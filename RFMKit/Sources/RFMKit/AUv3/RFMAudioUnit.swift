@@ -35,7 +35,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
             case auto                           // device; the simulator: the shared fake; the App Group file decides
         }
         public var runProbes = true
-        public var defaultCore: String? = CorePlayer.order[0]   // (nil: none; one this build lacks: the first it has)
+        public var defaultCore: String? = ""    // "": the first this build has; nil: none; one it lacks: the first, with a note
         public var link: Link = .auto
         public var panel = PanelSession.Config()
         public var slotsDir: String?            // nil: the bundle (and from an appex the app's) Frameworks
@@ -145,7 +145,10 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
         // the core (a new instance: the default firmware, a fresh flash; a restored state replaces it)
         if let d = config.slotsDir { rfms_scan(d) } else if rfms_count() == 0 { rfms_scan(nil) }
         if link != nil { rfme_attach(e, 1) }
-        if let id = config.defaultCore { _ = ctl.withLock { loadLocked(id, flash: nil, from: "a fresh flash") } }
+        if let want = config.defaultCore,
+           let id = want.isEmpty ? CorePlayer.pick(nil, in: CorePlayer.catalog()) : want {
+            _ = ctl.withLock { loadLocked(id, flash: nil, from: "a fresh flash") }
+        }
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
         updateName()
         session?.appeared()
