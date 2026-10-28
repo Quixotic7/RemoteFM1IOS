@@ -3,7 +3,8 @@
 # Copyright (C) 2026 RemoteFM1 contributors
 # Archives a Release build and uploads it to App Store Connect for internal TestFlight testing. A store build
 # (RFM_STORE_BUILD=YES): only the cores in cores/store-cores.txt are embedded (scripts/embed_cores.sh); the archive's
-# cores are printed and checked against that list before the upload.
+# cores are printed and checked against that list before the upload, and a core's store variant (Saadet's) against
+# build/cores/ios/frameworks-store.
 #
 #   ASC_KEY_ID=... ASC_ISSUER_ID=... scripts/testflight.sh [build-number]
 #
@@ -56,5 +57,11 @@ have=$(cd "$FW" && ls -d FM1Core_*.framework | sed -E 's/^FM1Core_(.*)_[0-9]+\.f
 want=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$ROOT/cores/store-cores.txt" | grep -v '^$' | sort -u)
 echo "cores in the archive: $(echo $have) ($(ls -d "$FW"/FM1Core_*.framework | wc -l | tr -d ' ') slots)"
 [ "$have" = "$want" ] || { echo "error: the archive's cores are not cores/store-cores.txt's ($(echo $want))"; exit 1; }
+# a core with a store variant (build/cores/ios/frameworks-store: Saadet without the vendor banks): its slots are that
+for f in "$ROOT"/build/cores/ios/frameworks-store/FM1Core_*.framework; do
+    [ -d "$f" ] || continue
+    cmp -s "$f/Info.plist" "$FW/$(basename "$f")/Info.plist" \
+        || { echo "error: $(basename "$f") in the archive is not the store variant"; exit 1; }
+done
 xcodebuild -exportArchive -archivePath "$OUT/RemoteFM1.xcarchive" -exportOptionsPlist "$OUT/ExportOptions.plist" \
     -exportPath "$OUT/export" "${AUTH[@]}"
