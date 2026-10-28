@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FM-1 knob</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: {{rw}}px; height: {{rh}}px; box-sizing: border-box; font-family: 'Chakra Petch', sans-serif; color: {{t.label}}">
+<span style="font: 700 {{lf}}px/1 'Chakra Petch', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.label}}; white-space: nowrap">{{label}}</span>
+<button aria-label="{{aria}}" style="flex: none; width: {{size}}px; height: {{size}}px; border-radius: 50%; border: 0; padding: 0; background: transparent; box-shadow: 0 {{sh}}px 0 rgba(0,0,0,0.28)">
+<svg aria-hidden="true" width="{{size}}" height="{{size}}" viewBox="0 0 100 100" style="display: block">
+<circle cx="50" cy="50" r="50" fill="{{t.knob}}"></circle>
+<circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="8" stroke-dasharray="3.2 3.9"></circle>
+<circle cx="50" cy="50" r="36" fill="{{t.knob}}"></circle>
+<circle cx="50" cy="50" r="36" fill="rgba(255,255,255,0.07)"></circle>
+<line x1="50" y1="10" x2="50" y2="30" stroke="{{t.mark}}" stroke-width="7" stroke-linecap="round" transform="rotate({{angle}} 50 50)"></line>
+</svg>
+</button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"size":{"editor":"int","default":64,"min":24,"max":120},"label":{"editor":"text","default":"Master"},"angle":{"editor":"int","default":-40,"min":-150,"max":150},"$preview":{"width":92,"height":87}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const t = P[this.props.theme] || P.Tangerine;
+const size = Number(this.props.size) || 64;
+const lf = Math.max(9, Math.round(size * 0.17));
+const label = this.props.label ?? 'Master';
+const angle = Number(this.props.angle ?? -40);
+return {
+t, size, lf, label, angle,
+rw: size + 28,
+rh: lf + 6 + size + 6,
+sh: Math.max(3, Math.round(size * 0.06)),
+aria: label + ' knob',
+};
+}
+}
+</script>
+</body>
+</html>

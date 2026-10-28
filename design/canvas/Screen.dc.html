@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FM-1 display</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div role="img" aria-label="{{aria}}" style="width: {{s}}px; height: {{s}}px; box-sizing: border-box; padding: {{pad}}px; background: {{t.bezel}}; border-radius: {{br}}px; box-shadow: 0 4px 0 rgba(0,0,0,0.25); font-family: 'DM Mono', monospace; color: {{t.ink}}">
+<div style="width: 100%; height: 100%; box-sizing: border-box; background: {{t.lcd}}; color: {{t.ink}}; border-radius: {{lr}}px; padding: {{ip}}px; display: flex; flex-direction: column; gap: {{gv}}px; overflow: hidden">
+
+<div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: {{gv}}px; border-bottom: 1px solid {{t.ink}}; font: 500 {{hdr}}px/1 'DM Mono', monospace; white-space: nowrap">
+<span>{{head}}</span>
+<svg aria-hidden="true" width="{{bat}}" height="{{batH}}" viewBox="0 0 22 12"><rect x="0.75" y="0.75" width="18.5" height="10.5" rx="2" fill="none" stroke="{{t.ink}}" stroke-width="1.5"></rect><rect x="20" y="4" width="2" height="4" rx="0.5" fill="{{t.ink}}"></rect><rect x="3" y="3" width="4" height="6" fill="{{t.ink}}"></rect><rect x="8" y="3" width="4" height="6" fill="{{t.ink}}"></rect><rect x="13" y="3" width="4" height="6" fill="{{t.ink}}"></rect></svg>
+</div>
+
+<sc-if value="{{osc}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; gap: {{og}}px; font: 500 {{lbl}}px/1 'DM Mono', monospace">
+<span style="margin-right: {{og}}px">OP</span>
+<sc-for list="{{ops}}" as="o" hint-placeholder-count="6">
+<span style="width: {{o.sz}}px; height: {{o.sz}}px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px solid {{o.line}}; border-radius: 2px; background: {{o.bg}}; color: {{o.fg}}; font: 500 {{o.fs}}px/1 'DM Mono', monospace">{{o.n}}</span>
+</sc-for>
+</div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: {{gv}}px; align-content: center">
+<sc-for list="{{params}}" as="p" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: {{p.g}}px">
+<span style="font: 500 {{p.lf}}px/1 'DM Mono', monospace; letter-spacing: 0.04em; white-space: nowrap">{{p.k}} {{p.label}}</span>
+<span style="font: 500 {{p.vf}}px/1 'DM Mono', monospace; letter-spacing: -0.02em">{{p.value}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{seq}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: {{gv}}px">
+<span style="font: 500 {{lbl}}px/1 'DM Mono', monospace; letter-spacing: 0.04em">PATTERN 01 · STEP</span>
+<span style="font: 500 {{big}}px/1 'DM Mono', monospace; letter-spacing: -0.03em">05/16</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: {{gv}}px">
+<div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 500 {{lbl}}px/1 'DM Mono', monospace">TEMPO</span><span style="font: 500 {{val}}px/1 'DM Mono', monospace">120</span></div>
+<div style="display: flex; flex-direction: column; gap: 3px"><span style="font: 500 {{lbl}}px/1 'DM Mono', monospace">SWING</span><span style="font: 500 {{val}}px/1 'DM Mono', monospace">0%</span></div>
+</div>
+</div>
+</sc-if>
+
+<div style="align-self: center; display: flex; align-items: center; gap: {{og}}px; padding: {{tp}}px {{tpx}}px; border: 1px solid {{t.ink}}; border-radius: 999px; font: 500 {{tab}}px/1 'DM Mono', monospace; letter-spacing: 0.08em">
+<span aria-hidden="true">‹</span><span>{{page}}</span><span aria-hidden="true">›</span>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"size":{"editor":"int","default":300,"min":100,"max":700},"page":{"editor":"enum","options":["OSC","SEQ"],"default":"OSC"},"patch":{"editor":"text","default":"001 PIANO 1"},"$preview":{"width":300,"height":300}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const t = P[this.props.theme] || P.Tangerine;
+const s = Number(this.props.size) || 300;
+const f = (k, min) => Math.max(min, Math.round(s * k));
+const seq = this.props.page === 'SEQ';
+const patch = this.props.patch ?? '001 PIANO 1';
+const lbl = f(0.036, 7), op = f(0.058, 9), val = f(0.1, 12);
+const ops = [1, 2, 3, 4, 5, 6].map((n) => ({
+n, sz: op, fs: Math.max(6, Math.round(op * 0.62)), line: t.ink,
+bg: n === 1 ? t.ink : 'transparent',
+fg: n === 1 ? t.lcd : t.ink,
+}));
+const params = [['K1', 'RATIO', '1.00'], ['K2', 'LEVEL', '99'], ['K3', 'DETUNE', '+0'], ['K4', 'FINE', '0']].map(([k, label, value]) => ({
+k, label, value, lf: lbl, vf: val, g: f(0.015, 2),
+}));
+return {
+t, s, seq, osc: !seq, ops, params, lbl, val,
+page: seq ? 'SEQ' : 'OSC',
+head: seq ? 'SEQ · PLAYING' : patch,
+aria: 'FM-1 display showing ' + (seq ? 'sequencer' : patch),
+pad: f(0.045, 6), br: f(0.09, 10), lr: f(0.035, 4), ip: f(0.05, 6),
+gv: f(0.03, 3), og: f(0.012, 2), hdr: f(0.062, 9), tab: f(0.042, 8),
+tp: f(0.014, 2), tpx: f(0.05, 6), big: f(0.2, 20),
+bat: f(0.08, 14), batH: Math.round(f(0.08, 14) * 12 / 22),
+};
+}
+}
+</script>
+</body>
+</html>

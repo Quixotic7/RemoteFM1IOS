@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FM-1 button grid</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+button{cursor:pointer}
+</style>
+</helmet>
+<div role="group" aria-label="Function buttons" style="display: grid; grid-template-columns: repeat({{cols}}, {{bw}}px); gap: {{gap}}px; padding: 10px; width: {{rootW}}px; box-sizing: border-box; background: {{t.bed}}; border-radius: {{wr}}px; box-shadow: inset 0 2px 0 rgba(0,0,0,0.18); font-family: 'Chakra Petch', sans-serif">
+<sc-for list="{{btns}}" as="b" hint-placeholder-count="12">
+<button aria-pressed="{{b.pressed}}" aria-label="{{b.aria}}" onClick="{{b.tap}}" style="height: {{b.bh}}px; border: 0; padding: 0; border-radius: {{b.br}}px; background: {{b.face}}; box-shadow: inset 0 2px 0 {{b.hi}}, 0 4px 0 {{b.lo}}; color: {{b.color}}; text-shadow: {{b.glow}}; font: 700 {{b.fs}}px/1 'Chakra Petch', sans-serif; letter-spacing: 0.06em; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px">
+<sc-if value="{{b.isPlay}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="{{b.ic}}" height="{{b.ic}}" viewBox="0 0 10 10"><path d="M2 1l7 4-7 4z" fill="#4FE08A"></path></svg></sc-if>
+<sc-if value="{{b.isRec}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="{{b.ic}}" height="{{b.ic}}" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#FF4436"></circle></svg></sc-if>
+<span>{{b.legend}}</span>
+</button>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"cols":{"editor":"enum","options":["6","4","3"],"default":"6"},"bw":{"editor":"int","default":64,"min":36,"max":140},"bh":{"editor":"int","default":52,"min":30,"max":100},"gap":{"editor":"int","default":10,"min":4,"max":24},"active":{"editor":"enum","options":["","FX","SEL","ENV","LFO","EDIT","GLO","HOME","SAVE","ARP","SEQ","PLAY","REC"],"default":""},"$preview":{"width":454,"height":140}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const t = P[this.props.theme] || P.Tangerine;
+const cols = Number(this.props.cols) || 6;
+const bw = Number(this.props.bw) || 64;
+const bh = Number(this.props.bh) || 52;
+const gap = Number(this.props.gap) || 10;
+const st = this.state || {};
+const active = st.active !== undefined ? st.active : (this.props.active || '');
+const order = ['FX', 'SEL', 'ENV', 'LFO', 'EDIT', 'GLO', 'HOME', 'SAVE', 'ARP', 'SEQ', 'PLAY', 'REC'];
+const fs = Math.max(10, Math.round(bh * 0.26));
+const btns = order.map((legend) => {
+const on = legend === active;
+return {
+legend,
+aria: legend === 'PLAY' ? 'Play / Stop' : legend,
+pressed: on ? 'true' : 'false',
+isPlay: legend === 'PLAY',
+isRec: legend === 'REC',
+bh, fs, br: Math.round(bh * 0.24), ic: Math.max(7, Math.round(bh * 0.17)),
+face: on ? t.hi : t.key, hi: t.hi, lo: t.lo,
+color: on ? t.led : t.keyText,
+glow: on ? '0 0 8px ' + t.led : 'none',
+tap: () => this.setState({ active: on ? '' : legend }),
+};
+});
+return {
+t, cols, bw, gap, btns,
+rootW: cols * bw + (cols - 1) * gap + 20,
+wr: Math.round(bh * 0.34) + 6,
+};
+}
+}
+</script>
+</body>
+</html>

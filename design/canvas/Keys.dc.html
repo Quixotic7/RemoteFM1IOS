@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FM-1 LED keybed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+button{cursor:pointer}
+</style>
+</helmet>
+<div role="group" aria-label="{{aria}}" style="position: relative; width: {{W}}px; height: {{H}}px; background: {{t.bed}}; border-radius: {{rad}}px; box-shadow: inset 0 3px 0 rgba(0,0,0,0.2); font-family: 'Chakra Petch', sans-serif">
+
+<sc-if value="{{scroll}}" hint-placeholder-val="{{ false }}">
+<div role="group" aria-label="Keyboard range, tap to scroll" style="position: absolute; left: {{pad}}px; top: {{pad}}px; width: {{mw}}px; height: {{mh}}px; display: flex; gap: 2px">
+<sc-for list="{{mini}}" as="m" hint-placeholder-count="16">
+<button aria-label="{{m.aria}}" onClick="{{m.jump}}" style="flex: 1; height: {{m.h}}px; border: 0; padding: 0 0 4px; border-radius: 4px; background: {{m.face}}; display: flex; align-items: flex-end; justify-content: center">
+<span aria-hidden="true" style="width: 55%; height: 3px; border-radius: 2px; background: {{m.led}}; box-shadow: {{m.glow}}"></span>
+</button>
+</sc-for>
+<span aria-hidden="true" style="position: absolute; top: -3px; left: {{winL}}%; width: {{winW}}%; height: {{winH}}px; box-sizing: border-box; border: 2px solid {{t.keyText}}; border-radius: 7px; pointer-events: none; transition: left 0.2s"></span>
+</div>
+</sc-if>
+
+<div style="position: absolute; left: {{stageX}}px; top: {{stageY}}px; width: {{stageW}}px; height: {{stageH}}px; overflow: {{stageOverflow}}">
+<sc-for list="{{keys}}" as="k" hint-placeholder-count="27">
+<button aria-label="{{k.aria}}" aria-pressed="{{k.on}}" onClick="{{k.tap}}" style="position: absolute; left: {{k.x}}px; top: {{k.y}}px; width: {{k.w}}px; height: {{k.h}}px; border: 0; padding: 0; border-radius: {{k.r}}px; background: {{k.face}}; box-shadow: inset 0 2px 0 {{k.hi}}, 0 4px 0 {{k.lo}}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: {{k.lg}}px; transition: left 0.2s">
+<span aria-hidden="true" style="width: {{k.lw}}px; height: {{k.lh}}px; border-radius: 3px; background: {{k.led}}; opacity: {{k.lop}}; box-shadow: {{k.glow}}"></span>
+<sc-if value="{{k.showNum}}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="font: 700 {{k.nf}}px/1 'Chakra Petch', sans-serif; color: {{k.numColor}}">{{k.num}}</span></sc-if>
+</button>
+</sc-for>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"w":{"editor":"int","default":800,"min":280,"max":1400},"h":{"editor":"int","default":220,"min":80,"max":700},"layout":{"editor":"enum","options":["row","scroll","split"],"default":"row"},"keyW":{"editor":"int","default":40,"min":28,"max":90},"mode":{"editor":"enum","options":["play","seq"],"default":"play"},"$preview":{"width":800,"height":220}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const t = P[this.props.theme] || P.Tangerine;
+const W = Number(this.props.w) || 800;
+const H = Number(this.props.h) || 220;
+const scroll = this.props.layout === 'scroll';
+const split = this.props.layout === 'split';
+const seq = this.props.mode === 'seq';
+const st = this.state || {};
+const held = st.held || { C4: true, E4: true, G4: true };
+const steps = st.steps || [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0];
+const head = 4;
+const whites = ['F3', 'G3', 'A3', 'B3', 'C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4', 'C5', 'D5', 'E5', 'F5', 'G5'];
+const blacks = [[0, 'F#3'], [1, 'G#3'], [2, 'A#3'], [4, 'C#4'], [5, 'D#4'], [7, 'F#4'], [8, 'G#4'], [9, 'A#4'], [11, 'C#5'], [12, 'D#5'], [14, 'F#5']];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const pad = clamp(Math.round(Math.min(W, H) * 0.05), 8, 18);
+const g = clamp(Math.round(W * 0.008), 3, 10);
+const mh = scroll ? clamp(Math.round(H * 0.11), 22, 34) : 0;
+const mg = scroll ? Math.max(8, g + 4) : 0;
+let p, stageX, stageY, stageW, stageH, ox, oy, offset = 0, visible = 16, maxOff = 0;
+if (scroll) {
+p = (Number(this.props.keyW) || 40) + g;
+stageX = pad; stageY = pad + mh + mg; stageW = W - 2 * pad; stageH = H - stageY - pad;
+visible = (stageW + g) / p;
+maxOff = Math.max(0, 16 - visible);
+const def = seq ? 0 : Math.min(maxOff, 4);
+offset = clamp(st.offset !== undefined ? st.offset : def, 0, maxOff);
+ox = -offset * p; oy = 0;
+} else {
+const slots = split ? 8.5 : 16;
+p = (W - 2 * pad + g) / slots;
+stageX = 0; stageY = 0; stageW = W; stageH = H; ox = pad; oy = pad;
+}
+const kw = p - g;
+const rows = split ? 2 : 1;
+const rowGap = split ? Math.round(H * 0.05) : 0;
+const rowH = scroll ? stageH : (H - 2 * pad - rowGap * (rows - 1)) / rows;
+const vg = g + 2;
+const bh = Math.round(rowH * 0.4);
+const wh = Math.round(rowH - bh - vg - 4);
+const bw = kw * 0.86;
+const r = Math.round(Math.min(kw * 0.42, 18));
+const lw = Math.max(3, Math.round(kw * 0.08));
+const nf = clamp(Math.round(kw * 0.22), 8, 14);
+const rd = (v) => Math.round(v * 10) / 10;
+const isOn = (i, n) => (seq ? !!steps[i] : !!held[n]);
+const keys = [];
+whites.forEach((n, i) => {
+let row = 0, c = i;
+if (split && i >= 8) { row = 1; c = i - 8 + 0.5; }
+const isHead = seq && i === head;
+const on = isOn(i, n);
+keys.push({
+x: rd(ox + c * p), y: rd(oy + row * (rowH + rowGap) + bh + vg), w: rd(kw), h: wh, r,
+face: isHead ? t.hi : t.key, hi: t.hi, lo: t.lo,
+lw, lh: Math.round(wh * (seq ? 0.34 : 0.42)), lg: Math.round(wh * 0.08),
+led: on || isHead ? t.led : t.ledOff,
+lop: isHead ? 1 : (seq && on ? 0.6 : 1),
+glow: (on && !seq) || isHead ? '0 0 10px ' + t.led + ', 0 0 3px ' + t.led : 'none',
+on: on ? 'true' : 'false',
+showNum: seq, num: String(i + 1), nf, numColor: t.keyText,
+aria: seq ? 'Step ' + (i + 1) + (on ? ', on' : ', off') + (isHead ? ', playing' : '') : n,
+tap: () => {
+if (seq) { const s = steps.slice(); s[i] = s[i] ? 0 : 1; this.setState({ steps: s }); }
+else { const h = Object.assign({}, held); h[n] = !h[n]; this.setState({ held: h }); }
+},
+});
+});
+blacks.forEach(([after, n]) => {
+let row = 0, b = after + 1;
+if (split && after >= 7) { row = 1; b = after + 1 - 8 + 0.5; }
+const cx = ox + b * p - g / 2;
+const on = !seq && !!held[n];
+keys.push({
+x: rd(cx - bw / 2), y: rd(oy + row * (rowH + rowGap)), w: rd(bw), h: bh, r: Math.round(Math.min(bw * 0.42, 18)),
+face: t.key, hi: t.hi, lo: t.lo,
+lw, lh: Math.round(bh * 0.42), lg: 0,
+led: on ? t.led : t.ledOff, lop: 1,
+glow: on ? '0 0 10px ' + t.led + ', 0 0 3px ' + t.led : 'none',
+on: on ? 'true' : 'false',
+showNum: false, num: '', nf, numColor: t.keyText,
+aria: n.replace('#', ' sharp '),
+tap: () => { if (!seq) { const h = Object.assign({}, held); h[n] = !h[n]; this.setState({ held: h }); } },
+});
+});
+const mini = whites.map((n, i) => {
+const on = isOn(i, n) || (seq && i === head);
+const inView = i >= Math.floor(offset) && i < offset + visible;
+return {
+h: mh,
+face: inView ? t.hi : t.key,
+led: on ? t.led : t.ledOff,
+glow: on ? '0 0 6px ' + t.led : 'none',
+aria: 'Scroll keyboard to ' + (seq ? 'step ' + (i + 1) : n),
+jump: () => this.setState({ offset: clamp(i - visible / 2 + 0.5, 0, maxOff) }),
+};
+});
+return {
+t, W, H, keys, mini, scroll, pad, mh,
+mw: W - 2 * pad,
+winL: rd(offset / 16 * 100), winW: rd(Math.min(visible, 16) / 16 * 100), winH: mh + 6,
+stageX, stageY, stageW, stageH,
+stageOverflow: scroll ? 'hidden' : 'visible',
+rad: Math.round(Math.min(W, H) * 0.08),
+aria: seq ? 'Keyboard as 16-step sequencer' : 'Keyboard, F3 to G5',
+};
+}
+}
+</script>
+</body>
+</html>

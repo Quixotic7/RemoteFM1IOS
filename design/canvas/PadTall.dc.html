@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemoteFM1 iPad portrait</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+html,body{margin:0;overflow:hidden}
+a{color:inherit}a:hover{color:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<main style="position: relative; width: 834px; height: 1194px; overflow: hidden; background: {{t.body}}; font-family: 'DM Sans', sans-serif">
+
+<header style="position: absolute; left: 40px; right: 40px; top: 26px; height: 32px; display: flex; align-items: center; justify-content: space-between">
+<span style="display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: rgba(0,0,0,0.14); color: {{t.label}}; font: 600 13px/1 'DM Sans', sans-serif">
+<span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; background: #3BD47A"></span>FM-1 linked</span>
+<a href="PhoneSheet.dc.html" aria-label="Open controls, or swipe down" style="position: absolute; left: 50%; top: -6px; width: 96px; height: 44px; margin-left: -48px; display: flex; align-items: center; justify-content: center"><span style="width: 48px; height: 5px; border-radius: 3px; background: {{t.label}}; opacity: 0.55"></span></a>
+<span style="font: 700 13px/1 'Chakra Petch', sans-serif; letter-spacing: 0.16em; color: {{t.label}}">REMOTE FM1</span>
+</header>
+
+<div style="position: absolute; left: 40px; top: 88px; width: 224px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; justify-items: center">
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="Master" angle="70" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="Select" angle="-20" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="Presets" angle="-120" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="Algorithm" angle="30" hint-size="112px,110px"></dc-import>
+</div>
+
+<div style="position: absolute; left: 40px; top: 590px; width: 220px; height: 54px; box-sizing: border-box; padding: 5px; display: flex; gap: 6px; background: {{t.bed}}; border-radius: 15px">
+<button aria-label="Octave down" style="flex: 1; border: 0; border-radius: 11px; background: {{t.key}}; box-shadow: inset 0 2px 0 {{t.hi}}, 0 3px 0 {{t.lo}}; color: {{t.keyText}}; font: 700 15px/1 'Chakra Petch', sans-serif; letter-spacing: 0.06em">OCT−</button>
+<button aria-label="Octave up" style="flex: 1; border: 0; border-radius: 11px; background: {{t.key}}; box-shadow: inset 0 2px 0 {{t.hi}}, 0 3px 0 {{t.lo}}; color: {{t.keyText}}; font: 700 15px/1 'Chakra Petch', sans-serif; letter-spacing: 0.06em">OCT+</button>
+</div>
+
+<div style="position: absolute; left: 272px; top: 88px">
+<dc-import name="Screen" theme="{{themeName}}" size="290" page="OSC" hint-size="290px,290px"></dc-import>
+</div>
+
+<div style="position: absolute; left: 570px; top: 88px; width: 224px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; justify-items: center">
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="KN1" angle="-60" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="KN2" angle="135" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="KN3" angle="0" hint-size="112px,110px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="84" label="KN4" angle="0" hint-size="112px,110px"></dc-import>
+</div>
+<span aria-hidden="true" style="position: absolute; left: 677px; top: 344px; width: 10px; height: 10px; border-radius: 2px; background: #FF3B2F; box-shadow: 0 0 10px #FF3B2F"></span>
+
+<div style="position: absolute; left: 77px; top: 404px">
+<dc-import name="Buttons" theme="{{themeName}}" cols="6" bw="100" bh="64" gap="12" active="" hint-size="680px,160px"></dc-import>
+</div>
+
+<div style="position: absolute; left: 40px; top: 660px">
+<dc-import name="Keys" theme="{{themeName}}" w="754" h="476" layout="row" mode="play" hint-size="754px,476px"></dc-import>
+</div>
+
+</main>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Midnight"},"$preview":{"width":834,"height":1194}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const name = P[this.props.theme] ? this.props.theme : 'Midnight';
+return { t: P[name], themeName: name };
+}
+}
+</script>
+</body>
+</html>

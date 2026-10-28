@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemoteFM1 linked: screen and controls</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+html,body{margin:0;overflow:hidden}
+a{color:inherit}a:hover{color:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<main style="position: relative; width: 390px; height: 844px; overflow: hidden; background: {{t.body}}; font-family: 'DM Sans', sans-serif">
+
+<header style="position: absolute; left: 16px; right: 16px; top: 50px; height: 32px; display: flex; align-items: center; justify-content: space-between">
+<span style="display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: 999px; background: rgba(0,0,0,0.14); color: {{t.label}}; font: 600 12px/1 'DM Sans', sans-serif">
+<span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; background: #3BD47A"></span>FM-1 linked</span>
+<a href="PhoneSheet.dc.html" aria-label="Open controls, or swipe down" style="position: absolute; left: 50%; top: -6px; width: 88px; height: 44px; margin-left: -44px; display: flex; align-items: center; justify-content: center"><span style="width: 40px; height: 5px; border-radius: 3px; background: {{t.label}}; opacity: 0.55"></span></a>
+<span style="font: 700 12px/1 'Chakra Petch', sans-serif; letter-spacing: 0.14em; color: {{t.label}}">REMOTE FM1</span>
+</header>
+
+<div style="position: absolute; left: 25px; top: 92px">
+<dc-import name="Screen" theme="{{themeName}}" size="340" page="OSC" hint-size="340px,340px"></dc-import>
+</div>
+
+<section aria-label="Knobs, swipe sideways to switch sets" style="position: absolute; left: 12px; right: 12px; top: 444px">
+<sc-if value="{{showMain}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; justify-content: space-between">
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="Master" angle="70" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="Select" angle="-20" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="Presets" angle="-120" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="Algorithm" angle="30" hint-size="78px,71px"></dc-import>
+</div>
+</sc-if>
+<sc-if value="{{showKn}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; justify-content: space-between">
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="KN1" angle="-60" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="KN2" angle="135" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="KN3" angle="0" hint-size="78px,71px"></dc-import>
+<dc-import name="Knob" theme="{{themeName}}" size="50" label="KN4" angle="0" hint-size="78px,71px"></dc-import>
+</div>
+</sc-if>
+</section>
+
+<div role="tablist" aria-label="Knob set" style="position: absolute; left: 115px; top: 523px; width: 160px; height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px">
+<button role="tab" aria-selected="{{mainSel}}" onClick="{{pickMain}}" style="height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: {{mainBg}}; color: {{t.label}}; font: 700 10px/1 'Chakra Petch', sans-serif; letter-spacing: 0.12em">MAIN</button>
+<button role="tab" aria-selected="{{knSel}}" onClick="{{pickKn}}" style="height: 32px; padding: 0 10px; border: 0; border-radius: 999px; background: {{knBg}}; color: {{t.label}}; font: 700 10px/1 'Chakra Petch', sans-serif; letter-spacing: 0.12em">KN 1–4</button>
+</div>
+
+<nav aria-label="Lower deck, or swipe sideways" style="position: absolute; left: 95px; top: 565px; width: 200px; height: 36px; box-sizing: border-box; padding: 3px; display: flex; background: rgba(0,0,0,0.16); border-radius: 999px">
+<a href="PhonePanel.dc.html" aria-current="page" style="flex: 1; border-radius: 999px; background: {{t.key}}; color: {{t.keyText}}; font: 700 12px/30px 'Chakra Petch', sans-serif; letter-spacing: 0.1em; text-align: center; text-decoration: none">BUTTONS</a>
+<a href="PhoneKeys.dc.html" style="flex: 1; border-radius: 999px; color: {{t.label}}; font: 700 12px/30px 'Chakra Petch', sans-serif; letter-spacing: 0.1em; text-align: center; text-decoration: none">KEYS</a>
+</nav>
+
+<div style="position: absolute; left: 15px; top: 611px">
+<dc-import name="Buttons" theme="{{themeName}}" cols="6" bw="50" bh="48" gap="8" active="ENV" hint-size="360px,124px"></dc-import>
+</div>
+
+<div style="position: absolute; left: 95px; top: 747px; width: 200px; height: 48px; box-sizing: border-box; padding: 4px; display: flex; gap: 6px; background: {{t.bed}}; border-radius: 14px">
+<button aria-label="Octave down" style="flex: 1; border: 0; border-radius: 10px; background: {{t.key}}; box-shadow: inset 0 2px 0 {{t.hi}}, 0 3px 0 {{t.lo}}; color: {{t.keyText}}; font: 700 13px/1 'Chakra Petch', sans-serif; letter-spacing: 0.06em">OCT−</button>
+<button aria-label="Octave up" style="flex: 1; border: 0; border-radius: 10px; background: {{t.key}}; box-shadow: inset 0 2px 0 {{t.hi}}, 0 3px 0 {{t.lo}}; color: {{t.keyText}}; font: 700 13px/1 'Chakra Petch', sans-serif; letter-spacing: 0.06em">OCT+</button>
+</div>
+
+<nav aria-label="Views" style="position: absolute; left: 0; right: 0; bottom: 18px; display: flex; justify-content: center">
+<a href="Main.dc.html" aria-label="Full view" style="width: 36px; height: 24px; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{t.label}}; opacity: 0.35"></span></a>
+<a href="PhonePanel.dc.html" aria-label="Controls view" aria-current="page" style="width: 36px; height: 24px; display: flex; align-items: center; justify-content: center"><span style="width: 22px; height: 8px; border-radius: 4px; background: {{t.label}}"></span></a>
+<a href="PhoneScreen.dc.html" aria-label="Screen view" style="width: 36px; height: 24px; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{t.label}}; opacity: 0.35"></span></a>
+</nav>
+
+</main>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const name = P[this.props.theme] ? this.props.theme : 'Tangerine';
+const set = (this.state && this.state.set) || 'main';
+const main = set === 'main';
+return {
+t: P[name], themeName: name,
+showMain: main, showKn: !main,
+mainSel: main ? 'true' : 'false', knSel: main ? 'false' : 'true',
+mainBg: main ? 'rgba(0,0,0,0.18)' : 'transparent',
+knBg: main ? 'transparent' : 'rgba(0,0,0,0.18)',
+pickMain: () => this.setState({ set: 'main' }),
+pickKn: () => this.setState({ set: 'kn' }),
+};
+}
+}
+</script>
+</body>
+</html>

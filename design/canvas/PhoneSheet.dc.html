@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemoteFM1 pull-down controls</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;family=DM+Mono:wght@400;500&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+html,body{margin:0;overflow:hidden}
+a{color:inherit}a:hover{color:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<main style="position: relative; width: 390px; height: 844px; overflow: hidden; background: {{t.body}}; font-family: 'DM Sans', sans-serif; color: #F3EBDC">
+
+<div style="position: absolute; left: 16px; top: 530px">
+<dc-import name="Keys" theme="{{themeName}}" w="358" h="272" layout="scroll" key-w="40" mode="play" hint-size="358px,272px"></dc-import>
+</div>
+<div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(10,8,6,0.45)"></div>
+
+<section aria-label="Controls" style="position: absolute; left: 0; right: 0; top: 0; height: 668px; box-sizing: border-box; padding: 56px 20px 0; background: #17140F; border-radius: 0 0 32px 32px; box-shadow: 0 18px 40px rgba(0,0,0,0.35)">
+
+<div style="display: flex; align-items: center; justify-content: space-between; height: 44px">
+<h1 style="margin: 0; font: 700 22px/1 'Unbounded', sans-serif; letter-spacing: -0.02em">Controls</h1>
+<a href="Main.dc.html" style="height: 44px; padding: 0 16px; border-radius: 999px; background: #2A251F; color: #F3EBDC; font: 700 14px/44px 'DM Sans', sans-serif; text-decoration: none">Done</a>
+</div>
+
+<h2 style="margin: 18px 0 10px; font: 600 11px/1 'DM Sans', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; color: #A69C8A">Sound source</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{sources}}" as="s" hint-placeholder-count="2">
+<button aria-pressed="{{s.pressed}}" onClick="{{s.pick}}" style="height: 78px; border-radius: 20px; border: {{s.border}}; background: {{s.bg}}; color: #F3EBDC; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px; padding: 0 14px; text-align: left">
+<span style="display: flex; align-items: center; gap: 7px; font: 700 15px/1 'DM Sans', sans-serif"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: {{s.dot}}"></span>{{s.title}}</span>
+<span style="font: 400 12px/1.25 'DM Sans', sans-serif; color: #B5AB99">{{s.sub}}</span>
+</button>
+</sc-for>
+</div>
+
+<h2 style="margin: 20px 0 10px; font: 600 11px/1 'DM Sans', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; color: #A69C8A">View · or swipe sideways</h2>
+<nav aria-label="View" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<a href="Main.dc.html" aria-current="page" style="height: 96px; border-radius: 18px; border: 1.5px solid #FF8A4C; background: #2A251F; text-decoration: none; color: #F3EBDC; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; box-sizing: border-box">
+<span aria-hidden="true" style="width: 48px; height: 40px; display: flex; flex-direction: column; gap: 4px">
+<span style="display: flex; gap: 3px; height: 20px"><span style="width: 12px; border-radius: 3px; background: #6E6557"></span><span style="width: 20px; border-radius: 3px; background: #F3EBDC"></span><span style="flex: 1; border-radius: 3px; background: #6E6557"></span></span>
+<span style="flex: 1; border-radius: 3px; background: #FF8A4C"></span>
+</span>
+<span style="font: 700 12px/1 'DM Sans', sans-serif">Full</span>
+</a>
+<a href="PhonePanel.dc.html" style="height: 96px; border-radius: 18px; border: 1px solid #3A352D; background: transparent; text-decoration: none; color: #F3EBDC; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; box-sizing: border-box">
+<span aria-hidden="true" style="width: 48px; height: 40px; display: flex; flex-direction: column; align-items: center; gap: 4px">
+<span style="width: 22px; height: 22px; border-radius: 3px; background: #F3EBDC"></span>
+<span style="width: 48px; flex: 1; border-radius: 3px; background: #6E6557"></span>
+</span>
+<span style="font: 600 12px/1 'DM Sans', sans-serif">Panel</span>
+</a>
+<a href="PhoneKeys.dc.html" style="height: 96px; border-radius: 18px; border: 1px solid #3A352D; background: transparent; text-decoration: none; color: #F3EBDC; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; box-sizing: border-box">
+<span aria-hidden="true" style="width: 48px; height: 40px; display: flex; flex-direction: column; align-items: center; gap: 4px">
+<span style="width: 20px; height: 20px; border-radius: 3px; background: #F3EBDC"></span>
+<span style="width: 48px; flex: 1; border-radius: 3px; background: #FF8A4C"></span>
+</span>
+<span style="font: 600 12px/1 'DM Sans', sans-serif">Keys</span>
+</a>
+<a href="PhoneScreen.dc.html" style="height: 96px; border-radius: 18px; border: 1px solid #3A352D; background: transparent; text-decoration: none; color: #F3EBDC; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; box-sizing: border-box">
+<span aria-hidden="true" style="width: 48px; height: 40px; display: flex; align-items: center; justify-content: center">
+<span style="width: 38px; height: 38px; border-radius: 4px; background: #F3EBDC"></span>
+</span>
+<span style="font: 600 12px/1 'DM Sans', sans-serif">Screen</span>
+</a>
+</nav>
+
+<h2 style="margin: 20px 0 10px; font: 600 11px/1 'DM Sans', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; color: #A69C8A">Theme</h2>
+<div style="display: flex; align-items: center; gap: 8px">
+<sc-for list="{{themes}}" as="th" hint-placeholder-count="5">
+<button aria-label="{{th.name}} theme" aria-pressed="{{th.pressed}}" onClick="{{th.pick}}" style="width: 48px; height: 48px; border-radius: 50%; border: 0; padding: 0; background: {{th.ring}}; display: flex; align-items: center; justify-content: center">
+<span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 50%; background: {{th.body}}; display: flex; align-items: center; justify-content: center"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{th.bed}}; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{th.led}}"></span></span></span>
+</button>
+</sc-for>
+<a href="Theme.dc.html" style="margin-left: auto; height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid #3A352D; color: #F3EBDC; font: 600 13px/42px 'DM Sans', sans-serif; text-decoration: none; box-sizing: border-box">Edit</a>
+</div>
+
+<div style="margin-top: 20px; background: #211E19; border-radius: 20px; overflow: hidden">
+<button style="width: 100%; height: 52px; border: 0; border-bottom: 1px solid #2E2A23; background: transparent; color: #F3EBDC; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font: 600 15px/1 'DM Sans', sans-serif">Firmware<span style="display: flex; align-items: center; gap: 8px; color: #B5AB99; font-weight: 500">Factory<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg></span></button>
+<button style="width: 100%; height: 52px; border: 0; border-bottom: 1px solid #2E2A23; background: transparent; color: #F3EBDC; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font: 600 15px/1 'DM Sans', sans-serif">MIDI &amp; audio<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AB99" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg></button>
+<button style="width: 100%; height: 52px; border: 0; background: transparent; color: #F3EBDC; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font: 600 15px/1 'DM Sans', sans-serif">Settings<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AB99" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"></path></svg></button>
+</div>
+
+<a href="Main.dc.html" aria-label="Close controls, or swipe up" style="position: absolute; left: 50%; bottom: 4px; width: 88px; height: 32px; margin-left: -44px; display: flex; align-items: center; justify-content: center"><span style="width: 40px; height: 5px; border-radius: 3px; background: #6E6557"></span></a>
+</section>
+
+</main>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Tangerine","Midnight","Mint","Lilac","Cream"],"default":"Tangerine"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+const P={Tangerine:{body:'#EE7A3C',label:'#3A1606',bed:'#874332',key:'#924E3A',hi:'#A9614B',lo:'#64301F',keyText:'#FBEDE3',knob:'#1B1715',mark:'#F4EDE6',bezel:'#141210',lcd:'#C9D6EA',ink:'#13203A',led:'#FFE6A8',ledOff:'#6F6668'},Midnight:{body:'#1E2230',label:'#C9D2E6',bed:'#12151D',key:'#2B3244',hi:'#3B4359',lo:'#0A0C12',keyText:'#E6ECF8',knob:'#0A0B0F',mark:'#6CF0C2',bezel:'#05060A',lcd:'#0D1F1A',ink:'#7CF5C8',led:'#6CF0C2',ledOff:'#454B5C'},Mint:{body:'#A8DCC8',label:'#143329',bed:'#2F5B52',key:'#376A60',hi:'#4A7F74',lo:'#1E3F38',keyText:'#EAF7F1',knob:'#1A2421',mark:'#F2FFF9',bezel:'#121816',lcd:'#E9F0D8',ink:'#1E2A17',led:'#FFF3B0',ledOff:'#6E8580'},Lilac:{body:'#C9AEE6',label:'#2A1642',bed:'#573B77',key:'#634486',hi:'#77589B',lo:'#3B2655',keyText:'#F6EFFC',knob:'#1C1624',mark:'#F7F0FF',bezel:'#120E18',lcd:'#D7E3F2',ink:'#1A2236',led:'#FFD6F0',ledOff:'#8A7A9A'},Cream:{body:'#EFE6D2',label:'#2A231C',bed:'#2A2520',key:'#3A332C',hi:'#4B433A',lo:'#141110',keyText:'#F3EBDC',knob:'#E8622A',mark:'#FFF4E8',bezel:'#15120F',lcd:'#F6C34A',ink:'#2A1A05',led:'#FF7A3D',ledOff:'#6A6158'}};
+const st = this.state || {};
+const name = st.theme || (P[this.props.theme] ? this.props.theme : 'Tangerine');
+const src = st.src || 'fm1';
+const sources = [
+{ id: 'phone', title: 'This iPhone', sub: 'Emulator, play by touch' },
+{ id: 'fm1', title: 'FM-1', sub: 'RemoteFM1 · Bluetooth' },
+].map((s) => {
+const on = s.id === src;
+return Object.assign({}, s, {
+pressed: on ? 'true' : 'false',
+border: on ? '1.5px solid #FF8A4C' : '1px solid #3A352D',
+bg: on ? '#2A251F' : 'transparent',
+dot: on ? (s.id === 'fm1' ? '#3BD47A' : '#FF8A4C') : '#6E6557',
+pick: () => this.setState({ src: s.id }),
+});
+});
+const themes = Object.keys(P).map((k) => ({
+name: k, body: P[k].body, bed: P[k].bed, led: P[k].led,
+pressed: k === name ? 'true' : 'false',
+ring: k === name ? '#FF8A4C' : 'transparent',
+pick: () => this.setState({ theme: k }),
+}));
+return { t: P[name], themeName: name, sources, themes };
+}
+}
+</script>
+</body>
+</html>
