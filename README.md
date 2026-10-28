@@ -5,7 +5,7 @@ panel. See [PLAN.md](PLAN.md) for the design and the milestones.
 
 Status: M1, and M2, M3 and M4 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
 SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In Core mode it runs a real firmware
-(ChoralRoot 0.26.1, Felucca 1.6.1, Melodee 1.4.5, FIZZ 0.12.0-beta.12, Saadet 0.1.1 or Boardwalk 0.9) with the FM-1 as its panel and the sound on the iOS device; the
+(ChoralRoot 0.26.1, Felucca 1.6.1, Melodee 1.4.5, FIZZ 0.12.0-beta.12, Saadet 0.1.1, Boardwalk 0.9 or LOOM-8 0.9.3) with the FM-1 as its panel and the sound on the iOS device; the
 firmware's flash is kept in `Documents/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
 and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MIDI in, the core's MIDI out, the flash
 in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
@@ -35,7 +35,8 @@ screen, the test pattern and the AU test).
   `cores/fizz/` (FIZZ's build file and descriptor), `cores/saadet/` (Saadet's: its unit on FM1VST's fm1-base glue,
   the instrument unit, descriptors, the conformance script, and `store/`: the empty factory banks of its store
   variant), `cores/boardwalk/` (Boardwalk's unit on the same glue, its sound engine's unit, descriptor and
-  conformance script), `cores/store-cores.txt` (the cores of an App Store / TestFlight
+  conformance script), `cores/loom/` (LOOM-8's: its unit, the o2 units, `loom_plat.c` for `app/plat_loom.c`, and
+  `gen_samples_rfm.py`, the factory samples without the GPL 909 hat), `cores/store-cores.txt` (the cores of an App Store / TestFlight
   build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
   profiler).
 - `RFMKit/`: a Swift package.
@@ -62,11 +63,14 @@ screen, the test pattern and the AU test).
   Saadet's pin (6c0b47e, which Saadet's build fetches; its `bsp/` is not needed). Read-only.
 - `vendor/boardwalk`: Boardwalk v0.9 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at 4587fda; `base/bsp` is
   not needed). Read-only.
+- `vendor/loom`: LOOM-8 v0.9.3 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at d0133c2; `base/bsp` is not
+  needed). Read-only.
 
 ## Build
 
     git submodule update --init vendor/FM1VST vendor/FIZZ vendor/saadet vendor/fm1-base vendor/boardwalk
     git -C vendor/boardwalk submodule update --init base
+    git submodule update --init vendor/loom && git -C vendor/loom submodule update --init base
     git -C vendor/FM1VST submodule update --init remote/RemoteFM1 cores/ChoralRootFM1 cores/melodee
     git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
 
@@ -93,7 +97,7 @@ cover the AU's state and render block and the probes' shared file and notificati
 tests (`CoreTests`) use the macOS builds of `scripts/build_cores.sh macos` and skip without them: each core boots and
 plays, two slots of one core don't share state, a fifth slot is refused, a released slot comes back fresh, the flash
 round trip, a firmware reboot, a core on the fake unit, FIZZ's descriptor and demo, Saadet's descriptor and its store variant (no vendor bank data in the binary, boots,
-sounds), Boardwalk's descriptor, attract tune and cabinets, and the default core when the
+sounds), Boardwalk's descriptor, attract tune and cabinets, LOOM-8's descriptor, its kicks and no 909 hat in its binary, and the default core when the
 preferred one is missing. M4 adds `LeaseTests` (the lease with two clients and with
 a forked second process, a takeover on the shared fake that never sends SESSION 0, and `PanelSession`'s rules) and
 `AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence, a missing core's fallback).
@@ -105,7 +109,7 @@ FM1VST's own conformance test against the macOS builds of our libraries:
 The cores on a simulator, headless, through the app's real path (fake unit, demo input, audio tapped for 3 s, the
 flash saved, a power cycle):
 
-    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee fizz saadet boardwalk]   # default: RFM iPhone 17 (CEB2B846-...)
+    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee fizz saadet boardwalk loom]   # default: RFM iPhone 17 (CEB2B846-...)
 
 It prints each core's summary and saves `coretest-<id>.json`, a screenshot and the log under `$OUT` (default
 `$TMPDIR/remotefm1-coretest`).
