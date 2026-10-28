@@ -1,0 +1,4 @@
+# The cores an App Store / TestFlight build carries (RFM_STORE_BUILD=YES: scripts/embed_cores.sh, scripts/testflight.sh;
+# PLAN.md section 7). One core id per line. Only cores whose licence and authors allow App Store distribution:
+# FIZZ is MPL-2.0 and the owner's. Every core is still built; a store build embeds only these.
+fizz

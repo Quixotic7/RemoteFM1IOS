@@ -1,7 +1,9 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# Archives a Release build and uploads it to App Store Connect for internal TestFlight testing.
+# Archives a Release build and uploads it to App Store Connect for internal TestFlight testing. A store build
+# (RFM_STORE_BUILD=YES): only the cores in cores/store-cores.txt are embedded (scripts/embed_cores.sh); the archive's
+# cores are printed and checked against that list before the upload.
 #
 #   ASC_KEY_ID=... ASC_ISSUER_ID=... scripts/testflight.sh [build-number]
 #
@@ -46,6 +48,13 @@ EOF
 
 xcodebuild -project "$ROOT/RemoteFM1.xcodeproj" -scheme RemoteFM1 -configuration Release \
     -destination 'generic/platform=iOS' -archivePath "$OUT/RemoteFM1.xcarchive" \
-    -allowProvisioningUpdates "${AUTH[@]}" ${BUILD[@]+"${BUILD[@]}"} archive
+    -allowProvisioningUpdates "${AUTH[@]}" ${BUILD[@]+"${BUILD[@]}"} RFM_STORE_BUILD=YES archive
+
+# the cores in the archive: exactly the store list's
+FW=$OUT/RemoteFM1.xcarchive/Products/Applications/RemoteFM1.app/Frameworks
+have=$(cd "$FW" && ls -d FM1Core_*.framework | sed -E 's/^FM1Core_(.*)_[0-9]+\.framework$/\1/' | sort -u)
+want=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$ROOT/cores/store-cores.txt" | grep -v '^$' | sort -u)
+echo "cores in the archive: $(echo $have) ($(ls -d "$FW"/FM1Core_*.framework | wc -l | tr -d ' ') slots)"
+[ "$have" = "$want" ] || { echo "error: the archive's cores are not cores/store-cores.txt's ($(echo $want))"; exit 1; }
 xcodebuild -exportArchive -archivePath "$OUT/RemoteFM1.xcarchive" -exportOptionsPlist "$OUT/ExportOptions.plist" \
     -exportPath "$OUT/export" "${AUTH[@]}"
