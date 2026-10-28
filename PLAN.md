@@ -1,6 +1,6 @@
 # RemoteFM1 for iOS (plan)
 
-Status (2026-10-27): plan only. Nothing built, nothing sent to a unit.
+Status (2026-10-27): plan, with the owner's decisions (section 7). Nothing built, nothing sent to a unit.
 
 An iPhone/iPad host for FM-1 firmware cores, with a real FM-1 running RemoteFM1 firmware 0.2.2 as the panel: keys,
 buttons, encoders and MASTER come in; the firmware's 240×240 screen and LEDs go out; sound plays on the iOS device.
@@ -89,7 +89,7 @@ So the device can't share. The instances must agree among themselves, and only o
 - **Across devices.** A Mac running FM1VST and an iPhone running this app will fight over the unit as above. The app
   can only say so ("the FM-1 has a session from elsewhere": HELLO_R `session8` = 1 with no lease owner). The fix
   belongs in the protocol (e.g. an owner token in SESSION, or a "taken" notice): proposed to RemoteFM1, not done here.
-- **Fallback without an App Group** (if the signing team can't have one, section 6): Darwin notify state
+- **Fallback without an App Group** (if one turns out not to work for an extension): Darwin notify state
   (`notify_set_state`, 64 bits: a short owner ID + epoch) carries the same lease, without the host/core names.
 
 ## 5. iOS and AUv3 constraints
@@ -118,24 +118,53 @@ unit), and on the owner's device when it involves the FM-1.
 | M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings |
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
-| M6 | Distribution, as decided (section 7) | |
+| M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
-## 7. Decisions for the owner
+## 7. Decisions
 
-1. **Distribution and licence.** FM1VST, libremotefm1 and nearly every core are GPL-3.0-only. Most cores are other
-   people's work (Felucca, Melodee and 25 more; only amb is MPL-2.0). GPLv3 conflicts with App Store terms, so an
-   App Store or TestFlight build could only carry the owner's own cores (ChoralRoot, PurpleMonkey) and amb, with the
-   owner's code dual-licensed. Recommended: this repo GPL-3.0-only; build and install from Xcode for now; decide on
-   wider distribution later. Note: this Mac signs with a free Personal Team, whose apps expire after 7 days and may
-   not get an App Group (M2 checks). A paid Apple Developer account removes both limits.
-2. **Which firmwares.** Proposed: ChoralRoot, Felucca, Melodee first (M3), then the cores that aren't gated; never
-   the gated ones (fm106, rainbow, fartmachine, x0x, nomansky, orbit, sloop, sloopdx).
-3. **iPhone and iPad, or iPad first.** Proposed: one universal app. Develop and test on the iPhone 13 Pro Max over
-   Bluetooth; USB-MIDI when a USB-C iPad is available.
-4. **Which FM-1** to test with (two units may be plugged in, one used for FIZZ), and its Bluetooth name
-   ("FM-1 XXXX").
+Decided by the owner (2026-10-27):
+
+- **Firmwares:** ChoralRoot, Felucca, Melodee first (M3), then the cores that aren't gated; never the gated ones
+  (fm106, rainbow, fartmachine, x0x, nomansky, orbit, sloop, sloopdx).
+- **Devices:** one universal app, iPhone and iPad. Developed and tested on the iPhone 13 Pro Max over Bluetooth;
+  USB-MIDI when a USB-C iPad is available.
+- **Test unit:** the RemoteFM1 unit that advertises "FM-1 7938".
+- **Distribution:** this repo is GPL, and the owner also wants an App Store app. The owner has a paid Apple Developer
+  account (this Mac's Xcode only lists the free Personal Team so far: sign in with the paid team before M1's device
+  install).
+
+### GPL and the App Store: two builds from one repo
+
+GPLv3's terms conflict with the App Store's only for code by **other** people. The owner holds the copyright to their
+own code (this app; libremotefm1; FM1VST's `engine/`, `core-api/`, `RemoteLink` and `RemoteMidi.c`: every commit
+there is the owner's), so the owner may also publish it on the App Store. A core's glue goes with its core: some glue
+files are copies of firmware code (e.g. `core-glue/fm1base/loom_*.c`, `core-glue/plat/x0x_*.c`). The cores are the
+problem:
+
+- Every core except amb is GPL-3.0-only, and none is the owner's alone. ChoralRoot (and PurpleMonkey, built on it) is
+  a Felucca fork: it carries Leo Kuroshita's Felucca, Kerem Kilic's Melodee engines, Charles Vestal's Velo/MONK-1
+  key sensing, SLOOP's resampler, Dexed (GPL-3.0-or-later), and a contributor's commits (genkigenki). It also compiles
+  in Casio's CZ-1 preset tones and Sequential's Prophet-5 programs, for which no licence was granted.
+- amb (Charles Vestal, on fm1-base) is MPL-2.0, which the App Store allows.
+
+So:
+
+| Build | Cores | How it ships |
+| --- | --- | --- |
+| **Full** (GPL) | every core that isn't gated | Xcode installs and ad-hoc builds on the owner's devices; the source is public |
+| **App Store** | amb, plus each core whose authors all give written permission for App Store distribution | App Store / TestFlight |
+
+- One build flag picks the cores (as FM1VST's `FM1_PUBLIC_BUILD` does).
+- To get a core into the App Store build, the owner asks its authors for an extra permission (GPLv3 section 7).
+  There is a precedent: Leo Kuroshita let fm1-base take his Felucca code under MPL-2.0 (felucca-bsp#4). ChoralRoot in
+  the App Store would also need the Casio and Sequential sound data left out or cleared.
+- **Contributions:** for the owner to keep shipping this repo on the App Store after others contribute, the repo
+  needs either a section 7 permission for app stores in its licence, or a contributor agreement. Recommended: the
+  permission, in `LICENSE`, before the first outside contribution. The owner decides.
+- The App Store edition needs something to play from the first day: amb alone is thin. Until there is permission for
+  more, the App Store app may not be worth shipping. Work on it waits until the Full build works (M4).
 
 ## 8. Risks
 
@@ -145,4 +174,4 @@ Code is written by Opus subagents, one milestone at a time; Claude designs, revi
 - Slots cap instances per core per host (4 proposed).
 - Cross-compiling ~30 cores: their generate steps need Python with Pillow on the build Mac, and some glue may assume
   macOS. Each core gets its conformance test on iOS before it ships.
-- Free signing: 7-day expiry, possibly no App Group.
+- The App Store build depends on other authors' permission; without it, only amb can ship there.
