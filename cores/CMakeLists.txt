@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# The FM-1 cores for RemoteFM1 iOS: ChoralRoot, Felucca and Melodee through FM1VST's fm1_add_core() (cmake/FM1Cores.cmake)
+# The FM-1 cores for RemoteFM1 iOS: ChoralRoot, Felucca, Melodee and FIZZ through FM1VST's fm1_add_core() (cmake/FM1Cores.cmake)
 # and their glue (core-glue/), without FM1VST's top CMakeLists (it fetches JUCE). One SHARED library per core,
 # FM1Core_<id>, from the core's objects, exporting only _fm1core_get; scripts/build_cores.sh turns it into the four slot
 # frameworks (PLAN.md section 3).
 #
 # Not configured from here directly: scripts/build_cores.sh copies this file, the parts of vendor/FM1VST it needs and
-# the three firmware trees into build/cores/src, laid out as in FM1VST, and configures that: the generate steps write
+# the firmware trees into build/cores/src, laid out as in FM1VST, and configures that: the generate steps write
 # into <tree>/build/gen, which must not land in vendor/, and the glue reaches the firmware by relative paths and as
 # ${CMAKE_SOURCE_DIR}/cores/<name>. RFM_FM1VST is that copy (the source dir).
 cmake_minimum_required(VERSION 3.22)
@@ -18,7 +18,10 @@ if(NOT EXISTS ${RFM_FM1VST}/cmake/FM1Cores.cmake)
 endif()
 set(CR_PYTHON "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" CACHE FILEPATH
     "python3 with Pillow and fontTools, for the cores' generate steps")
-set(RFM_CORES "choralroot;felucca;melodee" CACHE STRING "the cores to build")
+set(RFM_CORES "choralroot;felucca;melodee;fizz" CACHE STRING "the cores to build")
+# iOS: ChoralRoot's host build includes <libproc.h> (its profiler's instruction counter), which the iOS SDKs lack:
+# cores/ios/libproc.h stands in for it. FIZZ's build file is cores/fizz/core.cmake. (RFM_OWN: this repo's cores/ folder)
+set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers; cores/fizz)")
 
 include(${RFM_FM1VST}/cmake/FM1Cores.cmake)
 set(_glue ${RFM_FM1VST}/core-glue)
@@ -33,9 +36,9 @@ endif()
 if(melodee IN_LIST RFM_CORES)
     include(${_glue}/melodee/core.cmake)
 endif()
-# iOS: ChoralRoot's host build includes <libproc.h> (its profiler's instruction counter), which the iOS SDKs lack:
-# cores/ios/libproc.h stands in for it (RFM_OWN: this repo's cores/ folder)
-set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers)")
+if(fizz IN_LIST RFM_CORES)
+    include(${RFM_OWN}/fizz/core.cmake)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET core_choralroot_obj)
     target_include_directories(core_choralroot_obj BEFORE PRIVATE ${RFM_OWN}/ios)
 endif()

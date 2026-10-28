@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# Builds the FM-1 cores (ChoralRoot, Felucca, Melodee) with cores/CMakeLists.txt and makes each one's four slot
+# Builds the FM-1 cores (ChoralRoot, Felucca, Melodee, FIZZ) with cores/CMakeLists.txt and makes each one's four slot
 # frameworks (PLAN.md section 3): FM1Core_<id>_<n>.framework, n = 1..4, the same code with its own install name
 # (@rpath/FM1Core_<id>_<n>.framework/FM1Core_<id>_<n>) and bundle id (com.quixotic7.remotefm1.core.<id>.<n>).
 #
@@ -19,11 +19,16 @@
 # vendor/FM1VST it needs, laid out as there (build/cores/src: cmake/, core-api/, core-glue/, engine/, tests/ and
 # cores/<tree>; the glue includes the firmware by relative paths and names the trees ${CMAKE_SOURCE_DIR}/cores/<name>),
 # with cores/CMakeLists.txt as its top. Each tree's copy gets a .git file pointing at its submodule's git dir, so
-# fm1_add_core reads the right commit. CR_PYTHON=... picks the python with Pillow and fontTools.
+# fm1_add_core reads the right commit. FIZZ comes from vendor/FIZZ (cores/FIZZ in the copy: its licence files, core/
+# without core/tests/, third_party/, the font licence; nothing GPL of it). CR_PYTHON=... picks the python with Pillow
+# and fontTools; RFM_CORES="a;b" the cores to build (default: all four; the store build embeds a subset of them,
+# scripts/embed_cores.sh).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 FM1VST=$ROOT/vendor/FM1VST
+FIZZ=$ROOT/vendor/FIZZ
+CORES=${RFM_CORES:-choralroot;felucca;melodee;fizz}
 B=$ROOT/build/cores
 SRC=$B/src
 PY=${CR_PYTHON:-/Library/Frameworks/Python.framework/Versions/3.11/bin/python3}
@@ -35,6 +40,13 @@ JOBS=$(sysctl -n hw.ncpu)
 
 say() { printf '== %s\n' "$*"; }
 
+# the copy's .git: its submodule's git dir (fm1_add_core reads the commit there)
+git_pointer() {   # submodule copy
+    local want
+    want="gitdir: $(git -C "$1" rev-parse --absolute-git-dir)"
+    if [ "$(cat "$2/.git" 2>/dev/null || true)" != "$want" ]; then echo "$want" >"$2/.git"; fi
+}
+
 sync_sources() {
     mkdir -p "$SRC/cores"
     for d in cmake core-api core-glue engine tests; do rsync -a --delete "$FM1VST/$d/" "$SRC/$d/"; done
@@ -42,11 +54,13 @@ sync_sources() {
         local from=$FM1VST/cores/$t
         [ -n "$(ls -A "$from" 2>/dev/null)" ] || { echo "$from is empty: git -C vendor/FM1VST submodule update --init --recursive cores/$t"; exit 1; }
         rsync -a --delete --exclude=/build/ --exclude=.git "$from/" "$SRC/cores/$t/"
-        local gd
-        gd=$(git -C "$from" rev-parse --absolute-git-dir)
-        local want="gitdir: $gd"
-        if [ "$(cat "$SRC/cores/$t/.git" 2>/dev/null || true)" != "$want" ]; then echo "$want" >"$SRC/cores/$t/.git"; fi
+        git_pointer "$from" "$SRC/cores/$t"
     done
+    [ -f "$FIZZ/core/glue/core_quadrille.c" ] || { echo "$FIZZ is empty: git submodule update --init vendor/FIZZ"; exit 1; }
+    rsync -a --delete --exclude=.git --exclude=/core/tests/ --include=/LICENSE --include=/LICENSING.md \
+        --include='/core/***' --include='/third_party/***' --include=/assets/ --include=/assets/fonts/ \
+        --include=/assets/fonts/OFL.txt --exclude='*' "$FIZZ/" "$SRC/cores/FIZZ/"
+    git_pointer "$FIZZ" "$SRC/cores/FIZZ"
     cmp -s "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt" || cp "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt"
 }
 
@@ -100,9 +114,11 @@ build_platform() {
         *) echo "unknown platform $p (ios, sim, macos)"; exit 2 ;;
     esac
     say "cores: $p -> $dir"
-    if [ ! -f "$dir/CMakeCache.txt" ]; then
+    # configured again when the core list changed (RFM_CORES is a cache variable)
+    if [ ! -f "$dir/CMakeCache.txt" ] || ! grep -qxF "RFM_CORES:STRING=$CORES" "$dir/CMakeCache.txt"; then
         "$CMAKE" -S "$SRC" -B "$dir" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DRFM_OWN="$ROOT/cores" -DCR_PYTHON="$PY" "${args[@]}" \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DRFM_OWN="$ROOT/cores" -DCR_PYTHON="$PY" \
+            -DRFM_CORES="$CORES" "${args[@]}" \
             >"$dir.configure.log" 2>&1 || { mkdir -p "$dir"; tail -40 "$dir.configure.log"; exit 1; }
     fi
     local ids
@@ -130,7 +146,7 @@ build_platform() {
             pl=$(plist "$id" "$n" "$ver" "$plat")
             [ "$(cat "$f/Info.plist" 2>/dev/null || true)" = "$pl" ] || printf '%s\n' "$pl" >"$f/Info.plist"
         done
-        printf '%-11s %-8s %s  %s\n' "$id" "$ver" "$(du -h "$lib" | cut -f1)" "$fw/FM1Core_${id}_1..$NSLOTS.framework"
+        printf '%-11s %-15s %s  %s\n' "$id" "$ver" "$(du -h "$lib" | cut -f1)" "$fw/FM1Core_${id}_1..$NSLOTS.framework"
     done <"$dir/cores.txt"
 }
 
