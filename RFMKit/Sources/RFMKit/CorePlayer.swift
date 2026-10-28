@@ -102,7 +102,7 @@ public final class CorePlayer {
     }
 
     /// the cores' order in the picker and for a default: the first of these this build has
-    public nonisolated static let order = ["choralroot", "felucca", "melodee", "fizz", "saadet"]
+    public nonisolated static let order = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk"]
 
     /// `preferred` if `cores` has it, else the first of `cores` (sorted by `order`); nil when there are none
     public nonisolated static func pick(_ preferred: String?, in cores: [CoreInfo]) -> String? {

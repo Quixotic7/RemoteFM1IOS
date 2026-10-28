@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// M3 on the Mac: the five cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
+// M3 on the Mac: the cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet, Boardwalk) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
 // scripts/build_cores.sh macos (build/cores/macos/frameworks, or RFM_CORES_DIR). Skipped, saying so, when they are
 // not built. The engine runs on the test's thread (RFME_CLOCK_CALLER); the only link is libremotefm1's fake unit.
 
@@ -61,8 +61,8 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet"]
-    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0"]    // (the others: GPL-3.0-only)
+    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk"]
+    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0"]    // (the others: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
     static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC)]
     static let keyD4 = 9                // (conformance: the note key D4; key 0 is F3)
@@ -248,6 +248,42 @@ final class CoreTests: XCTestCase {
         print(String(format: "core saadet (store): key rms %.5f peak %d, binary %d B (full %d B)", a.rms, a.peak,
                      store.count, full.count))
         XCTAssertGreaterThan(a.peak, 64, "the store variant's held D4 is silent")
+        XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// Boardwalk: its descriptor (MPL-2.0, the source at its commit, the credits); its screen draws; the boardwalk
+    /// plays its attract tune with no key held; PLAY steps into the cabinet in front, HOME back out, and the screen
+    /// changes each time
+    func testBoardwalk() throws {
+        var i = rfms_info_t()
+        XCTAssertEqual(rfms_find("boardwalk", &i), 1)
+        XCTAssertEqual(RemoteController.string(i.name), "Boardwalk")
+        XCTAssertEqual(RemoteController.string(i.version), "0.9")
+        let url = RemoteController.string(i.source_url)
+        XCTAssertTrue(url.hasPrefix("https://github.com/charlesvestal/fm1-boardwalk@") && url.count == 47 + 40, url)
+        let credits = CorePlayer.credits("boardwalk")
+        for s in ["Charles Vestal", "Leo Kuroshita", "Dattorro", "Groove OS", "Barlow", "Terminus",
+                  "Mozilla Public License Version 2.0", "SIL OPEN FONT LICENSE"] {
+            XCTAssertTrue(credits.contains(s), "boardwalk credits lack \(s)")
+        }
+        let c = try TestCore("boardwalk")
+        c.boot()
+        let tune = c.run(1500)
+        XCTAssertGreaterThan(Self.colours(c), 8, "Boardwalk's screen is (nearly) one colour")
+        XCTAssertGreaterThan(tune.peak, 64, "the boardwalk's attract tune is silent")
+        let walk = c.lcd
+        c.button(Int32(RFME_B_PLAY), true)
+        c.run(60)
+        c.button(Int32(RFME_B_PLAY), false)
+        c.run(500)
+        let cabinet = c.lcd
+        XCTAssertNotEqual(cabinet, walk, "PLAY did not step into the cabinet")
+        c.button(Int32(RFME_B_HOME), true)
+        c.run(60)
+        c.button(Int32(RFME_B_HOME), false)
+        c.run(500)
+        XCTAssertNotEqual(c.lcd, cabinet, "HOME did not step out")
+        print(String(format: "core boardwalk: attract tune peak %d rms %.5f", tune.peak, tune.rms))
         XCTAssertEqual(c.status.halted, 0)
     }
 
