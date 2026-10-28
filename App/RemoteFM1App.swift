@@ -7,6 +7,8 @@
 // -coretest (M3): the core test (CoreTest.swift) runs on the normal screen; -core <id> picks the firmware.
 // M4: the app's link shares the FM-1 with the AU's instances through the lease (PLAN.md section 4), under its own
 // UUID (UserDefaults rfm1.instance). -aucoretest (M4): only the AU core test (AUCoreTest.swift), run at launch.
+// The screen is the on-screen FM-1 (MainScreen); its launch arguments (-view, -deck, -knobs, -source, -sheet,
+// -sheetpage, -themeeditor, -theme, -orientation, -steps) are in MainScreen.swift's LaunchOptions.
 
 import RFMKit
 import SwiftUI
@@ -22,6 +24,7 @@ struct RemoteFM1App: App {
     init() {
         let args = ProcessInfo.processInfo.arguments
         coreTest = args.contains("-coretest")
+        RFMFonts.register()
         guard !args.contains("-autest") && !args.contains("-aucoretest") else { return }
         let backend = Self.backend(args)
         let d = UserDefaults.standard
@@ -44,7 +47,7 @@ struct RemoteFM1App: App {
         WindowGroup {
             Group {
                 if let controller, let player {
-                    ContentView(controller: controller, player: player)
+                    MainScreen(controller: controller, player: player)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
                         .onChange(of: player.mode) { _, m in
                             UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")
@@ -57,12 +60,11 @@ struct RemoteFM1App: App {
                         .onAppear { controller.setOwnerName(Self.ownerName(player)) }
                         .onChange(of: player.audioOn) { _, on in UserDefaults.standard.set(on, forKey: "rfm1.audio") }
                 } else if ProcessInfo.processInfo.arguments.contains("-aucoretest") {
-                    AUCoreTestView(host: AUCoreTestHost())
+                    AUCoreTestView(host: AUCoreTestHost()).preferredColorScheme(.dark)
                 } else {
-                    AUTestView(host: AUTestHost(auto: true))
+                    AUTestView(host: AUTestHost(auto: true)).preferredColorScheme(.dark)
                 }
             }
-            .preferredColorScheme(.dark)
         }
         .onChange(of: phase) { _, p in
             if p == .background, let player { Self.saveInBackground(player) }

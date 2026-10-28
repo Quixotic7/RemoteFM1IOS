@@ -36,6 +36,9 @@ static_assert(sizeof(RemoteSnapshot::lcd) == sizeof(fm1panel_t::lcd), "the LCD l
 namespace {
 
 constexpr uint32_t kPeriodMs = RemoteLink::kPeriodMs;   // the LCD and LEDs at most every 50 device ms (20 fps)
+constexpr uint32_t kPreviewMs = 33;                      // the app's preview at most every 33 device ms (30 fps)
+constexpr uint32_t kPanelMs = 8;                         // the on-screen panel's state at most every 8 device ms
+constexpr int kNIds = FM1P_NBTN + FM1P_NKEY;             // keymap ids: 0..13 matrix buttons, 14.. note keys
 constexpr uint32_t kFlashEveryMs = 30000;
 constexpr uint32_t kStatsEveryMs = 500;
 constexpr int kRemoteVel = 100;                          // RemoteFM1 sends no velocity (Processor.cpp kRemoteVel)
@@ -135,7 +138,14 @@ struct rfme {
     std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
     int32_t masterV = -1;
     uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
-    rfm_leds_t lastLeds{};
+    uint32_t lastLinkPub = 0, lastLinkWrites = 0;
+    rfm_leds_t lastLeds{}, lastLinkLeds{};
+    // the on-screen panel's state (the clock's own, then published): each keymap id's LED (column, line), -1 none
+    int8_t ledCol[kNIds], ledLine[kNIds];
+    rfme_panel_t panelLast{};
+    uint32_t lastPanel = 0;
+    rfm::Triple<rfme_panel_t> panelOut;
+    uint32_t panelSeen = 0;                 // (the reader's)
     bool pubValid = false, linkValid = false;
     uint32_t lastFlashCheck = 0, savedDirty = 0, lastStats = 0;
     rfm::Spsc<rfm_event_t, 1024> in;    // rfme_event -> the clock
@@ -191,7 +201,29 @@ struct rfme {
             tcv.notify_all();
     }
 
-    rfme() { std::memset(noteKey, -1, sizeof noteKey); }
+    rfme()
+    {
+        std::memset(noteKey, -1, sizeof noteKey);
+        std::memset(ledCol, -1, sizeof ledCol);
+        std::memset(ledLine, -1, sizeof ledLine);
+    }
+
+    // each keymap id's LED: (column, line) where the keymap has it on rows 1..4 (Device::led_level, precomputed)
+    void mapLeds(const int8_t *keymap)
+    {
+        std::memset(ledCol, -1, sizeof ledCol);
+        std::memset(ledLine, -1, sizeof ledLine);
+        if (!keymap)
+            return;
+        for (int r = 1; r <= FM1P_NLINE; r++)
+            for (int c = 0; c < FM1P_NCOL; c++) {
+                const int id = keymap[r * FM1P_NCOL + c];
+                if (id >= 0 && id < kNIds && ledCol[id] < 0) {
+                    ledCol[id] = (int8_t)c;
+                    ledLine[id] = (int8_t)(r - 1);
+                }
+            }
+    }
 
     // the keys held by the unit and by host notes, to the device; a key newly down gets its velocity first
     // (Processor.cpp pushKeys)
@@ -335,42 +367,78 @@ struct rfme {
         }
     }
 
+    // the LCD and LEDs: to the FM-1 (at most every kPeriodMs, whole on request) and to the preview (at most every
+    // kPreviewMs), each only when they changed
     void publish(uint32_t ms)
     {
         const fm1panel_t *h = dev->panel();
         const bool engaged = link && attached.load(std::memory_order_relaxed) && link->engaged();
-        bool full = !pubValid;
         if (!engaged)
             linkValid = false;
-        else if (link->takeFullRequest() || !linkValid)
-            full = true;
-        if (!full && ms - lastPub < kPeriodMs)
+        const bool linkFull = engaged && (link->takeFullRequest() || !linkValid);
+        const bool linkDue = engaged && (linkFull || ms - lastLinkPub >= kPeriodMs);
+        const bool viewDue = !pubValid || ms - lastPub >= kPreviewMs;
+        if (!linkDue && !viewDue)
             return;
         rfm_leds_t l;
         remoteLeds(h, l);
         const uint32_t writes = h->lcd_writes;
-        if (!full && writes == lastWrites && rfm_leds_equal(&l, &lastLeds))
-            return;
-        if (engaged) {
+        if (linkDue && (linkFull || writes != lastLinkWrites || !rfm_leds_equal(&l, &lastLinkLeds))) {
             RemoteSnapshot &s = link->back();
             std::memcpy(s.lcd, h->lcd, sizeof s.lcd);
             s.leds = l;
             s.seq = ++linkPubs;
             link->publish();
             linkValid = true;
+            lastLinkPub = ms;
+            lastLinkWrites = writes;
+            lastLinkLeds = l;
         }
-        Preview &p = preview.back();
-        std::memcpy(p.lcd, h->lcd, sizeof p.lcd);
-        p.leds = l;
-        p.seq = ++pubSeq;
-        p.devMs = ms;
-        preview.publish();
-        lastPub = ms;
-        lastWrites = writes;
-        lastLeds = l;
-        pubValid = true;
-        snapshots.fetch_add(1, std::memory_order_relaxed);
-        lcdWrites.store(writes, std::memory_order_relaxed);
+        if (viewDue && (!pubValid || writes != lastWrites || !rfm_leds_equal(&l, &lastLeds))) {
+            Preview &p = preview.back();
+            std::memcpy(p.lcd, h->lcd, sizeof p.lcd);
+            p.leds = l;
+            p.seq = ++pubSeq;
+            p.devMs = ms;
+            preview.publish();
+            lastPub = ms;
+            lastWrites = writes;
+            lastLeds = l;
+            pubValid = true;
+            snapshots.fetch_add(1, std::memory_order_relaxed);
+            lcdWrites.store(writes, std::memory_order_relaxed);
+        }
+    }
+
+    // the on-screen panel's state, when it changed (rfme_panel)
+    void publishPanel(uint32_t ms)
+    {
+        if (ms - lastPanel < kPanelMs && panelLast.seq != 0)
+            return;
+        lastPanel = ms;
+        const fm1panel_t *h = dev->panel();
+        rfme_panel_t p{};
+        p.booted = 1;
+        p.keys = appliedKeys;
+        p.labels = labels;
+        for (int r = 0; r < FM1P_NE - 1; r++)
+            p.enc[r] = dev->enc_total(r) * (h->enc_dir[r] < 0 ? -1 : 1);   // (enc_total counts in enc_dir's sense)
+        p.master = h->master;
+        auto level = [&](int id) -> uint8_t {
+            return id >= 0 && id < kNIds && ledCol[id] >= 0 ? h->led[ledCol[id]][ledLine[id]] : 0;
+        };
+        for (int k = 0; k < FM1P_NKEY; k++)
+            p.key_led[k] = level(FM1P_NBTN + k);
+        for (int b = 0; b < FM1P_NB; b++)
+            p.btn_led[b] = level(h->btn_id[b]);
+        p.play_green = h->led_play_green;
+        p.seq = panelLast.seq;
+        if (panelLast.seq != 0 && std::memcmp(&p, &panelLast, sizeof p) == 0)
+            return;
+        p.seq = panelLast.seq + 1;
+        panelLast = p;
+        panelOut.back() = p;
+        panelOut.publish();
     }
 
     void between(uint32_t ms, bool)
@@ -404,6 +472,7 @@ struct rfme {
             flashDirty.store(dev->flash_dirty(), std::memory_order_relaxed);
         }
         publish(ms);
+        publishPanel(ms);
         // the flash (fm1remote: every 30 device s when flash_dirty moved; here also when asked, flash_sync first)
         if (!flashCopy.empty() && dev->flash() && !flashReady.load(std::memory_order_acquire)) {
             if (flashReq.load(std::memory_order_acquire)) {
@@ -483,7 +552,10 @@ struct rfme {
         resetMidi();
         masterV = -1;
         pubValid = linkValid = false;
-        lastPub = lastFlashCheck = lastStats = 0;
+        lastPub = lastLinkPub = lastFlashCheck = lastStats = 0;
+        lastPanel = 0;
+        panelLast.booted = 0;                            // (differs from the first state: published again)
+        mapLeds(dev->core()->keymap);
         flashCopy.assign(dev->flash_size(), 0);
         savedDirty = dev->flash_dirty();
         halted.store(false);
@@ -763,6 +835,21 @@ uint32_t rfme_preview(rfme_t *e, uint32_t have, uint8_t *rgba)
         return e->viewSeq;
     rfm::lcdToRGBA(e->preview.front()->lcd, rgba, FM1P_LCD_W * FM1P_LCD_H);
     return e->viewSeq;
+}
+
+uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out)
+{
+    if (const rfme_panel_t *p = e->panelOut.take())
+        e->panelSeen = p->seq;
+    if (out) {
+        if (e->panelSeen)
+            *out = *e->panelOut.front();
+        else
+            std::memset(out, 0, sizeof *out);
+        if (!e->booted)                                 // (unloaded since: nothing is lit)
+            out->booted = 0;
+    }
+    return e->panelSeen;
 }
 
 uint32_t rfme_lcd_hash(rfme_t *e)

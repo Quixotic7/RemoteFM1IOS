@@ -11,13 +11,23 @@ and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MID
 in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
 FM-1"). Not yet tried on a real FM-1, iPhone or third-party host.
 
+The UI is the owner's design (`design/README.md`, `design/canvas`): the screen is an on-screen FM-1 (M5's "LCD mirror and
+touch keys"), the same in the app and the AUv3. Three views, swiped sideways: **Full** (the hardware's arrangement:
+iPhone portrait with a scrolling keybed, iPhone landscape, iPad landscape and portrait, picked from the view's size),
+**Controls** (a big display, a knob row MAIN | KN 1–4, a BUTTONS | KEYS deck) and **Screen**. Touches go into the core
+the way the FM-1's events do; the core's screen, LEDs and knob turns come back through a lock-free snapshot
+(`rfme_panel`). The grabber opens the pull-down sheet: Sound source (This iPhone: the emulator, no link; FM-1: the link
+and the lease, "Use this FM-1", Bluetooth), View, Theme (five presets from `design/tokens.json`, an editor, a custom
+theme shared with the AU through the App Group), Firmware, MIDI & audio, Settings (Diagnostics: the former debug
+screen, the test pattern and the AU test).
+
 ## Layout
 
-- `App/`: the SwiftUI app (one screen), and the AU tests (`AUTestHost`, `AUTestView`; M4's `AUCoreTest`): the app as
+- `App/`: the SwiftUI app (`MainScreen`: the faceplate and its sheet; `DiagnosticsScreen`), and the AU tests (`AUTestHost`, `AUTestView`; M4's `AUCoreTest`): the app as
   a small AUv3 host for its own extension.
 - `AU/`: the AUv3 extension `RemoteFM1AU` (aumu `Rfm1` `Qx7u`, "Quixotic7: RemoteFM1"): its view controller, which is
-  also the AU factory, and its SwiftUI view (firmware, LCD mirror, panel status, Use this FM-1, Bluetooth, About,
-  Settings and Diagnostics).
+  also the AU factory, and its SwiftUI view (the faceplate; its sheet: Use this FM-1, Bluetooth, view, theme,
+  firmware and About, MIDI octave, Diagnostics).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
   `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
   needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
@@ -34,7 +44,9 @@ FM-1"). Not yet tried on a real FM-1, iPhone or third-party host.
     M4: the lease (`RFMLease`, `rfml_*`), RemoteLink's gate and drop path (`rfmc_set_lease`, `rfmc_claim`), and the
     process-wide shared fake unit (`SharedFake`, tests).
   - `RFMKit`: `RemoteController`, the Swift API the app uses; `CorePlayer` (the core, its audio and its flash);
-    `PanelSession` (M4: when to claim the FM-1); `AUv3/`: the audio unit (`RFMAudioUnit`), its state (`InstanceState`,
+    `PanelSession` (M4: when to claim the FM-1); `Faceplate/`: the on-screen FM-1 (the theme and its tokens, the
+    fonts, the layouts, the keybed's geometry, `PanelFeed`: touches in, LEDs and the screen out; the parts, the views,
+    the sheet, the theme editor); `Resources/`: the four OFL fonts and a copy of `design/tokens.json`; `AUv3/`: the audio unit (`RFMAudioUnit`), its state (`InstanceState`,
     `CoreState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel, About this firmware and the
     Diagnostics view.
 - `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
@@ -78,21 +90,21 @@ FM1VST's own conformance test against the macOS builds of our libraries:
 The cores on a simulator, headless, through the app's real path (fake unit, demo input, audio tapped for 3 s, the
 flash saved, a power cycle):
 
-    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee]
+    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee]   # default: RFM iPhone 17 (CEB2B846-...)
 
 It prints each core's summary and saves `coretest-<id>.json`, a screenshot and the log under `$OUT` (default
 `$TMPDIR/remotefm1-coretest`).
 
 The AU test on a simulator, headless (Simulator.app stays closed):
 
-    scripts/sim_autest.sh [UDID]
+    scripts/sim_autest.sh [UDID]                  # default: RFM iPhone 17
 
 It builds, boots the simulator if needed, installs, launches with `-autest`, prints the summary, saves `autest.json`,
 the log and two screenshots under `$OUT` (default `$TMPDIR/remotefm1-autest`), and shuts down a simulator it booted.
 
 M4's AU core test on a simulator, headless, the same way:
 
-    scripts/sim_aucoretest.sh [UDID]
+    scripts/sim_aucoretest.sh [UDID]              # default: RFM iPhone 17
 
 Two instances out of process (ChoralRoot and Felucca) play host MIDI notes for 3 s (RMS per instance, render times);
 the panel moves A -> B -> A on the extension's shared fake unit (who started its session, what the old owner sent
@@ -100,6 +112,15 @@ after, its SESSION 0s); A's `fullState` (a tempo saved on the fake panel) restor
 UUID; a duplicate D gets a new UUID; the app's own link and C take the lease from each other. It saves
 `aucoretest.json`, the log and screenshots of both instances' views (owner and "in use") under `$OUT` (default
 `$TMPDIR/remotefm1-aucoretest`).
+
+Screenshots of the UI for comparing with `design/canvas`, headless, on this project's simulators RFM iPhone 17
+(CEB2B846-457C-4A33-AA1A-A287D30CDE2F) and RFM iPad Pro 11 (807A585A-7B1D-4850-8FF3-D8C4871A2F30) (`PHONE=`, `PAD=`
+for others, `ONLY=phone|pad`, `NOBUILD=1`), with the core running:
+
+    scripts/sim_shots.sh [OUT]                    # default $TMPDIR/remotefm1-shots
+
+An iPad simulator refuses a programmatic rotation; the app then draws the faceplate turned and the script turns the
+PNG back.
 
 libremotefm1's own tests, built outside the source tree:
 
@@ -116,6 +137,14 @@ libremotefm1's own tests, built outside the source tree:
 - `-autest`: only the AU test, run at launch (the FM-1 link is never created). Its summary goes to `autest.json` in the
   app's Documents and the App Group container. On a device, the "AU test" button runs the same thing.
 - `-coretest`: the core test (above) on the normal screen; `-core <id>` picks the firmware (also without `-coretest`).
+- The UI (any combination; nothing is needed for normal use):
+  - `-view full|controls|screen`, `-deck buttons|keys`, `-knobs main|kn`: the view, the Controls deck, the knob set.
+  - `-source phone|fm1`: the sound source (phone: the emulator, the link stopped; fm1: the link, the fake unit on the
+    simulator).
+  - `-sheet`, `-sheetpage firmware|midi|settings`: the pull-down sheet open (on a page); `-themeeditor`: the editor.
+  - `-theme Tangerine|Midnight|Mint|Lilac|Cream`: a theme for this launch (not stored).
+  - `-orientation portrait|landscape`: asks the scene for it (`requestGeometryUpdate`).
+  - `-steps`: the step numbers 1–16 on the lower keys.
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices). On a device CoreMIDI is the default.
 

@@ -114,6 +114,23 @@ int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value);
 int rfme_matrix_button(rfme_t *e, int label);   // the matrix id of a label (after boot), -1
 int rfme_matrix_encoder(rfme_t *e, int role);   // the matrix encoder of a knob role (after boot), -1
 
+// ---- the on-screen panel (the app's faceplate): the core's panel state besides the LCD, for a UI to poll (30-60 Hz).
+// The clock publishes it every 8 device ms when it changed, through a triple buffer: lock-free, never blocking the
+// audio thread. The on-screen controls go in through rfme_event, as the FM-1's do.
+typedef struct {
+    uint32_t seq;               // moves when anything below changed (0: nothing published yet)
+    uint32_t keys;              // note keys held now (the unit's, the screen's and host notes): bit k = key k
+    uint32_t labels;            // buttons held now, by label (bit RFME_B_*)
+    int32_t enc[7];             // per knob role (RFME_E_*): detents turned clockwise since power-on, anyone's turns
+    int32_t master;             // the MASTER pot as the core has it, 0..1023
+    uint8_t key_led[27];        // each note key's LED level 0..255 (fm1core.h FM1P_LED_*: 176+ lit, 96 mid, 40 dim, 12 faint)
+    uint8_t btn_led[14];        // each button's LED level, by label (RFME_B_*)
+    uint8_t play_green;         // PLAY's green LED level
+    uint8_t booted;             // 1: a core is running (the values above are its)
+} rfme_panel_t;
+// the newest panel state (one reader thread, any but the clock's); returns its seq (0: none yet; out zeroed)
+uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out);
+
 typedef struct {
     int loaded, booted, halted, clock, attached;
     uint32_t halt_code;         // halted(): 0x100 | exit code

@@ -16,6 +16,7 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
 
     public override func viewDidLoad() {
         super.viewDidLoad()
+        RFMFonts.register()
         model.onBluetooth = { [weak self] in self?.presentBluetooth() }
         model.onAbout = { [weak self] info in self?.presentAbout(info) }
         let hosting = UIHostingController(rootView: AUView(model: model))
@@ -30,8 +31,9 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
             hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         hosting.didMove(toParent: self)
-        view.backgroundColor = UIColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1)
-        preferredContentSize = CGSize(width: 400, height: 400)
+        let body = ThemeStore.shared.current.body
+        view.backgroundColor = UIColor(red: body.r, green: body.g, blue: body.b, alpha: 1)
+        preferredContentSize = CGSize(width: 760, height: 352)      // (the iPhone-landscape faceplate's shape)
         log.info("view loaded, pid \(getpid())")
     }
 
@@ -79,23 +81,28 @@ private struct UnitRef: @unchecked Sendable { let au: RFMAudioUnit }
 @MainActor
 @Observable
 final class AUViewModel {
+    enum Page { case firmware, diagnostics }
     var instance = "–"
     var status = RFMAudioUnit.Status()
     var cores: [CoreInfo] = []
-    var preview: CGImage?
     var report: ProbeReport?
     var diagnosticsOpen = false
+    var page: Page?
+    var chip = PanelChip.emulator                       // (set only when it changes: the faceplate reads it)
+    let ui = FaceplateUI()
+    let feed = PanelFeed(host: nil)
+    @ObservationIgnored var userPicked = false          // (a view picked in the sheet: no more fitting to the size)
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
     @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
     @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
-    @ObservationIgnored private var previewSeq: UInt32 = 0
     @ObservationIgnored private var ticks = 0
 
     var current: CoreInfo? { cores.first { $0.id == status.coreID } }
 
     func attach(_ au: RFMAudioUnit) {
         self.au = au
+        feed.attach(au)
         au.onEvent = { [weak self] e in
             Task { @MainActor in
                 switch e {
@@ -117,11 +124,8 @@ final class AUViewModel {
         guard let au else { return }
         instance = au.state.short
         status = au.status()
-        let p = au.preview(have: previewSeq)
-        if let img = p.image {
-            previewSeq = p.seq
-            preview = img
-        }
+        let c = Self.chip(status.panel)
+        if c != chip { chip = c }
         ticks += 1
         if ticks % 10 == 1 {
             let c = au.cores
@@ -134,6 +138,20 @@ final class AUViewModel {
                 }
             }
         }
+    }
+
+    static func chip(_ p: PanelStatus?) -> PanelChip {
+        guard let p else { return .emulator }
+        if p.heldElsewhere { return .inUse }
+        if p.owner { return p.link.isConnected ? .linked : .searching }
+        return .emulator
+    }
+
+    /// the view for the host's size: very small -> Screen, tall -> Controls, else Full
+    func fit(_ size: CGSize) {
+        guard !userPicked, size.width > 0, size.height > 0 else { return }
+        let p: FaceplateUI.Page = min(size.width, size.height) < 260 ? .screen : size.height > size.width * 1.1 ? .controls : .full
+        if p != ui.page { ui.page = p }
     }
 
     func select(_ id: String) { au?.selectCore(id) }

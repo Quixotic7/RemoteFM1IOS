@@ -394,7 +394,7 @@ struct AUCoreTestView: View {
                     EmbeddedAUView(vc: v.1)
                         .frame(height: 360)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DebugTheme.line))
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(host.summary.steps) { s in
@@ -406,7 +406,7 @@ struct AUCoreTestView: View {
             }
             .padding(10)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(DebugTheme.background.ignoresSafeArea())
         .task { await host.run() }
     }
 }

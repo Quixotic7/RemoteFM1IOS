@@ -61,7 +61,9 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("AVFoundation")]
         ),
-        .target(name: "RFMKit", dependencies: ["RFMCore"]),
+        // the UI's fonts (OFL, bundled) and design/tokens.json (a copy; a test keeps the two equal)
+        .target(name: "RFMKit", dependencies: ["RFMCore"],
+                resources: [.copy("Resources/Fonts"), .copy("Resources/tokens.json")]),
         .testTarget(name: "RFMKitTests", dependencies: ["RFMKit"]),
     ],
     swiftLanguageModes: [.v6],

@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The one screen: the link's state and controls, the mode (M1's test pattern, or a firmware core: M3), the firmware,
-// the sound, the frame being sent, the core's numbers, the unit's HELLO_R, the link's numbers and the panel's last
-// events. Two columns on a regular width (iPad), one on an iPhone.
+// Diagnostics (the sheet's Settings -> Diagnostics; the app's one screen before the faceplate): the link's state and
+// controls, the mode (M1's test pattern, or a firmware core: M3), the firmware, the sound, the frame being sent, the
+// core's numbers, the unit's HELLO_R, the link's numbers and the panel's last events, and the AU test. Two columns on
+// a regular width (iPad), one on an iPhone.
 
 import RFMKit
 import SwiftUI
 
-struct ContentView: View {
+struct DiagnosticsScreen: View {
     let controller: RemoteController
     let player: CorePlayer
+    var done: (() -> Void)?
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showBluetooth = false
     @State private var showAUTest = false
@@ -44,7 +46,8 @@ struct ContentView: View {
             }
             .padding(16)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(DebugTheme.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
         .onAppear { controller.appeared() }
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
         .sheet(isPresented: $showAbout) { AboutFirmware(info: player.current) }
@@ -53,8 +56,9 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
-            Text("RemoteFM1").font(.title2.bold()).lineLimit(1).layoutPriority(1)
+            Text("Diagnostics").font(.title2.bold()).lineLimit(1).layoutPriority(1)
             Spacer(minLength: 8)
+            if let done { Button("Done", action: done).buttonStyle(.borderedProminent).fixedSize() }
             Button("AU test") { showAUTest = true }.buttonStyle(.bordered).fixedSize()
             StatusPill(state: controller.state, fake: controller.backend.isFake)
         }
@@ -71,7 +75,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .fixedSize()
             if let p = controller.panel, p.heldElsewhere {
-                Text(p.line).font(.footnote).foregroundStyle(Theme.accent).lineLimit(2)
+                Text(p.line).font(.footnote).foregroundStyle(DebugTheme.accent).lineLimit(2)
             } else if let w = controller.panel?.leaseWarning {
                 Text(w).font(.footnote).foregroundStyle(.orange).lineLimit(2)
             }
@@ -129,18 +133,18 @@ struct ContentView: View {
                     .interpolation(.none)
                     .resizable()
             } else {
-                Theme.card
+                DebugTheme.card
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: sizeClass == .regular ? 480 : 260)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.line))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DebugTheme.line))
         .accessibilityLabel("The screen being sent to the FM-1")
     }
 }
 
-enum Theme {
+enum DebugTheme {
     static let background = Color(red: 0.06, green: 0.07, blue: 0.09)
     static let card = Color(red: 0.11, green: 0.12, blue: 0.15)
     static let line = Color.white.opacity(0.12)
@@ -184,7 +188,7 @@ struct Card<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.card))
+        .background(RoundedRectangle(cornerRadius: 10).fill(DebugTheme.card))
     }
 }
 
@@ -197,7 +201,7 @@ struct PanelCard: View {
             HStack(spacing: 2) {
                 ForEach(0..<27, id: \.self) { k in
                     RoundedRectangle(cornerRadius: 1.5)
-                        .fill(controller.heldKeys & (1 << UInt32(k)) != 0 ? Theme.accent : Color.white.opacity(0.12))
+                        .fill(controller.heldKeys & (1 << UInt32(k)) != 0 ? DebugTheme.accent : Color.white.opacity(0.12))
                         .frame(height: 18)
                 }
             }
@@ -210,7 +214,7 @@ struct PanelCard: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 3)
                         .background(RoundedRectangle(cornerRadius: 3).fill(
-                            controller.heldButtons & (1 << UInt32(b)) != 0 ? Theme.teal : Color.white.opacity(0.08)))
+                            controller.heldButtons & (1 << UInt32(b)) != 0 ? DebugTheme.teal : Color.white.opacity(0.08)))
                 }
             }
             Text("MASTER \(controller.master.map(String.init) ?? "–")")

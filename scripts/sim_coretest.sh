@@ -5,7 +5,7 @@
 # core launch the app with -coretest -fake -core <id> (the fake unit's demo input plays it), wait for coretest.json,
 # take a screenshot, print the summary; shut the simulator down again if this script booted it.
 #
-#   scripts/sim_coretest.sh [UDID] [core ...]     (default: the first booted simulator, else an iPhone 17;
+#   scripts/sim_coretest.sh [UDID] [core ...]     (default: RFM iPhone 17, CEB2B846-...;
 #                                                  choralroot felucca melodee)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-coretest); NOBUILD=1 reuses the last build
 #
@@ -16,8 +16,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUNDLE=com.quixotic7.remotefm1
 UDID=${1:-}
 [ $# -gt 0 ] && shift
-UDID=${UDID:-$(xcrun simctl list devices booted | grep -Eo '[0-9A-F-]{36}' | head -1 || true)}
-UDID=${UDID:-$(xcrun simctl list devices available | grep -E 'iPhone 17 \(' | grep -Eo '[0-9A-F-]{36}' | head -1)}
+UDID=${UDID:-CEB2B846-457C-4A33-AA1A-A287D30CDE2F}   # (RFM iPhone 17, this project's own simulator)
 CORES=("$@")
 [ ${#CORES[@]} -gt 0 ] || CORES=(choralroot felucca melodee)
 OUT=${OUT:-${TMPDIR:-/tmp}/remotefm1-coretest}

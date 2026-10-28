@@ -27,7 +27,7 @@ struct AUTestView: View {
                     EmbeddedViewController(vc: vc)
                         .frame(height: 420)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DebugTheme.line))
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(host.summary.steps) { s in
@@ -47,7 +47,7 @@ struct AUTestView: View {
             }
             .padding(16)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(DebugTheme.background.ignoresSafeArea())
         .task { if host.auto { await host.run() } }
     }
 }

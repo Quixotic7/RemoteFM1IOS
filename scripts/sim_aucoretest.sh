@@ -7,7 +7,7 @@
 # extension), take a screenshot at each of the test's markers, print the summary, save the log, and shut the
 # simulator down again if this script booted it.
 #
-#   scripts/sim_aucoretest.sh [UDID]    (default: the first booted simulator, else an iPhone 17)
+#   scripts/sim_aucoretest.sh [UDID]    (default: RFM iPhone 17, CEB2B846-...)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-aucoretest); NOBUILD=1 reuses the last build
 #
 # Only fake units: the test tells the extension to use its shared fake (au-backend.txt in the App Group) before it
@@ -17,8 +17,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUNDLE=com.quixotic7.remotefm1
 GROUP=group.com.quixotic7.remotefm1
-UDID=${1:-$(xcrun simctl list devices booted | grep -Eo '[0-9A-F-]{36}' | head -1 || true)}
-UDID=${UDID:-$(xcrun simctl list devices available | grep -E 'iPhone 17 \(' | grep -Eo '[0-9A-F-]{36}' | head -1)}
+UDID=${1:-CEB2B846-457C-4A33-AA1A-A287D30CDE2F}   # (RFM iPhone 17, this project's own simulator)
 OUT=${OUT:-${TMPDIR:-/tmp}/remotefm1-aucoretest}
 DD=$OUT/dd
 RES=$OUT/$UDID

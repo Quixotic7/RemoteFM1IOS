@@ -42,7 +42,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     }
 
     private let kernel: OpaquePointer
-    private let e: OpaquePointer                // rfme_t
+    let e: OpaquePointer                        // rfme_t (the faceplate plays it: PanelEngineHost)
     private let link: OpaquePointer?            // rfmc_t
     public let session: PanelSession?
     public let backend: String                  // "none", "fake", "shared fake", "device"
@@ -52,7 +52,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     private var inputs: AUAudioUnitBusArray!
     private let lock = NSLock()                 // instanceState, channel
     private let ctl = NSLock()                  // the core: load, boot, power cycle, flash, settings
-    private let pvLock = NSLock()               // the preview
+    let pvLock = NSLock()                       // the preview (rfme_preview has one reader at a time)
     private var instanceState = InstanceState()
     private var coreID: String?
     private var coreError = ""
