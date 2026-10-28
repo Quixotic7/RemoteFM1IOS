@@ -190,7 +190,17 @@ Chakra Petch (hardware legends), DM Sans (app UI), Unbounded (sheet titles), DM 
 - Touch targets: 44pt minimum. Close to the limit: OCT buttons in iPhone landscape (~42pt) and the MAIN | KN 1–4
   switch (32pt tall): give them a larger invisible hit area.
 
-## 9. Not designed yet
+## 9. App icon (`icon/`)
+
+- The faceplate reduced to three things: the square display with an FM waveform, two knobs, and a row of pill keys
+  with two lit LEDs. Default is Tangerine; Dark uses the Midnight theme; Tinted is the grayscale source iOS tints.
+- `icon/AppIcon.appiconset/` is ready for Xcode's single-size format (iOS 18+): one 1024×1024 opaque PNG per
+  appearance (any, dark, tinted) and its `Contents.json`. To install: move it into `App/Assets.xcassets/` and make
+  sure the app target's `ASSETCATALOG_COMPILER_APPICON_NAME` is `AppIcon`. The AUv3 extension uses the app's icon.
+- `icon/icon-*.svg`: the vector sources (square, unmasked; iOS applies the rounded mask).
+- Canvas: `Icon.dc.html` (the 1024 artwork, with a variant switch) and `IconSet.dc.html` (variants and sizes).
+
+## 10. Not designed yet
 
 - The "panel in use by another instance" state (PLAN.md section 4) and the "Use this FM-1" action. Suggested:
   the status chip turns into `FM-1 in use` with a button in the sheet's Sound source card.

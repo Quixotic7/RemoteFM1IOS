@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemoteFM1 app icon</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: {{size}}px; height: {{size}}px; line-height: 0">
+<svg role="img" aria-label="RemoteFM1 app icon, {{variantName}}" width="{{size}}" height="{{size}}" viewBox="0 0 1024 1024" style="display: block">
+<defs><filter id="rfmglow" x="-200%" y="-50%" width="500%" height="200%"><feGaussianBlur stdDeviation="12"></feGaussianBlur></filter></defs>
+<rect width="1024" height="1024" fill="{{c.bg}}"></rect>
+<rect x="0" y="700" width="1024" height="324" fill="{{c.bed}}"></rect>
+<rect x="0" y="700" width="1024" height="10" fill="rgba(0,0,0,0.18)"></rect>
+
+<rect x="94" y="768" width="132" height="320" rx="60" fill="{{c.lo}}"></rect>
+<rect x="94" y="752" width="132" height="320" rx="60" fill="{{c.hi}}"></rect>
+<rect x="94" y="759" width="132" height="320" rx="60" fill="{{c.key}}"></rect>
+<rect x="151" y="812" width="18" height="130" rx="9" fill="{{c.off}}"></rect>
+
+<rect x="270" y="768" width="132" height="320" rx="60" fill="{{c.lo}}"></rect>
+<rect x="270" y="752" width="132" height="320" rx="60" fill="{{c.hi}}"></rect>
+<rect x="270" y="759" width="132" height="320" rx="60" fill="{{c.key}}"></rect>
+<rect x="327" y="812" width="18" height="130" rx="9" fill="{{c.led}}" filter="url(#rfmglow)"></rect>
+<rect x="327" y="812" width="18" height="130" rx="9" fill="{{c.led}}"></rect>
+
+<rect x="446" y="768" width="132" height="320" rx="60" fill="{{c.lo}}"></rect>
+<rect x="446" y="752" width="132" height="320" rx="60" fill="{{c.hi}}"></rect>
+<rect x="446" y="759" width="132" height="320" rx="60" fill="{{c.key}}"></rect>
+<rect x="503" y="812" width="18" height="130" rx="9" fill="{{c.off}}"></rect>
+
+<rect x="622" y="768" width="132" height="320" rx="60" fill="{{c.lo}}"></rect>
+<rect x="622" y="752" width="132" height="320" rx="60" fill="{{c.hi}}"></rect>
+<rect x="622" y="759" width="132" height="320" rx="60" fill="{{c.key}}"></rect>
+<rect x="679" y="812" width="18" height="130" rx="9" fill="{{c.led}}" filter="url(#rfmglow)"></rect>
+<rect x="679" y="812" width="18" height="130" rx="9" fill="{{c.led}}"></rect>
+
+<rect x="798" y="768" width="132" height="320" rx="60" fill="{{c.lo}}"></rect>
+<rect x="798" y="752" width="132" height="320" rx="60" fill="{{c.hi}}"></rect>
+<rect x="798" y="759" width="132" height="320" rx="60" fill="{{c.key}}"></rect>
+<rect x="855" y="812" width="18" height="130" rx="9" fill="{{c.off}}"></rect>
+
+<rect x="120" y="152" width="440" height="440" rx="52" fill="rgba(0,0,0,0.25)"></rect>
+<rect x="120" y="140" width="440" height="440" rx="52" fill="{{c.bezel}}"></rect>
+<rect x="146" y="166" width="388" height="388" rx="20" fill="{{c.lcd}}"></rect>
+<path d="M196 368 L200 324 L204 289 L208 269 L212 264 L216 274 L220 294 L224 317 L228 340 L232 361 L236 376 L240 387 L244 394 L248 396 L252 395 L256 391 L260 385 L264 377 L268 368 L272 359 L276 351 L280 345 L284 341 L288 340 L292 342 L296 349 L300 360 L304 375 L308 396 L312 419 L316 442 L320 462 L324 472 L328 467 L332 447 L336 412 L340 368 L344 324 L348 289 L352 269 L356 264 L360 274 L364 294 L368 317 L372 340 L376 361 L380 376 L384 387 L388 394 L392 396 L396 395 L400 391 L404 385 L408 377 L412 368 L416 359 L420 351 L424 345 L428 341 L432 340 L436 342 L440 349 L444 360 L448 375 L452 396 L456 419 L460 442 L464 462 L468 472 L472 467 L476 447 L480 412 L484 368" fill="none" stroke="{{c.ink}}" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"></path>
+
+<circle cx="788" cy="262" r="96" fill="rgba(0,0,0,0.28)"></circle>
+<circle cx="788" cy="250" r="96" fill="{{c.knob}}"></circle>
+<circle cx="788" cy="250" r="86" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="16" stroke-dasharray="10 12"></circle>
+<circle cx="788" cy="250" r="68" fill="rgba(255,255,255,0.07)"></circle>
+<line x1="788" y1="166" x2="788" y2="206" stroke="{{c.mark}}" stroke-width="18" stroke-linecap="round" transform="rotate(-40 788 250)"></line>
+
+<circle cx="788" cy="492" r="96" fill="rgba(0,0,0,0.28)"></circle>
+<circle cx="788" cy="480" r="96" fill="{{c.knob}}"></circle>
+<circle cx="788" cy="480" r="86" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="16" stroke-dasharray="10 12"></circle>
+<circle cx="788" cy="480" r="68" fill="rgba(255,255,255,0.07)"></circle>
+<line x1="788" y1="396" x2="788" y2="436" stroke="{{c.mark}}" stroke-width="18" stroke-linecap="round" transform="rotate(60 788 480)"></line>
+</svg>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"variant":{"editor":"enum","options":["Light","Dark","Tinted"],"default":"Light"},"size":{"editor":"int","default":1024,"min":16,"max":1024},"$preview":{"width":1024,"height":1024}}'>
+class Component extends DCLogic {
+renderVals() {
+const V = {
+Light: { bg: '#EE7A3C', bed: '#874332', key: '#924E3A', hi: '#A9614B', lo: '#64301F', bezel: '#141210', lcd: '#C9D6EA', ink: '#13203A', knob: '#1B1715', mark: '#F4EDE6', led: '#FFE6A8', off: '#6F6668' },
+Dark: { bg: '#1E2230', bed: '#12151D', key: '#2B3244', hi: '#3B4359', lo: '#0A0C12', bezel: '#05060A', lcd: '#0D1F1A', ink: '#7CF5C8', knob: '#0A0B0F', mark: '#6CF0C2', led: '#6CF0C2', off: '#454B5C' },
+Tinted: { bg: '#000000', bed: '#1C1C1C', key: '#303030', hi: '#454545', lo: '#000000', bezel: '#0B0B0B', lcd: '#D6D6D6', ink: '#111111', knob: '#121212', mark: '#FFFFFF', led: '#FFFFFF', off: '#5A5A5A' },
+};
+const name = V[this.props.variant] ? this.props.variant : 'Light';
+return { c: V[name], variantName: name, size: Number(this.props.size) || 1024 };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemoteFM1 icon variants and sizes</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;display=swap">
+<style>
+html,body{margin:0;overflow:hidden}
+</style>
+</helmet>
+<main style="width: 1100px; height: 700px; box-sizing: border-box; padding: 56px; background: #2C2B35; color: #F3EBDC; font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; gap: 56px">
+
+<div style="display: flex; gap: 48px; align-items: flex-start">
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="width: 280px; height: 280px; border-radius: 63px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="280" hint-size="280px,280px"></dc-import>
+</div>
+<figcaption style="font: 600 14px/1 'DM Sans', sans-serif; color: #D6CCBA">Default</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="width: 280px; height: 280px; border-radius: 63px; overflow: hidden">
+<dc-import name="Icon" variant="Dark" size="280" hint-size="280px,280px"></dc-import>
+</div>
+<figcaption style="font: 600 14px/1 'DM Sans', sans-serif; color: #D6CCBA">Dark</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 14px">
+<div style="width: 280px; height: 280px; border-radius: 63px; overflow: hidden">
+<dc-import name="Icon" variant="Tinted" size="280" hint-size="280px,280px"></dc-import>
+</div>
+<figcaption style="font: 600 14px/1 'DM Sans', sans-serif; color: #D6CCBA">Tinted (grayscale source)</figcaption>
+</figure>
+</div>
+
+<div style="display: flex; gap: 40px; align-items: flex-end">
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 180px; height: 180px; border-radius: 40px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="180" hint-size="180px,180px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #D6CCBA">180 · iPhone @3x</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 120px; height: 120px; border-radius: 27px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="120" hint-size="120px,120px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #F3EBDC">RemoteFM1</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 87px; height: 87px; border-radius: 19px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="87" hint-size="87px,87px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #D6CCBA">87</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 60px; height: 60px; border-radius: 13px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="60" hint-size="60px,60px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #D6CCBA">60</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 40px; height: 40px; border-radius: 9px; overflow: hidden">
+<dc-import name="Icon" variant="Light" size="40" hint-size="40px,40px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #D6CCBA">40</figcaption>
+</figure>
+<figure style="margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px">
+<div style="width: 60px; height: 60px; border-radius: 13px; overflow: hidden">
+<dc-import name="Icon" variant="Dark" size="60" hint-size="60px,60px"></dc-import>
+</div>
+<figcaption style="font: 500 12px/1 'DM Sans', sans-serif; color: #D6CCBA">60 dark</figcaption>
+</figure>
+</div>
+
+</main>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":700}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
