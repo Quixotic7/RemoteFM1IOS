@@ -1,6 +1,8 @@
 # RemoteFM1 for iOS (plan)
 
-Status (2026-10-27): plan, with the owner's decisions (section 7). Nothing built, nothing sent to a unit.
+Status (2026-10-27): M0 done and M1 built (README.md says how to build and test). On the simulator, with the fake
+unit, the app connects, sends the test pattern and shows panel events. M1 is not yet tried on the iPhone with the
+real "FM-1 7938". Owner's decisions in section 7.
 
 An iPhone/iPad host for FM-1 firmware cores, with a real FM-1 running RemoteFM1 firmware 0.2.2 as the panel: keys,
 buttons, encoders and MASTER come in; the firmware's 240×240 screen and LEDs go out; sound plays on the iOS device.

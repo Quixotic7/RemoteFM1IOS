@@ -1,0 +1,63 @@
+// swift-tools-version: 6.0
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 RemoteFM1 contributors
+// RFMKit: libremotefm1 and FM1VST's CoreMIDI back end (in place, from vendor/FM1VST, through the vendor symlink),
+// RemoteLink (a copy, RFMCore/RemoteLink.h says what changed) and the Swift API the app uses.
+import PackageDescription
+
+let rfm = "remote/RemoteFM1"            // inside vendor/FM1VST
+let vendorRFM = "../../vendor/FM1VST/remote/RemoteFM1"   // the same, from Sources/RFMCore
+
+let package = Package(
+    name: "RFMKit",
+    platforms: [.iOS(.v17), .macOS(.v14)],
+    products: [
+        .library(name: "RFMKit", targets: ["RFMKit"]),
+    ],
+    targets: [
+        // libremotefm1 (portable C99), RemoteFM1's macOS glue (host.c) and FM1VST's CoreMIDI back end
+        // (plugin/RemoteMidi.c: HELLO only to FM-1 candidates). No libusb on iOS: usb.c is built with RFM_NO_LIBUSB,
+        // which leaves only its stubs (host.c links against them), as FM1VST does without libusb.
+        .target(
+            name: "CRemoteFM1",
+            path: "vendor/FM1VST",
+            sources: [
+                "\(rfm)/host/src/codec.c",
+                "\(rfm)/host/src/fake.c",
+                "\(rfm)/host/src/panel.c",
+                "\(rfm)/host/src/screen.c",
+                "\(rfm)/host/src/session.c",
+                "\(rfm)/host/src/tiles_ref.c",
+                "\(rfm)/host/src/macos/host.c",
+                "\(rfm)/host/src/macos/usb.c",
+                "plugin/RemoteMidi.c",
+            ],
+            publicHeadersPath: "\(rfm)/host/include",
+            cSettings: [
+                .headerSearchPath("\(rfm)/host/include"),
+                .headerSearchPath("\(rfm)/proto"),
+                .headerSearchPath("\(rfm)/firmware/src"),
+                .headerSearchPath("\(rfm)/host/src/macos"),
+                .headerSearchPath("plugin"),
+                .define("RFM_NO_LIBUSB", to: "1"),
+            ],
+            linkerSettings: [.linkedFramework("CoreMIDI"), .linkedFramework("CoreFoundation")]
+        ),
+        // RemoteLink (session thread, event queue, triple buffer), fm1remote's patterns, and the C API for Swift
+        .target(
+            name: "RFMCore",
+            dependencies: ["CRemoteFM1"],
+            cxxSettings: [
+                .headerSearchPath("\(vendorRFM)/host/include"),
+                .headerSearchPath("\(vendorRFM)/proto"),
+                .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
+                .define("FM1_REMOTE_NO_BULK", to: "1"),
+            ]
+        ),
+        .target(name: "RFMKit", dependencies: ["RFMCore"]),
+        .testTarget(name: "RFMKitTests", dependencies: ["RFMKit"]),
+    ],
+    swiftLanguageModes: [.v6],
+    cLanguageStandard: .c99,
+    cxxLanguageStandard: .cxx17
+)

@@ -1,0 +1,3 @@
+[submodule "vendor/FM1VST"]
+	path = vendor/FM1VST
+	url = https://github.com/Quixotic7/FM1VST.git
