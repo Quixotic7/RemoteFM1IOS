@@ -4,7 +4,7 @@
 // UUID in fullState, and a message channel for the probes. M4: the instance plays a firmware core and shares one FM-1
 // with every other instance (PLAN.md section 4):
 //
-//   the core     a core from the app bundle's slot frameworks (ChoralRoot, Felucca, Melodee, FIZZ; a store build: FIZZ) (rfms_scan finds
+//   the core     a core from the app bundle's slot frameworks (ChoralRoot, Felucca, Melodee, FIZZ, Saadet; a store build: FIZZ, Saadet) (rfms_scan finds
 //                <appex>/../../Frameworks); loaded and booted off the render thread (the caller's, under `ctl`),
 //                the clock handed over explicitly: the render callback while render resources are allocated
 //                (RFME_CLOCK_AUDIO), the engine's timer otherwise (the panel keeps working, no sound). A core this

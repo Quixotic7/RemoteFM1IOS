@@ -6,7 +6,7 @@
 # take a screenshot, print the summary; shut the simulator down again if this script booted it.
 #
 #   scripts/sim_coretest.sh [UDID] [core ...]     (default: RFM iPhone 17, CEB2B846-...;
-#                                                  choralroot felucca melodee fizz)
+#                                                  choralroot felucca melodee fizz saadet)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-coretest); NOBUILD=1 reuses the last build
 #
 # The app's link is the in-process fake unit: nothing touches CoreMIDI or a real FM-1.
@@ -18,7 +18,7 @@ UDID=${1:-}
 [ $# -gt 0 ] && shift
 UDID=${UDID:-CEB2B846-457C-4A33-AA1A-A287D30CDE2F}   # (RFM iPhone 17, this project's own simulator)
 CORES=("$@")
-[ ${#CORES[@]} -gt 0 ] || CORES=(choralroot felucca melodee fizz)
+[ ${#CORES[@]} -gt 0 ] || CORES=(choralroot felucca melodee fizz saadet)
 OUT=${OUT:-${TMPDIR:-/tmp}/remotefm1-coretest}
 DD=$OUT/dd
 RES=$OUT/$UDID

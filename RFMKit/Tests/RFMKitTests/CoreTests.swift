@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// M3 on the Mac: the four cores (ChoralRoot, Felucca, Melodee, FIZZ) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
+// M3 on the Mac: the five cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
 // scripts/build_cores.sh macos (build/cores/macos/frameworks, or RFM_CORES_DIR). Skipped, saying so, when they are
 // not built. The engine runs on the test's thread (RFME_CLOCK_CALLER); the only link is libremotefm1's fake unit.
 
@@ -61,8 +61,8 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "melodee", "fizz"]
-    static let licences = ["fizz": "MPL-2.0"]    // (the others: GPL-3.0-only)
+    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet"]
+    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0"]    // (the others: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
     static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC)]
     static let keyD4 = 9                // (conformance: the note key D4; key 0 is F3)
@@ -116,7 +116,9 @@ final class CoreTests: XCTestCase {
             let h0 = c.lcd
             XCTAssertEqual(s0.dev_ms, 2999, id)
             XCTAssertGreaterThan(s0.lcd_writes, 0, id)
-            XCTAssertNotEqual(h0, blank, "\(id): the LCD never changed")
+            if h0 == blank {        // (Saadet draws its whole screen at power-on, before the first device ms)
+                XCTAssertGreaterThan(Self.colours(c), 8, "\(id): the LCD never changed and is (nearly) one colour")
+            }
             if let b = Self.keyPrelude[id] {
                 c.button(b, true)
                 c.run(60)
@@ -179,6 +181,95 @@ final class CoreTests: XCTestCase {
                      colours.count, peak, rms, c.status.keys_pressed))
         XCTAssertGreaterThan(peak, 64, "FIZZ's demo pattern is silent after PLAY")
         XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// Saadet: its descriptor (MPL-2.0, the source at its commit, its authors, the vendors' sound data named); its
+    /// screen draws (the default part's page)
+    func testSaadet() throws {
+        var i = rfms_info_t()
+        XCTAssertEqual(rfms_find("saadet", &i), 1)
+        XCTAssertEqual(RemoteController.string(i.name), "Saadet")
+        XCTAssertEqual(RemoteController.string(i.version), "0.1.1")
+        XCTAssertEqual(RemoteController.string(i.family), "fm1base")
+        let url = RemoteController.string(i.source_url)
+        XCTAssertTrue(url.hasPrefix("https://github.com/keremimo/saadet@") && url.count == 35 + 40, url)
+        let credits = CorePlayer.credits("saadet")
+        for s in ["Kerem Kilic", "Leo Kuroshita", "Charles Vestal", "MSFA", "DaisySP", "uPD933", "Archivo",
+                  "Roland", "Sequential", "Casio", "no licence is granted", "Mozilla Public License Version 2.0",
+                  "Apache License", "SIL OPEN FONT LICENSE"] {
+            XCTAssertTrue(credits.contains(s), "saadet credits lack \(s)")
+        }
+        let c = try TestCore("saadet")
+        c.boot()
+        c.run(1500)
+        XCTAssertGreaterThan(Self.colours(c), 8, "Saadet's screen is (nearly) one colour")
+        XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// Saadet's store variant (build/cores/macos/frameworks-store): the same core id, its own version and credits;
+    /// none of the Roland, Sequential and Casio factory data in its binary (a patch name of each named bank and the
+    /// packed CZ-1 and Prophet data as Saadet's generators wrote them, all of which the full build's binary has);
+    /// it boots, draws and a held key sounds
+    func testSaadetStoreVariant() throws {
+        let storeDir = (Self.coresDir as NSString).deletingLastPathComponent + "/frameworks-store"
+        let bin = { (dir: String) in try Data(contentsOf: URL(fileURLWithPath: dir + "/FM1Core_saadet_1.framework/FM1Core_saadet_1")) }
+        guard FileManager.default.fileExists(atPath: storeDir) else { throw XCTSkip("no \(storeDir)") }
+        let gen = (Self.coresDir as NSString).deletingLastPathComponent + "/../src/cores/saadet/build/gen/"
+        let p5 = try Self.cArray(gen + "melodee_prophet_factory.h", "P5_FPACK", 48)
+        let cz = try Self.cArray(gen + "melodee_cz1.h", "CZ_LZ", 48)
+        let markers: [(String, Data)] = [("JUNO-106 BRASS SWELL", Data("BRASS SWELL".utf8)),
+                                         ("JUNO-106 STRINGS III", Data("STRINGS III".utf8)),
+                                         ("CZ-1 FUNKY CLAV 1", Data("FUNKY CLAV 1".utf8)),
+                                         ("Prophet P5_FPACK", Data(p5)), ("CZ-1 CZ_LZ", Data(cz))]
+        let full = try bin(Self.coresDir), store = try bin(storeDir)
+        for (what, m) in markers {
+            XCTAssertNotNil(full.range(of: m), "the full build lacks \(what): the check finds nothing")
+            XCTAssertNil(store.range(of: m), "the store variant has \(what)")
+        }
+
+        XCTAssertEqual(rfms_scan(storeDir), 1, Self.text(rfms_errors))
+        defer { rfms_scan(Self.coresDir) }
+        var i = rfms_info_t()
+        XCTAssertEqual(rfms_find("saadet", &i), 1)
+        XCTAssertEqual(RemoteController.string(i.version), "0.1.1-store")
+        XCTAssertEqual(RemoteController.string(i.license), "MPL-2.0")
+        let credits = CorePlayer.credits("saadet")
+        XCTAssertTrue(credits.contains("Kerem Kilic"))
+        for s in ["Roland", "Sequential", "Casio", "Juno", "Prophet-5"] {
+            XCTAssertFalse(credits.contains(s), "the store variant's credits name \(s)")
+        }
+        let c = try TestCore("saadet")
+        c.boot()
+        c.run(1500)
+        XCTAssertGreaterThan(Self.colours(c), 8)
+        c.key(Self.keyD4, true)
+        let a = c.run(500)
+        c.key(Self.keyD4, false)
+        print(String(format: "core saadet (store): key rms %.5f peak %d, binary %d B (full %d B)", a.rms, a.peak,
+                     store.count, full.count))
+        XCTAssertGreaterThan(a.peak, 64, "the store variant's held D4 is silent")
+        XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// the colours on a core's screen
+    static func colours(_ c: TestCore) -> Int {
+        var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
+        _ = rgba.withUnsafeMutableBufferPointer { rfme_preview(c.e, 0, $0.baseAddress) }
+        var set = Set<UInt32>()
+        for p in stride(from: 0, to: rgba.count, by: 4) {
+            set.insert(UInt32(rgba[p]) << 16 | UInt32(rgba[p + 1]) << 8 | UInt32(rgba[p + 2]))
+        }
+        return set.count
+    }
+
+    /// the first n bytes of a generated header's `NAME[...] = { ... }` array
+    static func cArray(_ path: String, _ name: String, _ n: Int) throws -> [UInt8] {
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        guard let r = text.range(of: name + "["), let open = text[r.upperBound...].firstIndex(of: "{") else {
+            throw NSError(domain: "gen", code: 1, userInfo: [NSLocalizedDescriptionKey: "no \(name) in \(path)"])
+        }
+        let nums = text[text.index(after: open)...].split(whereSeparator: { ",} \n".contains($0) }).prefix(n)
+        return nums.compactMap { UInt8($0) }
     }
 
     /// the default core: the preferred one if this build has it, else the first in CorePlayer.order (a store build
