@@ -4,3 +4,6 @@
 [submodule "vendor/FIZZ"]
 	path = vendor/FIZZ
 	url = https://github.com/Quixotic7/FIZZ.git
+[submodule "vendor/saadet"]
+	path = vendor/saadet
+	url = https://github.com/keremimo/saadet.git
