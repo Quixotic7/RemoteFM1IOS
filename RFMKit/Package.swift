@@ -8,6 +8,7 @@ import PackageDescription
 
 let rfm = "remote/RemoteFM1"            // inside vendor/FM1VST
 let vendorRFM = "../../vendor/FM1VST/remote/RemoteFM1"   // the same, from Sources/RFMCore
+let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
 
 let package = Package(
     name: "RFMKit",
@@ -44,18 +45,21 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("CoreMIDI"), .linkedFramework("CoreFoundation")]
         ),
-        // RemoteLink (session thread, event queue, triple buffer), fm1remote's patterns, and the C API for Swift
+        // RemoteLink (session thread, event queue, triple buffer), fm1remote's patterns, and the C API for Swift.
+        // M3: the slot loader and the core engine (FM1VST's engine/device.cpp in place, FM1Device.cpp; core-api/)
         .target(
             name: "RFMCore",
             dependencies: ["CRemoteFM1"],
             cxxSettings: [
+                .headerSearchPath("\(vendorFM1)/engine"),
+                .headerSearchPath("\(vendorFM1)/core-api"),
                 .headerSearchPath("\(vendorRFM)/host/include"),
                 .headerSearchPath("\(vendorRFM)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
                 .headerSearchPath("\(vendorRFM)/host/src/macos"),      // mac_priv.h (RFMProbe: cm_scan)
                 .define("FM1_REMOTE_NO_BULK", to: "1"),
             ],
-            linkerSettings: [.linkedFramework("AudioToolbox")]
+            linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("AVFoundation")]
         ),
         .target(name: "RFMKit", dependencies: ["RFMCore"]),
         .testTarget(name: "RFMKitTests", dependencies: ["RFMKit"]),

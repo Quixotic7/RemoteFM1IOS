@@ -35,7 +35,7 @@ public final class RemoteController {
     public static let maxEvents = 12
     static let notFoundAfter: TimeInterval = 3
 
-    @ObservationIgnored private nonisolated(unsafe) var core: OpaquePointer?
+    @ObservationIgnored nonisolated(unsafe) var core: OpaquePointer?     // (rfmc_t; CorePlayer runs its engine on it)
     @ObservationIgnored private var lastSeq: UInt32 = 0
     @ObservationIgnored private var previewSeq: UInt32 = 0
     @ObservationIgnored private var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))

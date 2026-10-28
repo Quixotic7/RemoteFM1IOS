@@ -1,9 +1,10 @@
 # RemoteFM1 for iOS (plan)
 
-Status (2026-10-27): M0 done; M1 built; M2's simulator part done (README.md says how to build and test). On the
-simulator, with the fake unit, the app connects, sends the test pattern and shows panel events; the AUv3 extension
-loads, renders silence and answers section 5's checks that the simulator can. Not yet tried on the iPhone with the
-real "FM-1 7938" (M1's test and M2's device part). Owner's decisions in section 7.
+Status (2026-10-27): M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
+On the simulator, with the fake unit: the app sends the test pattern and shows panel events; the AUv3 extension
+loads, renders silence and answers section 5's checks that the simulator can; ChoralRoot, Felucca and Melodee run in
+the standalone app with the fake unit as their panel, and make sound. Nothing yet on the iPhone or the real
+"FM-1 7938" (M1's test, M2's and M3's device parts). Owner's decisions in section 7.
 
 An iPhone/iPad host for FM-1 firmware cores, with a real FM-1 running RemoteFM1 firmware 0.2.2 as the panel: keys,
 buttons, encoders and MASTER come in; the firmware's 240×240 screen and LEDs go out; sound plays on the iOS device.
@@ -52,8 +53,17 @@ process. Slots that are never loaded cost nothing at run time. A fifth ChoralRoo
 ChoralRoot per host". Every instance of our AUv3 in one host app runs in the same extension process (seen in M2 on
 the simulator: two instances, one pid; to confirm in AUM and GarageBand), so slots are per host app.
 
-Size measured on macOS: `choralroot.fm1core` is 0.8 MB on disk, 2.6 MB of data (mostly zero-filled) when loaded,
-plus the 1 MiB flash image. The extension's memory limit is lower than the app's: measure it on the device in M2.
+Measured in M3 (iOS simulator): a slot is 1.0–1.2 MB on disk, so 4 slots of the 3 cores add 13 MB to the app (about
+120 MB if all ~30 cores shipped this way). A booted slot adds 2.5 MB (ChoralRoot, Felucca) to 3.2 MB (Melodee) of
+memory. `dlclose` really unloads a slot on macOS and the simulator, so a slot is reusable after a firmware reboot
+(the loader retires a slot whose image stays mapped). The extension's memory limit can only be measured on a device.
+
+How the cores are built: `cores/CMakeLists.txt` uses FM1VST's `FM1Cores.cmake` and the cores' glue as they are, and
+links each core's objects into a framework exporting only `fm1core_get`. The cores' generate steps write into the
+firmware tree, so `scripts/build_cores.sh` builds from a copy under `build/cores/src`, never in vendor/. The only
+iOS change a core needed: ChoralRoot's debug profiler includes `<libproc.h>`, which iOS lacks; `cores/ios/libproc.h`
+stands in for it (the profiler then reads 0, as on any non-Apple host). FM1VST's conformance test passes on our
+macOS builds of the three cores.
 
 ## 4. AUv3: sharing one FM-1 between instances
 
@@ -112,7 +122,8 @@ probes run on the iPhone from the app's "AU test" button.
 | Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) runs there too, as in FM1VST. 44.1 kHz resampled to the session rate | C++ kernel renders silence, takes host MIDI; a std::thread in the extension keeps running while it renders | timing under load |
 | Memory | measured with 1, 4 and 8 instances | `os_proc_available_memory` is 0 (no limit on the simulator); footprint ~23 MB | the real limit: device only |
 | State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does | instance UUID and format version survive save and restore into a new instance (keys `rfm1.instance`, `rfm1.format`) | (the rest comes with M3/M4) |
-| Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background | key added; the session activates | behaviour in the background |
+| Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background | key added; the session activates | behaviour in the background; the save-on-background path (not run headless) |
+| Cores on the render thread (M3) | the core runs in the AVAudioSourceNode's callback; with sound off, on a timer thread | 48 kHz, 512-frame renders: average 90–190 µs (1–2 % of the buffer), one early peak of 3.3 ms on the iPhone simulator; sound after the fake unit's key presses on all three cores | timing on the iPhone 13 Pro Max; Melodee's `swapcontext` (deprecated API) on a device; a team-signed build loading the slot frameworks |
 
 ## 6. Milestones
 
@@ -124,7 +135,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M0 | Skeleton: Xcode project (app, AUv3 extension, `RFMKit`), FM1VST submodule, libremotefm1 + CoreMIDI back end built for iOS | headless simulator build passes; libremotefm1's own tests pass on the Mac |
 | M1 | Standalone: Bluetooth sheet, find the FM-1 by HELLO, session, test pattern; HELLO_R fields and link stats on screen. The fake unit for the simulator | on the owner's iPhone: the pattern moves on the FM-1, its keys light their LEDs on the pattern screen |
 | M2 | AUv3 test run (no core yet): the extension loads in AUM; CoreMIDI from the extension; Bluetooth sheet inside it; App Group with the team; memory limit; the Bluetooth link after the app closes | each row of section 5 answered and written here; fallback chosen if needed. Simulator part done; device part waits for the iPhone |
-| M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings |
+| M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings. Simulator part done (fake unit, all three cores); device part waits for the iPhone |
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship |
@@ -181,6 +192,8 @@ So:
 - Bluetooth only on the iPhone: about 35 KB/s with 0.2.2, so a page change takes a moment, shown whole (HOLD).
 - The lease relies on every instance behaving; a crashed owner is only detected through its stale heartbeat (3 s).
 - Slots cap instances per core per host (4 proposed).
-- Cross-compiling ~30 cores: their generate steps need Python with Pillow on the build Mac, and some glue may assume
-  macOS. Each core gets its conformance test on iOS before it ships.
+- Cross-compiling ~30 cores: their generate steps need Python with Pillow and fontTools on the build Mac, and some
+  glue may assume macOS (so far only ChoralRoot's `<libproc.h>`). Each core gets its conformance test before it
+  ships.
+- App size: 4 identical slots per core cost 4× on disk.
 - The App Store build depends on other authors' permission; without it, only amb can ship there.

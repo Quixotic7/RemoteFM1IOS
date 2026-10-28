@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 RemoteFM1 contributors
+// RFMEngine (M3): FM-1 firmware cores on iOS.
+//
+// SLOTS (rfms_*): each core is in the bundle as FM1Core_<id>_1 .. _4.framework, the same code with its own install
+// name (PLAN.md section 3). A core's state is its image's globals, so each instance takes a slot nobody in this
+// process holds, and gives it back by unloading it. The registry is process-wide and thread-safe (not for the audio
+// thread). A slot whose image did not leave memory on unload is retired for the rest of the process (its globals are
+// the old instance's).
+//
+// THE ENGINE (rfme_*): one loaded core run by FM1VST's Device on ONE clock thread at a time (core-api/fm1core.h's
+// threading contract): the audio callback (RFME_CLOCK_AUDIO), the engine's own timer thread when there is no audio
+// (RFME_CLOCK_TIMER, the sound dropped), or the caller (RFME_CLOCK_CALLER, tests). fm1remote's design
+// (RemoteFM1 host/tools/fm1remote/engine.h) with FM1VST's panel mapping (plugin/Processor.cpp):
+//   panel -> core   the FM-1's events (RemoteLink's queue) and rfme_event's, applied in Device's between hook, in order
+//   core -> FM-1    the LCD, the LEDs (as RemoteFM1's planes) and PLAY green, into RemoteLink's triple buffer and the
+//                   engine's preview at most every 50 device ms and only when they changed
+//   core -> files   the flash image copied by the clock every 30 device s when flash_dirty moved, or when asked; the
+//                   caller writes it (never on the audio thread)
+// Load, boot, unload and power cycle run on one control thread (the main thread) with the clock stopped
+// (rfme_set_clock(NONE) waits until the clock is out). Nothing in rfme_render allocates or locks.
+#ifndef RFMENGINE_H
+#define RFMENGINE_H
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ---- slots
+typedef struct {
+    char id[32], name[64], version[48], family[32], license[48], gated[96];
+    char source_url[256];
+    uint32_t abi, flash_size;
+    int slots;                  // FM1Core_<id>_<n>.framework found
+    int in_use, retired;        // slots held now; slots retired (their image stayed loaded)
+} rfms_info_t;
+// finds the slots in dir, or (NULL / "") in the main bundle's Frameworks, and from inside an app extension also the
+// containing app's (<appex>/../../Frameworks); probes each core's descriptor (ABI 5..6). Returns how many cores.
+// A core with a slot in use keeps its registry entry.
+int rfms_scan(const char *dir);
+int rfms_count(void);
+int rfms_info(int i, rfms_info_t *out);             // 1: filled
+int rfms_find(const char *id, rfms_info_t *out);    // 1: found
+// the core's credits (fm1core_credits: NULL for ABI 5): copied into buf (n bytes, NUL-terminated); returns the full
+// length (0: none)
+uint32_t rfms_credits(const char *id, char *buf, uint32_t n);
+// where the slots were found (the last scan's directories, "; "-separated) and the scan's problems ("" none)
+uint32_t rfms_dirs(char *buf, uint32_t n);
+uint32_t rfms_errors(char *buf, uint32_t n);
+
+// ---- the engine
+typedef struct rfmc rfmc_t;
+typedef struct rfme rfme_t;
+enum { RFME_CLOCK_NONE = 0, RFME_CLOCK_AUDIO, RFME_CLOCK_TIMER, RFME_CLOCK_CALLER };
+// button labels and knob roles, as fm1core.h's FM1P_B_* / FM1P_E_* (for rfme_matrix_button / _encoder)
+enum { RFME_B_FX, RFME_B_SEL, RFME_B_ENV, RFME_B_LFO, RFME_B_EDIT, RFME_B_GLO, RFME_B_HOME, RFME_B_SAVE, RFME_B_ARP,
+       RFME_B_SEQ, RFME_B_PLAY, RFME_B_REC, RFME_B_OCTDN, RFME_B_OCTUP };
+enum { RFME_E_SELECT, RFME_E_ALGO, RFME_E_PRESETS, RFME_E_K1, RFME_E_K2, RFME_E_K3, RFME_E_K4 };
+
+// link: the FM-1 (RFMCore's rfmc_t) whose panel this engine plays and shows on while attached, or NULL (headless)
+rfme_t *rfme_new(rfmc_t *link);
+void rfme_free(rfme_t *e);      // the clock stopped, detached, the core shut down and its slot released
+
+// control thread, any clock (each stops the clock while it works, then gives it back)
+int rfme_load(rfme_t *e, const char *core_id, char *err, uint32_t n);   // a free slot of the core; 0: failed (err)
+int rfme_boot(rfme_t *e, const uint8_t *flash, uint32_t n);             // power-on from the image (NULL / 0: fresh)
+void rfme_unload(rfme_t *e);                                             // shutdown(), the slot released
+// a firmware reboot (halted()): the image kept (flash_sync, copied), the slot reloaded, booted from the image, which is
+// also offered to rfme_take_flash for saving. 0: failed (err)
+int rfme_power_cycle(rfme_t *e, char *err, uint32_t n);
+// attached: the engine takes the link's panel events and publishes to it; the link's own producer (the test pattern)
+// stands aside (rfmc_set_external)
+void rfme_attach(rfme_t *e, int on);
+
+// who runs the clock; waits until the previous owner has left it
+void rfme_set_clock(rfme_t *e, int owner);
+int rfme_clock(rfme_t *e);
+
+// RFME_CLOCK_AUDIO: n frames at `rate` into L and R (silence while not booted or not the owner). Real-time safe.
+void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate);
+// RFME_CLOCK_CALLER (tests): `ms` device milliseconds on this thread; the sound measured, then dropped
+typedef struct {
+    uint64_t frames;
+    double rms;                 // over both channels, full scale 1.0
+    int32_t peak;               // the largest |sample| (int16)
+} rfme_audio_t;
+void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out);
+
+// a panel event as the FM-1 sends it (RFMC_EV_KEY / BUTTON / ENC / MASTER, matrix ids; any thread but the clock's,
+// one producer), applied in the clock's between hook like the unit's. 0: the queue is full
+int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value);
+int rfme_matrix_button(rfme_t *e, int label);   // the matrix id of a label (after boot), -1
+int rfme_matrix_encoder(rfme_t *e, int role);   // the matrix encoder of a knob role (after boot), -1
+
+typedef struct {
+    int loaded, booted, halted, clock, attached;
+    uint32_t halt_code;         // halted(): 0x100 | exit code
+    int slot;                   // 1..4, 0 none
+    char core_id[32];
+    uint32_t dev_ms, lcd_writes, snapshots, events_applied, events_dropped, keys_pressed, midi_out;
+    uint32_t shed, cpu_pct, have_stats;   // the core's stats(), read every 500 device ms
+    uint64_t renders, render_frames;
+    uint32_t render_last_us, render_avg_us, render_max_us, render_last_frames;   // rfme_render's own time
+    double rate;                // the last render's rate
+    uint32_t flash_size, flash_dirty, flash_copies;
+} rfme_status_t;
+void rfme_status(rfme_t *e, rfme_status_t *st);
+void rfme_reset_render_stats(rfme_t *e);
+// the LCD last published (any thread but the clock's): if its number differs from `have`, copied as RGBA8888
+// (240 x 240 x 4) into rgba; returns its number (0: none yet)
+uint32_t rfme_preview(rfme_t *e, uint32_t have, uint8_t *rgba);
+// (RFME_CLOCK_CALLER or NONE) FNV-1a of the core's LCD as it is now
+uint32_t rfme_lcd_hash(rfme_t *e);
+
+// ---- the flash image
+uint32_t rfme_flash_size(rfme_t *e);
+// a copy the clock made (every 30 device s when dirty, after rfme_request_flash, or a power cycle's); 1: one was
+// ready and is now in out (n >= flash size)
+int rfme_take_flash(rfme_t *e, uint8_t *out, uint32_t n);
+// asks the clock for flash_sync and a copy at its next between hook (then rfme_take_flash)
+void rfme_request_flash(rfme_t *e);
+// stops the clock, flash_sync, the image now into out, the clock given back; 1: ok
+int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n);
+
+// ---- the parameter map (RFME_CLOCK_CALLER or NONE: tests)
+int rfme_param_get(rfme_t *e, const char *name, int32_t *value);    // 1: found
+int rfme_param_set(rfme_t *e, const char *name, int32_t value);
+// the first FM1P_PERSIST entry: its name, range and value; 0: none
+int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t *max, int32_t *value);
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __OBJC__
+#import <AVFoundation/AVFoundation.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+// an AVAudioSourceNode whose render block calls rfme_render (format: deinterleaved float, 1 or 2 channels); e must
+// outlive the node's use
+AVAudioSourceNode *rfme_source_node(rfme_t *e, AVAudioFormat *format);
+#ifdef __cplusplus
+}
+#endif
+#endif
+#endif

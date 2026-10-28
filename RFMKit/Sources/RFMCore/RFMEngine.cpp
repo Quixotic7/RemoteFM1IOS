@@ -1,0 +1,708 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 RemoteFM1 contributors
+// The core engine (include/RFMEngine.h). Adapted from RemoteFM1 v0.2.2's host/tools/fm1remote/engine.cpp (Engine:
+// the between hook, the publish at most every frame period and only on change, the flash copy every 30 device s and
+// final_flash, the timer clock). Changed: ABI 6's fm1panel_t instead of emu_hal_t, with FM1VST v0.6.2's
+// plugin/Processor.cpp mapping (applyRemote: buttons by label, encoders by role with enc_dir undone, velocity 100 for
+// the unit's keys; remoteLeds: each LED in the plane of its fm1p_led_class, PLAY green); slots instead of
+// CoreLoader's copies; the clock owned by one of audio / timer / caller at a time (rfme_set_clock); the preview
+// for the app; flash on request; the core's stats() and the render's own time.
+#include "RFMEngine.h"
+
+#include <mach/mach_time.h>
+
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "RFMInternal.h"
+#include "RFMSlots.h"
+#include "RemoteLink.h"
+#include "device.h"
+
+static_assert(RFME_B_OCTUP == FM1P_B_OCTUP && RFME_B_SAVE == FM1P_B_SAVE && RFME_E_K4 == FM1P_E_K4, "labels");
+static_assert(RFMC_EV_KEY == RFM_EV_KEY && RFMC_EV_BUTTON == RFM_EV_BUTTON && RFMC_EV_ENC == RFM_EV_ENC &&
+                  RFMC_EV_MASTER == RFM_EV_MASTER && RFMC_EV_RELEASE == RemoteLink::kEvRelease,
+              "event types");
+static_assert(sizeof(RemoteSnapshot::lcd) == sizeof(fm1panel_t::lcd), "the LCD layouts differ");
+
+namespace {
+
+constexpr uint32_t kPeriodMs = RemoteLink::kPeriodMs;   // the LCD and LEDs at most every 50 device ms (20 fps)
+constexpr uint32_t kFlashEveryMs = 30000;
+constexpr uint32_t kStatsEveryMs = 500;
+constexpr int kRemoteVel = 100;                          // RemoteFM1 sends no velocity (Processor.cpp kRemoteVel)
+
+struct Preview {
+    uint16_t lcd[FM1P_LCD_W * FM1P_LCD_H];
+    rfm_leds_t leds;
+    uint32_t seq = 0, devMs = 0;
+};
+
+double ticksToUs()
+{
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    return (double)tb.numer / (double)tb.denom / 1000.0;
+}
+
+// The panel's LED levels as RemoteFM1's LEDS planes (Processor.cpp remoteLeds)
+void remoteLeds(const fm1panel_t *h, rfm_leds_t &l)
+{
+    std::memset(&l, 0, sizeof l);
+    for (int c = 0; c < (int)RFM_NCOL && c < FM1P_NCOL; c++)
+        for (int r = 0; r < FM1P_NLINE; r++) {
+            const uint8_t bit = (uint8_t)(1u << (r + 1));
+            switch (fm1p_led_class(h->led[c][r])) {
+            case FM1P_LC_LIT: l.lit[c] |= bit; break;
+            case FM1P_LC_MID: l.mid[c] |= bit; break;
+            case FM1P_LC_DIM: l.dim[c] |= bit; break;
+            case FM1P_LC_FAINT: l.faint[c] |= bit; break;
+            default: break;
+            }
+        }
+    l.flags = fm1p_led_class(h->led_play_green) == FM1P_LC_LIT ? RFM_LEDS_F_PLAY_GREEN : 0;
+}
+
+void putErr(char *err, uint32_t n, const std::string &s)
+{
+    if (err && n) {
+        std::strncpy(err, s.c_str(), n - 1);
+        err[n - 1] = 0;
+    }
+}
+
+} // namespace
+
+struct rfme {
+    rfmc_t *owner = nullptr;            // the link's handle (NULL: headless)
+    RemoteLink *link = nullptr;
+
+    // the core (the control thread changes these only with the clock stopped)
+    rfm::SlotLoader::Slot *slot = nullptr;
+    std::unique_ptr<Device> dev;
+    bool booted = false;
+    std::vector<uint8_t> flashCopy;     // the clock's copy, handed over by flashReady
+
+    // the clock: exactly one owner runs it; inClock counts threads inside a clock entry
+    std::atomic<int> clock{RFME_CLOCK_NONE};
+    std::atomic<int> inClock{0};
+    std::atomic<bool> attached{false};
+
+    // the clock thread's own
+    uint32_t noteKeys = 0, labels = 0, matrixButtons = 0;
+    int32_t masterV = -1;
+    uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
+    rfm_leds_t lastLeds{};
+    bool pubValid = false, linkValid = false;
+    uint32_t lastFlashCheck = 0, savedDirty = 0, lastStats = 0;
+    rfm::Spsc<rfm_event_t, 1024> in;    // rfme_event -> the clock
+    rfm::Triple<Preview> preview;       // the clock -> rfme_preview
+
+    // read by anyone
+    std::atomic<bool> halted{false}, flashReady{false}, flashReq{false};
+    std::atomic<uint32_t> haltCode{0}, devMs{0}, lcdWrites{0}, snapshots{0}, applied{0}, dropped{0}, keysPressed{0};
+    std::atomic<uint32_t> midiOut{0}, shed{0}, cpuPct{0}, haveStats{0}, flashCopies{0}, flashDirty{0};
+    std::atomic<uint64_t> renders{0}, renderFrames{0}, renderTicks{0};
+    std::atomic<uint32_t> renderLastUs{0}, renderMaxUs{0}, renderLastFrames{0};
+    std::atomic<double> rate{0};
+    double usPerTick = ticksToUs();
+
+    // the timer clock
+    std::thread timer;
+    std::mutex tmu;
+    std::condition_variable tcv;
+    bool timerQuit = false;
+    std::atomic<bool> timerRebase{true};
+
+    // the main thread's view of the preview
+    uint32_t viewSeq = 0;
+
+    // ---- the clock's guard
+    struct Scope {
+        rfme *e;
+        bool ok;
+        Scope(rfme *x, int who) : e(x)
+        {
+            e->inClock.fetch_add(1, std::memory_order_seq_cst);
+            ok = e->clock.load(std::memory_order_seq_cst) == who && e->dev && e->booted;
+        }
+        ~Scope() { e->inClock.fetch_sub(1, std::memory_order_seq_cst); }
+    };
+
+    // the control thread: the clock stopped (the old owner out of it); returns the old owner
+    int stop()
+    {
+        const int prev = clock.exchange(RFME_CLOCK_NONE, std::memory_order_seq_cst);
+        while (inClock.load(std::memory_order_seq_cst) != 0)
+            std::this_thread::yield();
+        return prev;
+    }
+    void resume(int who)
+    {
+        if (who == RFME_CLOCK_TIMER) {
+            timerRebase.store(true);
+            startTimer();
+        }
+        clock.store(who, std::memory_order_seq_cst);
+        if (who == RFME_CLOCK_TIMER)
+            tcv.notify_all();
+    }
+
+    // ---- the between hook (the clock thread)
+    void apply(const rfm_event_t &e)
+    {
+        fm1panel_t *h = dev->panel();
+        switch (e.type) {
+        case RFM_EV_KEY:
+            if (e.index < FM1P_NKEY) {
+                const uint32_t bit = 1u << e.index;
+                if (e.value) {
+                    if (!(noteKeys & bit)) {
+                        dev->key_vel(e.index, kRemoteVel);   // (before the key goes down: panel->key_vel)
+                        keysPressed.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    noteKeys |= bit;
+                } else {
+                    noteKeys &= ~bit;
+                }
+                dev->keys(noteKeys);                         // (a key newly down also taps)
+            }
+            break;
+        case RFM_EV_BUTTON:
+            if (e.index < FM1P_NBTN) {
+                matrixButtons = e.value ? matrixButtons | 1u << e.index : matrixButtons & ~(1u << e.index);
+                int label = -1;                              // matrix id -> label (panel->btn_id)
+                for (int l = 0; l < FM1P_NB && label < 0; l++)
+                    if (h->btn_id[l] == e.index)
+                        label = l;
+                if (label >= 0) {
+                    labels = e.value ? labels | 1u << label : labels & ~(1u << label);
+                    dev->buttons(labels);
+                }
+            }
+            break;
+        case RFM_EV_ENC:
+            if (e.index < FM1P_NENC && e.value) {
+                int role = -1;                               // matrix encoder -> knob role (panel->enc_id)
+                for (int r = 0; r < FM1P_NE - 1 && role < 0; r++)
+                    if (h->enc_id[r] == e.index)
+                        role = r;
+                if (role >= 0)                               // (Device::enc multiplies by enc_dir: undone)
+                    dev->enc(role, e.value * (h->enc_dir[role] < 0 ? -1 : 1));
+                else
+                    h->enc[e.index] += e.value;
+            }
+            break;
+        case RFM_EV_MASTER:
+            masterV = e.value < 0 ? 0 : e.value > 1023 ? 1023 : e.value;
+            dev->master(masterV);
+            break;
+        case RemoteLink::kEvRelease:                         // the session ended: nothing is held any more
+            noteKeys = labels = matrixButtons = 0;
+            dev->keys(0);
+            dev->buttons(0);
+            break;
+        default:
+            return;
+        }
+        applied.fetch_add(1, std::memory_order_relaxed);
+        if (owner && attached.load(std::memory_order_relaxed)) {
+            rfmc_external_event(owner, e);
+            rfmc_external_panel(owner, noteKeys, matrixButtons, masterV);
+        }
+    }
+
+    void publish(uint32_t ms)
+    {
+        const fm1panel_t *h = dev->panel();
+        const bool engaged = link && attached.load(std::memory_order_relaxed) && link->engaged();
+        bool full = !pubValid;
+        if (!engaged)
+            linkValid = false;
+        else if (link->takeFullRequest() || !linkValid)
+            full = true;
+        if (!full && ms - lastPub < kPeriodMs)
+            return;
+        rfm_leds_t l;
+        remoteLeds(h, l);
+        const uint32_t writes = h->lcd_writes;
+        if (!full && writes == lastWrites && rfm_leds_equal(&l, &lastLeds))
+            return;
+        if (engaged) {
+            RemoteSnapshot &s = link->back();
+            std::memcpy(s.lcd, h->lcd, sizeof s.lcd);
+            s.leds = l;
+            s.seq = ++linkPubs;
+            link->publish();
+            linkValid = true;
+        }
+        Preview &p = preview.back();
+        std::memcpy(p.lcd, h->lcd, sizeof p.lcd);
+        p.leds = l;
+        p.seq = ++pubSeq;
+        p.devMs = ms;
+        preview.publish();
+        lastPub = ms;
+        lastWrites = writes;
+        lastLeds = l;
+        pubValid = true;
+        snapshots.fetch_add(1, std::memory_order_relaxed);
+        lcdWrites.store(writes, std::memory_order_relaxed);
+    }
+
+    void between(uint32_t ms, bool)
+    {
+        rfm_event_t ev;
+        if (link && attached.load(std::memory_order_relaxed))
+            while (link->popEvent(ev))
+                apply(ev);
+        while (in.pop(ev))
+            apply(ev);
+        devMs.store(ms, std::memory_order_relaxed);
+        for (uint32_t pkt; dev->midi_out_take(&pkt);)      // (no MIDI out in M3: counted and dropped)
+            midiOut.fetch_add(1, std::memory_order_relaxed);
+        if (!halted.load(std::memory_order_relaxed) && dev->halted()) {
+            haltCode.store((uint32_t)dev->core()->halted(), std::memory_order_relaxed);
+            halted.store(true, std::memory_order_release);
+        }
+        if (ms - lastStats >= kStatsEveryMs) {
+            lastStats = ms;
+            if (dev->core()->stats) {
+                uint32_t s = 0, c = 0;
+                dev->core()->stats(&s, &c);
+                shed.store(s, std::memory_order_relaxed);
+                cpuPct.store(c, std::memory_order_relaxed);
+                haveStats.store(1, std::memory_order_relaxed);
+            }
+            flashDirty.store(dev->flash_dirty(), std::memory_order_relaxed);
+        }
+        publish(ms);
+        // the flash (fm1remote: every 30 device s when flash_dirty moved; here also when asked, flash_sync first)
+        if (!flashCopy.empty() && dev->flash() && !flashReady.load(std::memory_order_acquire)) {
+            if (flashReq.load(std::memory_order_acquire)) {
+                flashReq.store(false, std::memory_order_relaxed);
+                dev->flash_sync();
+                copyFlash();
+            } else if (ms - lastFlashCheck >= kFlashEveryMs) {
+                lastFlashCheck = ms;
+                if (dev->flash_dirty() != savedDirty)
+                    copyFlash();
+            }
+        }
+    }
+
+    void copyFlash()
+    {
+        std::memcpy(flashCopy.data(), dev->flash(), flashCopy.size());
+        savedDirty = dev->flash_dirty();
+        flashCopies.fetch_add(1, std::memory_order_relaxed);
+        flashReady.store(true, std::memory_order_release);
+    }
+
+    // ---- the timer clock (no audio: the device runs by the wall clock, its sound dropped)
+    void startTimer()
+    {
+        if (timer.joinable())
+            return;
+        timer = std::thread([this] {
+            using clk = std::chrono::steady_clock;
+            clk::time_point t0 = clk::now();
+            uint32_t ms0 = 0;
+            for (;;) {
+                {
+                    std::unique_lock<std::mutex> l(tmu);
+                    if (timerQuit)
+                        return;
+                    if (clock.load() != RFME_CLOCK_TIMER)
+                        tcv.wait_for(l, std::chrono::milliseconds(50));
+                }
+                {
+                    Scope cs(this, RFME_CLOCK_TIMER);
+                    if (cs.ok) {
+                        if (timerRebase.exchange(false)) {
+                            t0 = clk::now();
+                            ms0 = dev->ms();
+                        }
+                        const uint32_t target =
+                            ms0 + (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
+                        for (int k = 0; k < 200 && (int32_t)(target - dev->ms()) > 0; k++)
+                            dev->run_ms();
+                        if ((int32_t)(target - dev->ms()) > 200)    // (far behind: start counting again from here)
+                            timerRebase.store(true);
+                        dev->discard();
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+        });
+    }
+
+    // ---- the control thread, the clock stopped
+    void unloadStopped()
+    {
+        dev.reset();
+        booted = false;
+        halted.store(false);
+        haltCode.store(0);
+        if (slot)
+            rfm::SlotLoader::shared().release(slot);   // (shutdown(), dlclose)
+        slot = nullptr;
+    }
+
+    void bootStopped(const uint8_t *bytes, uint32_t n)
+    {
+        dev->boot_from(bytes && n ? bytes : nullptr, bytes ? n : 0);
+        noteKeys = labels = matrixButtons = 0;
+        masterV = -1;
+        pubValid = linkValid = false;
+        lastPub = lastFlashCheck = lastStats = 0;
+        flashCopy.assign(dev->flash_size(), 0);
+        savedDirty = dev->flash_dirty();
+        halted.store(false);
+        haltCode.store(0);
+        dev->set_between([this](uint32_t ms, bool frame) { between(ms, frame); });
+        booted = true;
+        if (link)
+            link->invalidateScreen();                   // (a new device: the unit's screen resent whole)
+    }
+};
+
+extern "C" {
+
+rfme_t *rfme_new(rfmc_t *link)
+{
+    auto *e = new rfme;
+    e->owner = link;
+    e->link = link ? rfmc_link(link) : nullptr;
+    return e;
+}
+
+void rfme_free(rfme_t *e)
+{
+    if (!e)
+        return;
+    e->stop();
+    if (e->attached.exchange(false) && e->owner)
+        rfmc_set_external(e->owner, 0);
+    {
+        std::lock_guard<std::mutex> l(e->tmu);
+        e->timerQuit = true;
+    }
+    e->tcv.notify_all();
+    if (e->timer.joinable())
+        e->timer.join();
+    e->unloadStopped();
+    delete e;
+}
+
+int rfme_load(rfme_t *e, const char *core_id, char *err, uint32_t n)
+{
+    const int prev = e->stop();
+    e->unloadStopped();
+    std::string msg;
+    e->slot = rfm::SlotLoader::shared().acquire(core_id ? core_id : "", &msg);
+    if (!e->slot) {
+        putErr(err, n, msg);
+        e->resume(prev);
+        return 0;
+    }
+    e->dev = std::make_unique<Device>(e->slot->core);
+    e->resume(prev);
+    return 1;
+}
+
+int rfme_boot(rfme_t *e, const uint8_t *flash, uint32_t n)
+{
+    if (!e->dev || e->booted)
+        return 0;
+    const int prev = e->stop();
+    e->bootStopped(flash, n);
+    e->resume(prev);
+    return 1;
+}
+
+void rfme_unload(rfme_t *e)
+{
+    const int prev = e->stop();
+    e->unloadStopped();
+    e->resume(prev);
+}
+
+int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
+{
+    if (!e->slot) {
+        putErr(err, n, "no core loaded");
+        return 0;
+    }
+    const int prev = e->stop();
+    std::vector<uint8_t> image;
+    if (e->booted && e->dev->flash()) {             // (FM1VST powerCycleLocked: the current flash, synced)
+        e->dev->flash_sync();
+        image.assign(e->dev->flash(), e->dev->flash() + e->dev->flash_size());
+    }
+    const std::string id = e->slot->id;
+    e->unloadStopped();
+    std::string msg;
+    e->slot = rfm::SlotLoader::shared().acquire(id, &msg);
+    if (!e->slot) {
+        putErr(err, n, msg);
+        e->resume(prev);
+        return 0;
+    }
+    e->dev = std::make_unique<Device>(e->slot->core);
+    e->bootStopped(image.empty() ? nullptr : image.data(), (uint32_t)image.size());
+    if (!image.empty() && image.size() == e->flashCopy.size()) {   // (offered for saving)
+        std::memcpy(e->flashCopy.data(), image.data(), image.size());
+        e->flashReady.store(true, std::memory_order_release);
+    }
+    e->resume(prev);
+    return 1;
+}
+
+void rfme_attach(rfme_t *e, int on)
+{
+    const int prev = e->stop();
+    if (e->attached.exchange(on != 0) != (on != 0) && e->owner) {
+        if (!on && e->booted) {                         // (what the unit held lets go)
+            e->noteKeys = e->labels = e->matrixButtons = 0;
+            e->dev->keys(0);
+            e->dev->buttons(0);
+        }
+        e->linkValid = false;
+        rfmc_set_external(e->owner, on);
+    }
+    e->resume(prev);
+}
+
+void rfme_set_clock(rfme_t *e, int owner)
+{
+    e->stop();
+    e->resume(owner);
+}
+
+int rfme_clock(rfme_t *e) { return e->clock.load(); }
+
+void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate)
+{
+    const uint64_t t0 = mach_absolute_time();
+    {
+        rfme::Scope cs(e, RFME_CLOCK_AUDIO);
+        if (cs.ok) {
+            e->dev->render(L, R, n, rate);
+        } else {
+            std::memset(L, 0, n * sizeof *L);
+            if (R && R != L)
+                std::memset(R, 0, n * sizeof *R);
+        }
+    }
+    const uint64_t dt = mach_absolute_time() - t0;
+    const uint32_t us = (uint32_t)((double)dt * e->usPerTick);
+    e->renders.fetch_add(1, std::memory_order_relaxed);
+    e->renderFrames.fetch_add(n, std::memory_order_relaxed);
+    e->renderTicks.fetch_add(dt, std::memory_order_relaxed);
+    e->renderLastUs.store(us, std::memory_order_relaxed);
+    e->renderLastFrames.store(n, std::memory_order_relaxed);
+    if (us > e->renderMaxUs.load(std::memory_order_relaxed))
+        e->renderMaxUs.store(us, std::memory_order_relaxed);
+    e->rate.store(rate, std::memory_order_relaxed);
+}
+
+void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
+{
+    rfme_audio_t a{};
+    double sum = 0;
+    rfme::Scope cs(e, RFME_CLOCK_CALLER);
+    if (cs.ok) {
+        int16_t buf[2 * 256];
+        for (uint32_t i = 0; i < ms; i++) {
+            e->dev->run_ms();
+            for (uint32_t got; (got = e->dev->take_s16(buf, 256)) > 0;) {
+                for (uint32_t k = 0; k < 2 * got; k++) {
+                    const int32_t v = buf[k];
+                    sum += (double)v * v;
+                    const int32_t m = v < 0 ? -v : v;
+                    if (m > a.peak)
+                        a.peak = m;
+                }
+                a.frames += got;
+            }
+        }
+    }
+    a.rms = a.frames ? std::sqrt(sum / (2.0 * (double)a.frames)) / 32768.0 : 0.0;
+    if (out)
+        *out = a;
+}
+
+int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value)
+{
+    rfm_event_t ev{};
+    ev.type = type;
+    ev.index = index;
+    ev.value = value;
+    if (e->in.push(ev))
+        return 1;
+    e->dropped.fetch_add(1, std::memory_order_relaxed);
+    return 0;
+}
+
+int rfme_matrix_button(rfme_t *e, int label)
+{
+    return e->booted && label >= 0 && label < FM1P_NB ? e->dev->panel()->btn_id[label] : -1;
+}
+
+int rfme_matrix_encoder(rfme_t *e, int role)
+{
+    return e->booted && role >= 0 && role < FM1P_NE - 1 ? e->dev->panel()->enc_id[role] : -1;
+}
+
+void rfme_status(rfme_t *e, rfme_status_t *st)
+{
+    std::memset(st, 0, sizeof *st);
+    st->loaded = e->slot != nullptr;
+    st->booted = e->booted;
+    st->halted = e->halted.load();
+    st->halt_code = e->haltCode.load();
+    st->clock = e->clock.load();
+    st->attached = e->attached.load();
+    st->slot = e->slot ? e->slot->n : 0;
+    if (e->slot)
+        putErr(st->core_id, sizeof st->core_id, e->slot->id);
+    st->dev_ms = e->devMs.load();
+    st->lcd_writes = e->lcdWrites.load();
+    st->snapshots = e->snapshots.load();
+    st->events_applied = e->applied.load();
+    st->events_dropped = e->dropped.load();
+    st->keys_pressed = e->keysPressed.load();
+    st->midi_out = e->midiOut.load();
+    st->shed = e->shed.load();
+    st->cpu_pct = e->cpuPct.load();
+    st->have_stats = e->haveStats.load();
+    st->renders = e->renders.load();
+    st->render_frames = e->renderFrames.load();
+    st->render_last_us = e->renderLastUs.load();
+    st->render_max_us = e->renderMaxUs.load();
+    st->render_last_frames = e->renderLastFrames.load();
+    st->render_avg_us = st->renders ? (uint32_t)((double)e->renderTicks.load() * e->usPerTick / (double)st->renders) : 0;
+    st->rate = e->rate.load();
+    st->flash_size = e->dev ? e->dev->flash_size() : 0;
+    st->flash_dirty = e->flashDirty.load();
+    st->flash_copies = e->flashCopies.load();
+}
+
+void rfme_reset_render_stats(rfme_t *e)
+{
+    e->renders.store(0);
+    e->renderFrames.store(0);
+    e->renderTicks.store(0);
+    e->renderMaxUs.store(0);
+}
+
+uint32_t rfme_preview(rfme_t *e, uint32_t have, uint8_t *rgba)
+{
+    if (const Preview *p = e->preview.take())
+        e->viewSeq = p->seq;
+    if (!e->viewSeq || e->viewSeq == have || !rgba)
+        return e->viewSeq;
+    rfm::lcdToRGBA(e->preview.front()->lcd, rgba, FM1P_LCD_W * FM1P_LCD_H);
+    return e->viewSeq;
+}
+
+uint32_t rfme_lcd_hash(rfme_t *e)
+{
+    if (!e->dev || !e->booted)
+        return 0;
+    const uint8_t *p = reinterpret_cast<const uint8_t *>(e->dev->lcd());
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < sizeof(fm1panel_t::lcd); i++)
+        h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+
+uint32_t rfme_flash_size(rfme_t *e) { return e->dev ? e->dev->flash_size() : 0; }
+
+int rfme_take_flash(rfme_t *e, uint8_t *out, uint32_t n)
+{
+    if (!e->flashReady.load(std::memory_order_acquire))
+        return 0;
+    const int ok = out && n >= e->flashCopy.size();
+    if (ok)
+        std::memcpy(out, e->flashCopy.data(), e->flashCopy.size());
+    e->flashReady.store(false, std::memory_order_release);
+    return ok;
+}
+
+void rfme_request_flash(rfme_t *e) { e->flashReq.store(true, std::memory_order_release); }
+
+int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n)
+{
+    const int prev = e->stop();
+    int ok = 0;
+    if (e->booted && e->dev->flash() && out && n >= e->dev->flash_size()) {
+        e->dev->flash_sync();
+        std::memcpy(out, e->dev->flash(), e->dev->flash_size());
+        e->savedDirty = e->dev->flash_dirty();
+        ok = 1;
+    }
+    e->resume(prev);
+    return ok;
+}
+
+static const fm1param_t *param(rfme_t *e, const char *name)
+{
+    if (!e->booted || !name)
+        return nullptr;
+    const fm1core_t *c = e->dev->core();
+    for (uint32_t i = 0; i < c->nparams; i++)
+        if (c->params[i].name && std::strcmp(c->params[i].name, name) == 0)
+            return &c->params[i];
+    return nullptr;
+}
+
+int rfme_param_get(rfme_t *e, const char *name, int32_t *value)
+{
+    const fm1param_t *p = param(e, name);
+    if (!p || !p->get)
+        return 0;
+    if (value)
+        *value = p->get();
+    return 1;
+}
+
+int rfme_param_set(rfme_t *e, const char *name, int32_t value)
+{
+    const fm1param_t *p = param(e, name);
+    if (!p || !p->set)
+        return 0;
+    p->set(value);
+    return 1;
+}
+
+int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t *max, int32_t *value)
+{
+    if (!e->booted)
+        return 0;
+    const fm1core_t *c = e->dev->core();
+    for (uint32_t i = 0; i < c->nparams; i++) {
+        const fm1param_t &p = c->params[i];
+        if ((p.flags & FM1P_PERSIST) && !(p.flags & FM1P_META) && p.get && p.set && p.name) {
+            putErr(name, n, p.name);
+            if (min)
+                *min = p.min;
+            if (max)
+                *max = p.max;
+            if (value)
+                *value = p.get();
+            return 1;
+        }
+    }
+    return 0;
+}
+
+} // extern "C"

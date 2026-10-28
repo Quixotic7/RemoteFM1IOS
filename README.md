@@ -3,10 +3,11 @@
 An iPhone and iPad host for FM-1 firmware cores, with a real M-VAVE FM-1 running RemoteFM1 firmware 0.2.2 as the
 panel. See [PLAN.md](PLAN.md) for the design and the milestones.
 
-Status: M1, and M2 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB, SysEx only), runs a
-session and sends a test pattern. Keys and buttons held on the FM-1 light their LEDs and show in a strip at the bottom
-of its screen. M2 adds the AUv3 instrument as a skeleton (renders silence) and probes for PLAN.md section 5. No cores
-and no sound yet.
+Status: M1, M2 on the simulator, and M3 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
+SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In Core mode it runs a real firmware
+(ChoralRoot 0.26.1, Felucca 1.6.1 or Melodee 1.4.5) with the FM-1 as its panel and the sound on the iOS device; the
+firmware's flash is kept in `Documents/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
+and probes for PLAN.md section 5. Not yet tried on a real FM-1 or iPhone.
 
 ## Layout
 
@@ -15,21 +16,36 @@ and no sound yet.
 - `AU/`: the AUv3 extension `RemoteFM1AU` (aumu `Rfm1` `Qx7u`, "Quixotic7: RemoteFM1"): its view controller, which is
   also the AU factory, and its SwiftUI view (instance, Bluetooth button, Diagnostics).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
-  `group.com.quixotic7.remotefm1`.
+  `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
+  needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
+- `cores/`: the CMake project for the cores (FM1VST's `fm1_add_core` and the three cores' glue, without JUCE), and
+  `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's profiler).
 - `RFMKit/`: a Swift package.
   - `CRemoteFM1`: libremotefm1 (RemoteFM1 v0.2.2), its macOS glue `host.c` and FM1VST's CoreMIDI back end
     `RemoteMidi.c`, compiled in place from `vendor/` through the `RFMKit/vendor` symlink. Built with `RFM_NO_LIBUSB`.
   - `RFMCore`: a copy of FM1VST's `RemoteLink` (its header says what changed), fm1remote's test patterns, and a C API
     for Swift; the AU's render kernel (`RFMKernel`, an Objective-C++ render block over plain C++) and the probes' C
     parts (`RFMProbe`: CoreMIDI candidates, an mmap'd shared file, Darwin notifications, notify state, memory).
-  - `RFMKit`: `RemoteController`, the Swift API the app uses; `AUv3/`: the audio unit (`RFMAudioUnit`), its state
+    M3: the slot loader (`RFMSlots`, `rfms_*`) and the core engine (`RFMEngine`, `rfme_*`: FM1VST's Device on one
+    clock thread, fm1remote's design), its AVAudioSourceNode, and FM1VST's `engine/device.cpp` compiled in place.
+  - `RFMKit`: `RemoteController`, the Swift API the app uses; `CorePlayer` (the core, its audio and its flash); `AUv3/`: the audio unit (`RFMAudioUnit`), its state
     (`InstanceState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel and the Diagnostics view.
-- `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (only `remote/RemoteFM1` is needed so far). Read-only.
+- `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
+  with its `firmware/engines`, `cores/melodee`). Read-only.
 
 ## Build
 
     git submodule update --init vendor/FM1VST
-    git -C vendor/FM1VST submodule update --init remote/RemoteFM1
+    git -C vendor/FM1VST submodule update --init remote/RemoteFM1 cores/ChoralRootFM1 cores/melodee
+    git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
+
+The cores need CMake and a python3 with Pillow and fontTools (`CR_PYTHON=...`; the default is python.org's 3.11):
+
+    scripts/build_cores.sh [ios] [sim] [macos]      # default: all three, into build/cores/<platform>
+
+Each core becomes `FM1Core_<id>_1..4.framework` (PLAN.md section 3). The build runs on a copy of the needed parts of
+`vendor/FM1VST` in `build/cores/src`, because the cores' generators write into their own tree. The app build runs it
+for its platform by itself; `macos` is for the Mac tests.
 
     xcodebuild -project RemoteFM1.xcodeproj -scheme RemoteFM1 -destination 'generic/platform=iOS Simulator' build
     xcodebuild -project RemoteFM1.xcodeproj -scheme RemoteFM1 -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
@@ -41,7 +57,22 @@ To install on a device, set the team in the target's Signing settings.
     cd RFMKit && swift test
 
 The tests run on the Mac against libremotefm1's fake unit only; nothing touches CoreMIDI or a real FM-1. They also
-cover the AU's state and render block and the probes' shared file and notifications within one process.
+cover the AU's state and render block and the probes' shared file and notifications within one process. The core
+tests (`CoreTests`) use the macOS builds of `scripts/build_cores.sh macos` and skip without them: each core boots and
+plays, two slots of one core don't share state, a fifth slot is refused, a released slot comes back fresh, the flash
+round trip, a firmware reboot, and a core on the fake unit.
+
+FM1VST's own conformance test against the macOS builds of our libraries:
+
+    (cd build/cores/macos && cmake --build . --target core_conformance && ctest -R core_conformance)
+
+The cores on a simulator, headless, through the app's real path (fake unit, demo input, audio tapped for 3 s, the
+flash saved, a power cycle):
+
+    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee]
+
+It prints each core's summary and saves `coretest-<id>.json`, a screenshot and the log under `$OUT` (default
+`$TMPDIR/remotefm1-coretest`).
 
 The AU test on a simulator, headless (Simulator.app stays closed):
 
@@ -61,6 +92,7 @@ libremotefm1's own tests, built outside the source tree:
 - `-fakeble`: the fake unit over Bluetooth (paced, lossy tiles, HOLD).
 - `-autest`: only the AU test, run at launch (the FM-1 link is never created). Its summary goes to `autest.json` in the
   app's Documents and the App Group container. On a device, the "AU test" button runs the same thing.
+- `-coretest`: the core test (above) on the normal screen; `-core <id>` picks the firmware (also without `-coretest`).
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices). On a device CoreMIDI is the default.
 

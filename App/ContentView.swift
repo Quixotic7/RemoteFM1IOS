@@ -1,30 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The one screen: the link's state and controls, the frame being sent, the unit's HELLO_R, the link's numbers and
-// the panel's last events. Two columns on a regular width (iPad), one on an iPhone.
+// The one screen: the link's state and controls, the mode (M1's test pattern, or a firmware core: M3), the firmware,
+// the sound, the frame being sent, the core's numbers, the unit's HELLO_R, the link's numbers and the panel's last
+// events. Two columns on a regular width (iPad), one on an iPhone.
 
 import RFMKit
 import SwiftUI
 
 struct ContentView: View {
     let controller: RemoteController
+    let player: CorePlayer
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showBluetooth = false
     @State private var showAUTest = false
+    @State private var showAbout = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 controls
+                coreControls
+                if !player.message.isEmpty {
+                    Text(player.message).font(.footnote).foregroundStyle(.orange)
+                }
                 if sizeClass == .regular {
                     HStack(alignment: .top, spacing: 20) {
                         VStack(spacing: 16) { preview; PanelCard(controller: controller) }
                             .frame(maxWidth: 480)
-                        VStack(spacing: 16) { UnitCard(controller: controller); LinkCard(controller: controller) }
+                        VStack(spacing: 16) {
+                            if player.mode == .core { CoreCard(player: player) }
+                            UnitCard(controller: controller)
+                            LinkCard(controller: controller)
+                        }
                     }
                 } else {
                     preview.frame(maxWidth: .infinity)
+                    if player.mode == .core { CoreCard(player: player) }
                     PanelCard(controller: controller)
                     UnitCard(controller: controller)
                     LinkCard(controller: controller)
@@ -35,6 +47,7 @@ struct ContentView: View {
         .background(Theme.background.ignoresSafeArea())
         .onAppear { if !controller.isRunning { controller.start() } }
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
+        .sheet(isPresented: $showAbout) { AboutFirmware(info: player.current) }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)) }
     }
 
@@ -57,16 +70,56 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .fixedSize()
-            Spacer(minLength: 4)
-            Toggle("Pattern", isOn: Binding(get: { controller.patternOn }, set: { controller.patternOn = $0 }))
+            Spacer(minLength: 0)
+        }
+    }
+
+    // the mode, the firmware, About, the sound; in Pattern mode the pattern's own switch
+    private var coreControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Mode", selection: Binding(get: { player.mode }, set: { player.setMode($0) })) {
+                Text("Test pattern").tag(CorePlayer.Mode.pattern)
+                Text("Firmware core").tag(CorePlayer.Mode.core)
+            }
+            .pickerStyle(.segmented)
+            HStack(spacing: 8) {
+                Picker("Firmware", selection: Binding(get: { player.selected }, set: { player.select($0) })) {
+                    ForEach(player.cores) { c in Text("\(c.name) \(c.version)").tag(c.id) }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .disabled(player.cores.isEmpty)
+                Button { showAbout = true } label: { Image(systemName: "info.circle") }
+                    .accessibilityLabel("About this firmware")
+                    .disabled(player.current == nil)
+                Spacer(minLength: 0)
+                modeButtons
+            }
+        }
+    }
+
+    @ViewBuilder private var modeButtons: some View {
+        Group {
+            if player.mode == .core {
+                if player.status.halted {
+                    Button("Restart") { player.powerCycle() }.buttonStyle(.bordered).fixedSize()
+                }
+                Toggle(isOn: Binding(get: { player.audioOn }, set: { player.setAudio($0) })) {
+                    Label("Sound", systemImage: player.audioOn ? "speaker.wave.2.fill" : "speaker.slash")
+                }
                 .toggleStyle(.button)
                 .fixedSize()
+            } else {
+                Toggle("Moving", isOn: Binding(get: { controller.patternOn }, set: { controller.patternOn = $0 }))
+                    .toggleStyle(.button)
+                    .fixedSize()
+            }
         }
     }
 
     private var preview: some View {
         Group {
-            if let img = controller.preview {
+            if let img = player.mode == .core ? player.preview : controller.preview {
                 Image(decorative: img, scale: 1)
                     .interpolation(.none)
                     .resizable()
@@ -239,5 +292,79 @@ struct LinkCard: View {
                     .lineLimit(3)
             }
         }
+    }
+}
+
+/// the core: which slot, its clock, its load, its flash
+struct CoreCard: View {
+    let player: CorePlayer
+
+    var body: some View {
+        let s = player.status
+        let clock = ["stopped", "audio", "timer (no sound)", "caller"][min(max(s.clock, 0), 3)]
+        let info = player.current
+        Card(title: "Core") {
+            Rows(rows: [
+                ("firmware", info.map { "\($0.name) \($0.version), slot \(s.slot) of \($0.slots)" } ?? "none"),
+                ("state", s.halted ? String(format: "halted (exit %u)", s.haltCode & 0xFF)
+                    : s.booted ? "running, clock \(clock)" : "not booted"),
+                ("device", String(format: "%.1f s, %u screens, %u keys", Double(s.devMs) / 1000, s.snapshots,
+                                  s.keysPressed)),
+                ("core load", s.haveStats ? "\(s.cpuPct)% (its own), shed \(s.shed)" : "–"),
+                ("render", s.renders == 0 ? "–" : String(format: "avg %u us, max %u us per %u frames (%.0f%%)",
+                                                         s.renderAvgUs, s.renderMaxUs, s.renderLastFrames,
+                                                         s.renderLoad * 100)),
+                ("audio", player.audioRunning ? player.audioText : "off"),
+                ("flash", "\(player.saves) saves" + (player.lastSave.map { ", last " + Self.time($0) } ?? "")
+                    + ", Documents/cores/\(player.selected).bin"),
+            ])
+        }
+    }
+
+    static func time(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: d)
+    }
+}
+
+/// name, version, licence, source and credits of the firmware: the GPL and the cores' notices, visible
+struct AboutFirmware: View {
+    let info: CoreInfo?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let c = info {
+                        Text("\(c.name) \(c.version)").font(.title2.bold())
+                        Rows(rows: [
+                            ("licence", c.license),
+                            ("family", c.family),
+                            ("core ABI", "\(c.abi)"),
+                            ("flash", "\(c.flashSize / 1024) KiB"),
+                            ("slots", "\(c.slots) (\(c.inUse) in use)"),
+                        ])
+                        Text("Source").font(.headline)
+                        Text(c.sourceURL).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                        if !c.credits.isEmpty {
+                            Text("Credits and notices").font(.headline)
+                            Text(c.credits).font(.footnote).textSelection(.enabled)
+                        }
+                    }
+                    Text("RemoteFM1").font(.headline)
+                    Text("This app and the firmware above are free software under the GNU General Public License, "
+                         + "version 3 (GPL-3.0-only). The firmware runs as built from the source named above, through "
+                         + "FM1VST's core interface.")
+                        .font(.footnote)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            .navigationTitle("About this firmware")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
     }
 }

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// RFMCore: RemoteLink and the M1 producer (see include/RFMCore.h).
+// RFMCore: RemoteLink and the M1 producer (see include/RFMCore.h). M3: an engine (RFMEngine.cpp) can take the link
+// over (rfmc_set_external): the producer then neither pops the panel's events nor publishes, and the engine reports
+// what it applied back here for the app's Panel card.
 #include "RFMCore.h"
+#include "RFMInternal.h"
 
 #include <atomic>
 #include <chrono>
@@ -85,6 +88,13 @@ struct rfmc {
     static constexpr size_t kLog = 64;
     std::atomic<uint32_t> aKeys{0}, aButtons{0};
     std::atomic<int32_t> aMaster{-1};
+
+    // M3: an engine drives the link. The producer holds xmu while it drains or publishes, and checks `external`
+    // under it; rfmc_set_external takes xmu, so once it returns the producer has stood aside.
+    std::mutex xmu;
+    std::atomic<bool> external{false};
+    rfm::Spsc<rfm_event_t, 256> xEvents;       // the engine's clock thread -> rfmc_events (the main thread)
+    std::atomic<uint32_t> xDropped{0};
 
     uint32_t now() const
     {
@@ -208,24 +218,32 @@ struct rfmc {
                     if (quit || (!want && !link.engaged()))
                         break;
                 }
-                const bool changed = drain();
-                const bool full = link.takeFullRequest();
-                const uint32_t t = now();
-                if (changed || full || (int32_t)(t - next) >= 0) {
-                    render(t);
-                    show();
-                    next = t + period;
+                {
+                    std::lock_guard<std::mutex> xg(xmu);
+                    if (!external.load()) {
+                        const bool changed = drain();
+                        const bool full = link.takeFullRequest();
+                        const uint32_t t = now();
+                        if (changed || full || (int32_t)(t - next) >= 0) {
+                            render(t);
+                            show();
+                            next = t + period;
+                        }
+                    }
                 }
                 std::unique_lock<std::mutex> l(mu);
                 cv.wait_for(l, std::chrono::milliseconds(10), [this] { return quit; });
             }
             // the link let go: nothing is held any more
-            drain();
-            keys = buttons = 0;
-            aKeys.store(0);
-            aButtons.store(0);
-            render(now());
-            show();
+            std::lock_guard<std::mutex> xg(xmu);
+            if (!external.load()) {
+                drain();
+                keys = buttons = 0;
+                aKeys.store(0);
+                aButtons.store(0);
+                render(now());
+                show();
+            }
         }
     }
 };
@@ -350,6 +368,8 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
 
 uint32_t rfmc_events(rfmc_t *c, uint32_t after, rfmc_event_t *out, uint32_t max)
 {
+    for (rfm_event_t e; c->xEvents.pop(e);)    // (an engine's: into the log as the producer's are)
+        c->note(e);
     std::lock_guard<std::mutex> g(c->pmu);
     uint32_t n = 0;
     size_t first = 0;
@@ -442,3 +462,29 @@ int rfmc_fake_button_lit(rfmc_t *c, uint32_t b)
 }
 
 } // extern "C"
+
+// ---- M3: an engine on the link (RFMInternal.h)
+RemoteLink *rfmc_link(rfmc_t *c) { return &c->link; }
+
+void rfmc_set_external(rfmc_t *c, int on)
+{
+    {
+        std::lock_guard<std::mutex> g(c->xmu);
+        c->external.store(on != 0);
+    }
+    c->link.requestFull();                      // (the new source's first frame goes whole)
+    c->cv.notify_all();
+}
+
+void rfmc_external_event(rfmc_t *c, const rfm_event_t &e)
+{
+    if (!c->xEvents.push(e))
+        c->xDropped.fetch_add(1, std::memory_order_relaxed);
+}
+
+void rfmc_external_panel(rfmc_t *c, uint32_t keys, uint32_t buttons, int32_t master)
+{
+    c->aKeys.store(keys, std::memory_order_relaxed);
+    c->aButtons.store(buttons, std::memory_order_relaxed);
+    c->aMaster.store(master, std::memory_order_relaxed);
+}

@@ -1,34 +1,68 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// RemoteFM1 for iPhone and iPad (M1): an FM-1 running RemoteFM1 firmware as a panel, with a test pattern and no core.
-// Launch arguments: -fake runs against libremotefm1's fake unit in the app, -fakeble the fake over Bluetooth.
-// The simulator uses the fake unless launched with -device (its CoreMIDI may see the Mac's MIDI devices).
-// -autest (M2): only the AU test (AUTestView), run at launch; the FM-1 link is never created.
+// RemoteFM1 for iPhone and iPad: an FM-1 running RemoteFM1 firmware as the panel of a firmware core played on the
+// phone (M3), or of M1's test pattern. Launch arguments: -fake runs against libremotefm1's fake unit in the app,
+// -fakeble the fake over Bluetooth. The simulator uses the fake unless launched with -device (its CoreMIDI may see the
+// Mac's MIDI devices). -autest (M2): only the AU test (AUTestView), run at launch; the FM-1 link is never created.
+// -coretest (M3): the core test (CoreTest.swift) runs on the normal screen; -core <id> picks the firmware.
 
 import RFMKit
 import SwiftUI
+import UIKit
 
 @main
 struct RemoteFM1App: App {
     @State private var controller: RemoteController?
+    @State private var player: CorePlayer?
+    @Environment(\.scenePhase) private var phase
+    private let coreTest: Bool
 
     init() {
         let args = ProcessInfo.processInfo.arguments
+        coreTest = args.contains("-coretest")
         guard !args.contains("-autest") else { return }
         let backend = Self.backend(args)
-        _controller = State(initialValue: RemoteController(backend: backend, demoInput: backend.isFake))
+        let c = RemoteController(backend: backend, demoInput: backend.isFake)
+        _controller = State(initialValue: c)
+        let d = UserDefaults.standard
+        var core = d.string(forKey: "rfm1.core") ?? "choralroot"
+        if let i = args.firstIndex(of: "-core"), i + 1 < args.count { core = args[i + 1] }
+        let p = CorePlayer(link: c, selected: core)
+        _player = State(initialValue: p)
+        if !coreTest {                          // (the last choices; the core test sets its own)
+            p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
+            if (d.string(forKey: "rfm1.mode") ?? "core") == "core" { p.setMode(.core) }
+        }
     }
 
     var body: some Scene {
         WindowGroup {
             Group {
-                if let controller {
-                    ContentView(controller: controller)
+                if let controller, let player {
+                    ContentView(controller: controller, player: player)
+                        .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
+                        .onChange(of: player.mode) { _, m in UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode") }
+                        .onChange(of: player.selected) { _, id in UserDefaults.standard.set(id, forKey: "rfm1.core") }
+                        .onChange(of: player.audioOn) { _, on in UserDefaults.standard.set(on, forKey: "rfm1.audio") }
                 } else {
                     AUTestView(host: AUTestHost(auto: true))
                 }
             }
             .preferredColorScheme(.dark)
+        }
+        .onChange(of: phase) { _, p in
+            if p == .background, let player { Self.saveInBackground(player) }
+        }
+    }
+
+    /// the flash saved as the app leaves the foreground (the core keeps playing if the sound is on)
+    @MainActor static func saveInBackground(_ player: CorePlayer) {
+        let app = UIApplication.shared
+        let task = TaskBox()
+        task.id = app.beginBackgroundTask(withName: "flash") { task.end() }
+        Task { @MainActor in
+            await player.didEnterBackground()
+            task.end()
         }
     }
 
@@ -39,5 +73,13 @@ struct RemoteFM1App: App {
         if !args.contains("-device") { return .fake(bluetooth: false) }
         #endif
         return .device
+    }
+}
+
+@MainActor final class TaskBox: @unchecked Sendable {
+    var id = UIBackgroundTaskIdentifier.invalid
+    func end() {
+        if id != .invalid { UIApplication.shared.endBackgroundTask(id) }
+        id = .invalid
     }
 }
