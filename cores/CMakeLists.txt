@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# The FM-1 cores for RemoteFM1 iOS: ChoralRoot, Felucca, Melodee and FIZZ through FM1VST's fm1_add_core() (cmake/FM1Cores.cmake)
+# The FM-1 cores for RemoteFM1 iOS: ChoralRoot, Felucca, Melodee, FIZZ and Saadet through FM1VST's fm1_add_core() (cmake/FM1Cores.cmake)
 # and their glue (core-glue/), without FM1VST's top CMakeLists (it fetches JUCE). One SHARED library per core,
 # FM1Core_<id>, from the core's objects, exporting only _fm1core_get; scripts/build_cores.sh turns it into the four slot
 # frameworks (PLAN.md section 3).
@@ -18,9 +18,10 @@ if(NOT EXISTS ${RFM_FM1VST}/cmake/FM1Cores.cmake)
 endif()
 set(CR_PYTHON "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" CACHE FILEPATH
     "python3 with Pillow and fontTools, for the cores' generate steps")
-set(RFM_CORES "choralroot;felucca;melodee;fizz" CACHE STRING "the cores to build")
+set(RFM_CORES "choralroot;felucca;melodee;fizz;saadet" CACHE STRING "the cores to build")
 # iOS: ChoralRoot's host build includes <libproc.h> (its profiler's instruction counter), which the iOS SDKs lack:
-# cores/ios/libproc.h stands in for it. FIZZ's build file is cores/fizz/core.cmake. (RFM_OWN: this repo's cores/ folder)
+# cores/ios/libproc.h stands in for it. FIZZ's build file is cores/fizz/core.cmake, Saadet's
+# cores/saadet/core.cmake (two cores: saadet and its store variant saadet_store, the same core id). (RFM_OWN: this repo's cores/ folder)
 set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers; cores/fizz)")
 
 include(${RFM_FM1VST}/cmake/FM1Cores.cmake)
@@ -38,6 +39,9 @@ if(melodee IN_LIST RFM_CORES)
 endif()
 if(fizz IN_LIST RFM_CORES)
     include(${RFM_OWN}/fizz/core.cmake)
+endif()
+if(saadet IN_LIST RFM_CORES)
+    include(${RFM_OWN}/saadet/core.cmake)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET core_choralroot_obj)
     target_include_directories(core_choralroot_obj BEFORE PRIVATE ${RFM_OWN}/ios)
@@ -81,8 +85,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         if(NOT EXISTS ${_conf})
             set(_conf ${_g}/conformance.txt)
         endif()
+        string(REGEX REPLACE "_store$" "" _cid ${_id})     # (a store variant has its core's id)
         add_test(NAME core_conformance_${_id}
-                 COMMAND core_conformance $<TARGET_FILE:FM1Core_${_id}> ${_id} ${_fam} ${_lic} ${_conf}
+                 COMMAND core_conformance $<TARGET_FILE:FM1Core_${_id}> ${_cid} ${_fam} ${_lic} ${_conf}
                          ${CMAKE_BINARY_DIR}/conformance)
         set_tests_properties(core_conformance_${_id} PROPERTIES TIMEOUT 300
                              ENVIRONMENT "FM1EMU_HOME=${CMAKE_BINARY_DIR}/conformance/home")

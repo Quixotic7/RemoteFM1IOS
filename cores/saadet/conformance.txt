@@ -1,0 +1,19 @@
+# Saadet 0.1.1 (and its store variant): tests/core_conformance.cpp's script for this core (see its header for the
+# directives). The sound: a key plays the default sound from power-on (no prelude).
+# the flash round trip: ALGORITHM turned a detent (the part's engine, saved in the synth state; PRESETS would not do
+# in the store variant, whose default PROPHET has only its init program); flash_sync saves
+# it (the rest's autosave, now); after the reboot the screen shows the other engine
+save wait 1500
+save knob ALGORITHM +1
+save wait 1500
+save quit
+saved wait 1500
+saved quit
+saved-lcd-differs
+# OCT- + OCT+ held 5 s: UBOOT (base/device/main_fm1.c, plat_glue.h); four failed boots in a row: UBOOT
+reboot-guard 3
+reboot wait 600
+reboot btn OCT- down
+reboot btn OCT+ down
+reboot wait 6000
+reboot quit
