@@ -31,8 +31,10 @@ screen, the test pattern and the AU test).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
   `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
   needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
-- `cores/`: the CMake project for the cores (FM1VST's `fm1_add_core` and the three cores' glue, without JUCE), and
-  `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's profiler).
+- `cores/`: the CMake project for the cores (FM1VST's `fm1_add_core` and the cores' glue, without JUCE),
+  `cores/fizz/` (FIZZ's build file and descriptor), `cores/store-cores.txt` (the cores of an App Store / TestFlight
+  build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
+  profiler).
 - `RFMKit/`: a Swift package.
   - `CRemoteFM1`: libremotefm1 (RemoteFM1 v0.2.2), its macOS glue `host.c` and FM1VST's CoreMIDI back end
     `RemoteMidi.c`, compiled in place from `vendor/` through the `RFMKit/vendor` symlink. Built with `RFM_NO_LIBUSB`.
@@ -51,10 +53,12 @@ screen, the test pattern and the AU test).
     Diagnostics view.
 - `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
   with its `firmware/engines`, `cores/melodee`). Read-only.
+- `vendor/FIZZ`: FIZZ v0.12.0-beta.12 (MPL-2.0) as a git submodule (its own submodule, fm1-base, is not needed).
+  Read-only.
 
 ## Build
 
-    git submodule update --init vendor/FM1VST
+    git submodule update --init vendor/FM1VST vendor/FIZZ
     git -C vendor/FM1VST submodule update --init remote/RemoteFM1 cores/ChoralRootFM1 cores/melodee
     git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
 
@@ -69,7 +73,8 @@ for its platform by itself; `macos` is for the Mac tests.
     xcodebuild -project RemoteFM1.xcodeproj -scheme RemoteFM1 -destination 'generic/platform=iOS Simulator' build
     xcodebuild -project RemoteFM1.xcodeproj -scheme RemoteFM1 -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 
-To install on a device, set the team in the target's Signing settings.
+To install on a device, set the team in the target's Signing settings. `RFM_STORE_BUILD=YES` (on the xcodebuild line,
+as `scripts/testflight.sh` does) embeds only the cores in `cores/store-cores.txt`; the default embeds all of them.
 
 ## Test
 
@@ -79,9 +84,10 @@ The tests run on the Mac against libremotefm1's fake unit only; nothing touches 
 cover the AU's state and render block and the probes' shared file and notifications within one process. The core
 tests (`CoreTests`) use the macOS builds of `scripts/build_cores.sh macos` and skip without them: each core boots and
 plays, two slots of one core don't share state, a fifth slot is refused, a released slot comes back fresh, the flash
-round trip, a firmware reboot, and a core on the fake unit. M4 adds `LeaseTests` (the lease with two clients and with
+round trip, a firmware reboot, a core on the fake unit, FIZZ's descriptor and demo, and the default core when the
+preferred one is missing. M4 adds `LeaseTests` (the lease with two clients and with
 a forked second process, a takeover on the shared fake that never sends SESSION 0, and `PanelSession`'s rules) and
-`AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence).
+`AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence, a missing core's fallback).
 
 FM1VST's own conformance test against the macOS builds of our libraries:
 
@@ -90,7 +96,7 @@ FM1VST's own conformance test against the macOS builds of our libraries:
 The cores on a simulator, headless, through the app's real path (fake unit, demo input, audio tapped for 3 s, the
 flash saved, a power cycle):
 
-    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee]   # default: RFM iPhone 17 (CEB2B846-...)
+    scripts/sim_coretest.sh [UDID] [choralroot felucca melodee fizz]   # default: RFM iPhone 17 (CEB2B846-...)
 
 It prints each core's summary and saves `coretest-<id>.json`, a screenshot and the log under `$OUT` (default
 `$TMPDIR/remotefm1-coretest`).

@@ -56,8 +56,10 @@ the simulator: two instances, one pid; to confirm in AUM and GarageBand), so slo
 
 Measured in M3 (iOS simulator): a slot is 1.0–1.2 MB on disk, so 4 slots of the 3 cores add 13 MB to the app (about
 120 MB if all ~30 cores shipped this way). A booted slot adds 2.5 MB (ChoralRoot, Felucca) to 3.2 MB (Melodee) of
-memory. `dlclose` really unloads a slot on macOS and the simulator, so a slot is reusable after a firmware reboot
-(the loader retires a slot whose image stays mapped). The extension's memory limit can only be measured on a device.
+memory; FIZZ (added 2026-10-28) 4.7 MB, and its renders average 0.66 ms per 512 frames (6 % of the buffer: it draws
+with plutovg) against 0.1–0.26 ms for the others. `dlclose` really unloads a slot on macOS and the simulator, so a slot
+is reusable after a firmware reboot (the loader retires a slot whose image stays mapped). The extension's memory limit
+can only be measured on a device.
 
 How the cores are built: `cores/CMakeLists.txt` uses FM1VST's `FM1Cores.cmake` and the cores' glue as they are, and
 links each core's objects into a framework exporting only `fm1core_get`. The cores' generate steps write into the
@@ -149,7 +151,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings. Simulator part done (fake unit, all three cores); device part waits for the iPhone |
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect. Simulator part done (`scripts/sim_aucoretest.sh`, a shared fake unit); device part waits for the iPhone |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
-| M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship |
+| M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship. The flag is built (`RFM_STORE_BUILD`); the store build carries FIZZ |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
@@ -185,9 +187,15 @@ So:
 | Build | Cores | How it ships |
 | --- | --- | --- |
 | **Full** (GPL) | every core that isn't gated | Xcode installs and ad-hoc builds on the owner's devices; the source is public |
-| **App Store** | amb, plus each core whose authors all give written permission for App Store distribution | App Store / TestFlight |
+| **App Store** | FIZZ (MPL-2.0, the owner's: `vendor/FIZZ`), amb, plus each core whose authors all give written permission for App Store distribution | App Store / TestFlight |
 
-- One build flag picks the cores (as FM1VST's `FM1_PUBLIC_BUILD` does).
+- One build flag picks the cores (as FM1VST's `FM1_PUBLIC_BUILD` does). As built: every core is built; the Xcode
+  setting `RFM_STORE_BUILD` (default NO) decides what `scripts/embed_cores.sh` puts in the app. YES embeds only the
+  cores in `cores/store-cores.txt` (now `fizz`), removes other cores' slots left in the app, and fails the build if a
+  core outside the list would be embedded or the list names one that wasn't built. `scripts/testflight.sh` archives
+  with YES and checks the archive's cores. Xcode builds on the owner's devices keep all four cores (the owner,
+  2026-10-28: TestFlight / App Store builds carry only FIZZ). The app falls back to the first core it has when a
+  saved choice or a restored AU state names one this build lacks.
 - To get a core into the App Store build, the owner asks its authors for an extra permission (GPLv3 section 7).
   There is a precedent: Leo Kuroshita let fm1-base take his Felucca code under MPL-2.0 (felucca-bsp#4). ChoralRoot in
   the App Store would also need the Casio and Sequential sound data left out or cleared.
