@@ -13,3 +13,6 @@
 [submodule "vendor/boardwalk"]
 	path = vendor/boardwalk
 	url = https://github.com/charlesvestal/fm1-boardwalk.git
+[submodule "vendor/loom"]
+	path = vendor/loom
+	url = https://github.com/charlesvestal/fm1-loom.git
