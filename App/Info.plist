@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>RemoteFM1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>RemoteFM1 connects to an FM-1 over Bluetooth MIDI.</string>
 	<key>UIBackgroundModes</key>
