@@ -58,7 +58,7 @@ Measured in M3 (iOS simulator): a slot is 1.0–1.2 MB on disk, so 4 slots of th
 120 MB if all ~30 cores shipped this way). A booted slot adds 2.5 MB (ChoralRoot, Felucca) to 3.2 MB (Melodee) of
 memory; FIZZ (added 2026-10-28) 4.7 MB, and its renders average 0.66 ms per 512 frames (6 % of the buffer: it draws
 with plutovg) against 0.1–0.26 ms for the others. Saadet (added 2026-10-28): a slot is 0.55 MB on disk, a booted slot
-2.4 MB, renders 0.08 ms per 512 frames (0.7 %). `dlclose` really unloads a slot on macOS and the simulator, so a slot
+2.4 MB, renders 0.08 ms per 512 frames (0.7 %). Boardwalk: 0.6 MB on disk, 2.5 MB booted, 0.14 ms (1.3 %). `dlclose` really unloads a slot on macOS and the simulator, so a slot
 is reusable after a firmware reboot (the loader retires a slot whose image stays mapped). The extension's memory limit
 can only be measured on a device.
 
@@ -189,14 +189,14 @@ So:
 | Build | Cores | How it ships |
 | --- | --- | --- |
 | **Full** (GPL) | every core that isn't gated | Xcode installs and ad-hoc builds on the owner's devices; the source is public |
-| **App Store** | FIZZ (MPL-2.0, the owner's: `vendor/FIZZ`), Saadet (MPL-2.0, Kerem Kilic's permission; its store variant), amb, plus each core whose authors all give written permission for App Store distribution | App Store / TestFlight |
+| **App Store** | FIZZ (MPL-2.0, the owner's: `vendor/FIZZ`), Saadet (MPL-2.0, Kerem Kilic's permission; its store variant), Boardwalk (MPL-2.0, Charles Vestal), amb, plus each core whose authors all give written permission for App Store distribution | App Store / TestFlight |
 
 - One build flag picks the cores (as FM1VST's `FM1_PUBLIC_BUILD` does). As built: every core is built; the Xcode
   setting `RFM_STORE_BUILD` (default NO) decides what `scripts/embed_cores.sh` puts in the app. YES embeds only the
   cores in `cores/store-cores.txt` (now `fizz`), removes other cores' slots left in the app, and fails the build if a
   core outside the list would be embedded or the list names one that wasn't built. `scripts/testflight.sh` archives
   with YES and checks the archive's cores. Xcode builds on the owner's devices keep all four cores (the owner,
-  2026-10-28: TestFlight / App Store builds carry only FIZZ; later that day: and Saadet).
+  2026-10-28: TestFlight / App Store builds carry only FIZZ; later that day: and Saadet and Boardwalk).
 - **Saadet** (`vendor/saadet`, Kerem Kilic, MPL-2.0 in its fm1-base build; he gave the owner permission to include it)
   bundles Roland's Juno-106, Sequential's Prophet-5/10 and Casio's CZ-1 factory sounds with no licence granted. Full
   builds carry them; store builds carry a store variant of the same core (id `saadet`, version `0.1.1-store`) built
