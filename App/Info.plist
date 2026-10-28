@@ -6,6 +6,10 @@
 	<string>RemoteFM1</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>RemoteFM1 connects to an FM-1 over Bluetooth MIDI.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIStatusBarStyle</key>

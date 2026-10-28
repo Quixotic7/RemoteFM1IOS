@@ -305,7 +305,7 @@ public final class RemoteController {
     }
 
     /// a fixed-size C char array (imported as a tuple), up to its NUL
-    static func string<T>(_ t: T) -> String {
+    nonisolated static func string<T>(_ t: T) -> String {
         withUnsafeBytes(of: t) { raw in String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self) }
     }
 

@@ -8,10 +8,37 @@
 
 /* Begin PBXBuildFile section */
 		A1F10000000000000000000D /* RFMKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1F10000000000000000000B /* RFMKit */; };
+		A1F20000000000000000000D /* RFMKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1F20000000000000000000B /* RFMKit */; };
+		A1F20000000000000000000E /* RemoteFM1AU.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1F200000000000000000004 /* RemoteFM1AU.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A1F200000000000000000010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1F100000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1F200000000000000000006;
+			remoteInfo = RemoteFM1AU;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1F20000000000000000000F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1F20000000000000000000E /* RemoteFM1AU.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A1F100000000000000000004 /* RemoteFM1.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RemoteFM1.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1F200000000000000000004 /* RemoteFM1AU.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RemoteFM1AU.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -19,8 +46,17 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				RemoteFM1.entitlements,
 			);
 			target = A1F100000000000000000006 /* RemoteFM1 */;
+		};
+		A1F200000000000000000005 /* Exceptions for "AU" folder in "RemoteFM1AU" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				RemoteFM1AU.entitlements,
+			);
+			target = A1F200000000000000000006 /* RemoteFM1AU */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -31,6 +67,14 @@
 				A1F100000000000000000005 /* Exceptions for "App" folder in "RemoteFM1" target */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A1F200000000000000000003 /* AU */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1F200000000000000000005 /* Exceptions for "AU" folder in "RemoteFM1AU" target */,
+			);
+			path = AU;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -44,6 +88,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1F200000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1F20000000000000000000D /* RFMKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -51,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				A1F100000000000000000003 /* App */,
+				A1F200000000000000000003 /* AU */,
 				A1F100000000000000000002 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				A1F100000000000000000004 /* RemoteFM1.app */,
+				A1F200000000000000000004 /* RemoteFM1AU.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -73,10 +127,12 @@
 				A1F100000000000000000007 /* Sources */,
 				A1F100000000000000000008 /* Frameworks */,
 				A1F100000000000000000009 /* Resources */,
+				A1F20000000000000000000F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1F200000000000000000011 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A1F100000000000000000003 /* App */,
@@ -89,6 +145,29 @@
 			productReference = A1F100000000000000000004 /* RemoteFM1.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1F200000000000000000006 /* RemoteFM1AU */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1F2000000000000000000B4 /* Build configuration list for PBXNativeTarget "RemoteFM1AU" */;
+			buildPhases = (
+				A1F200000000000000000007 /* Sources */,
+				A1F200000000000000000008 /* Frameworks */,
+				A1F200000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A1F200000000000000000003 /* AU */,
+			);
+			name = RemoteFM1AU;
+			packageProductDependencies = (
+				A1F20000000000000000000B /* RFMKit */,
+			);
+			productName = RemoteFM1AU;
+			productReference = A1F200000000000000000004 /* RemoteFM1AU.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -100,6 +179,9 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					A1F100000000000000000006 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					A1F200000000000000000006 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -122,12 +204,20 @@
 			projectRoot = "";
 			targets = (
 				A1F100000000000000000006 /* RemoteFM1 */,
+				A1F200000000000000000006 /* RemoteFM1AU */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A1F100000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1F200000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -144,7 +234,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1F200000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1F200000000000000000011 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1F200000000000000000006 /* RemoteFM1AU */;
+			targetProxy = A1F200000000000000000010 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1F1000000000000000000B2 /* Debug */ = {
@@ -200,6 +305,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = App/RemoteFM1.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -226,6 +332,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = App/RemoteFM1.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -242,6 +349,58 @@
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.quixotic7.remotefm1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A1F2000000000000000000B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AU/RemoteFM1AU.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AU/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "RemoteFM1 AU";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.quixotic7.remotefm1.au;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1F2000000000000000000B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AU/RemoteFM1AU.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = AU/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "RemoteFM1 AU";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.quixotic7.remotefm1.au;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -269,6 +428,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A1F2000000000000000000B4 /* Build configuration list for PBXNativeTarget "RemoteFM1AU" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1F2000000000000000000B5 /* Debug */,
+				A1F2000000000000000000B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -280,6 +448,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		A1F10000000000000000000B /* RFMKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1F10000000000000000000A /* XCLocalSwiftPackageReference "RFMKit" */;
+			productName = RFMKit;
+		};
+		A1F20000000000000000000B /* RFMKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A1F10000000000000000000A /* XCLocalSwiftPackageReference "RFMKit" */;
 			productName = RFMKit;

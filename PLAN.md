@@ -1,8 +1,9 @@
 # RemoteFM1 for iOS (plan)
 
-Status (2026-10-27): M0 done and M1 built (README.md says how to build and test). On the simulator, with the fake
-unit, the app connects, sends the test pattern and shows panel events. M1 is not yet tried on the iPhone with the
-real "FM-1 7938". Owner's decisions in section 7.
+Status (2026-10-27): M0 done; M1 built; M2's simulator part done (README.md says how to build and test). On the
+simulator, with the fake unit, the app connects, sends the test pattern and shows panel events; the AUv3 extension
+loads, renders silence and answers section 5's checks that the simulator can. Not yet tried on the iPhone with the
+real "FM-1 7938" (M1's test and M2's device part). Owner's decisions in section 7.
 
 An iPhone/iPad host for FM-1 firmware cores, with a real FM-1 running RemoteFM1 firmware 0.2.2 as the panel: keys,
 buttons, encoders and MASTER come in; the firmware's 240×240 screen and LEDs go out; sound plays on the iOS device.
@@ -48,8 +49,8 @@ bundle is not allowed in App Store/TestFlight builds, and may not work in dev-si
 Plan: each core is built once, then placed in the bundle as N separate signed frameworks (`FM1Core_choralroot_1` ..
 `_4`, the same binary with a different install name). A new instance takes the first free slot of its core in its
 process. Slots that are never loaded cost nothing at run time. A fifth ChoralRoot in one host shows "at most 4
-ChoralRoot per host". On iOS every instance of our AUv3 in one host app runs in the same extension process, so slots
-are per host app.
+ChoralRoot per host". Every instance of our AUv3 in one host app runs in the same extension process (seen in M2 on
+the simulator: two instances, one pid; to confirm in AUM and GarageBand), so slots are per host app.
 
 Size measured on macOS: `choralroot.fm1core` is 0.8 MB on disk, 2.6 MB of data (mostly zero-filled) when loaded,
 plus the 1 MiB flash image. The extension's memory limit is lower than the app's: measure it on the device in M2.
@@ -92,20 +93,26 @@ So the device can't share. The instances must agree among themselves, and only o
   can only say so ("the FM-1 has a session from elsewhere": HELLO_R `session8` = 1 with no lease owner). The fix
   belongs in the protocol (e.g. an owner token in SESSION, or a "taken" notice): proposed to RemoteFM1, not done here.
 - **Fallback without an App Group** (if one turns out not to work for an extension): Darwin notify state
-  (`notify_set_state`, 64 bits: a short owner ID + epoch) carries the same lease, without the host/core names.
+  (`notify_set_state`, 64 bits: a short owner ID + epoch) carries the same lease, without the host/core names. M2 on
+  the simulator: the App Group container, an mmap'd file in it, Darwin notifications and notify state all work between
+  the app and the extension, so the fallback is likely unneeded (to confirm on a team-signed device build).
 
 ## 5. iOS and AUv3 constraints
 
-| Constraint | Plan |
-| --- | --- |
-| CoreMIDI from inside an extension: not confirmed by Apple's documentation | **M2 tests it first** (MIDIClientCreate and seeing the FM-1 from the AUv3 in AUM). Fallback A: the standalone app as a bridge (shared-memory ring in the App Group); it must be running. Fallback B: the host's MIDI routing (AU MIDI out → FM-1, FM-1 → AU MIDI in); works in AUM, not in GarageBand |
-| Bluetooth pairing UI | in the app (`CABTMIDICentralViewController`). M2 tests it inside the extension's view too. Hosts have their own (AUM's Bluetooth MIDI button) |
-| The Bluetooth link belongs to the app that made it: FIZZ saw it drop when its app was relaunched | M2 checks whether a link made in the app survives the app closing while an AUv3 uses it. If it doesn't, pair from the host or from the extension |
-| USB on the owner's iPhone 13 Pro Max: with FIZZ, the FM-1 did not appear over the Lightning camera adapter | Bluetooth first. USB is tested on a USB-C iPad when there is one |
-| Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) runs there too, as in FM1VST. 44.1 kHz resampled to the session rate |
-| Memory | measured in M2 with 1, 4 and 8 instances |
-| State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does |
-| Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background |
+The M2 column is what the iOS 27.0 simulator showed (`scripts/sim_autest.sh`: the app loads the extension twice out
+of process, renders, restores state, and collects the probes). Simulator results can differ on a device; the same
+probes run on the iPhone from the app's "AU test" button.
+
+| Constraint | Plan | M2 on the simulator | Still needs the device |
+| --- | --- | --- | --- |
+| CoreMIDI from inside an extension: not confirmed by Apple's documentation | Fallback A: the standalone app as a bridge (shared-memory ring in the App Group); it must be running. Fallback B: the host's MIDI routing (AU MIDI out → FM-1, FM-1 → AU MIDI in); works in AUM, not in GarageBand | client and ports created (status 0) inside the extension; the simulator lists no MIDI endpoints at all, in the app or the extension | whether the extension sees the FM-1 and can run a session |
+| Bluetooth pairing UI | in the app (`CABTMIDICentralViewController`) and inside the extension's view. Hosts have their own (AUM's Bluetooth MIDI button) | presents inside the extension and scans. On iOS 27.0 the panel crashed in the app and the extension (`UIScreen.main.applicationFrame` is NaN there); `RFMKit/UI/BluetoothSheet.swift` builds its table itself only in that case. SwiftUI `.sheet` crashed in the extension too: it presents with UIKit | real pairing; whether iOS 27 devices have the same bug |
+| The Bluetooth link belongs to the app that made it: FIZZ saw it drop when its app was relaunched | if a link made in the app doesn't survive the app closing, pair from the host or from the extension | not testable | device only |
+| USB on the owner's iPhone 13 Pro Max: with FIZZ, the FM-1 did not appear over the Lightning camera adapter | Bluetooth first. USB is tested on a USB-C iPad when there is one | not testable | device only |
+| Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) runs there too, as in FM1VST. 44.1 kHz resampled to the session rate | C++ kernel renders silence, takes host MIDI; a std::thread in the extension keeps running while it renders | timing under load |
+| Memory | measured with 1, 4 and 8 instances | `os_proc_available_memory` is 0 (no limit on the simulator); footprint ~23 MB | the real limit: device only |
+| State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does | instance UUID and format version survive save and restore into a new instance (keys `rfm1.instance`, `rfm1.format`) | (the rest comes with M3/M4) |
+| Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background | key added; the session activates | behaviour in the background |
 
 ## 6. Milestones
 
@@ -116,7 +123,7 @@ unit), and on the owner's device when it involves the FM-1.
 | --- | --- | --- |
 | M0 | Skeleton: Xcode project (app, AUv3 extension, `RFMKit`), FM1VST submodule, libremotefm1 + CoreMIDI back end built for iOS | headless simulator build passes; libremotefm1's own tests pass on the Mac |
 | M1 | Standalone: Bluetooth sheet, find the FM-1 by HELLO, session, test pattern; HELLO_R fields and link stats on screen. The fake unit for the simulator | on the owner's iPhone: the pattern moves on the FM-1, its keys light their LEDs on the pattern screen |
-| M2 | AUv3 test run (no core yet): the extension loads in AUM; CoreMIDI from the extension; Bluetooth sheet inside it; App Group with the team; memory limit; the Bluetooth link after the app closes | each row of section 5 answered and written here; fallback chosen if needed |
+| M2 | AUv3 test run (no core yet): the extension loads in AUM; CoreMIDI from the extension; Bluetooth sheet inside it; App Group with the team; memory limit; the Bluetooth link after the app closes | each row of section 5 answered and written here; fallback chosen if needed. Simulator part done; device part waits for the iPhone |
 | M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings |
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |

@@ -90,4 +90,8 @@ int rfmc_fake_button_lit(rfmc_t *c, uint32_t b);
 #ifdef __cplusplus
 }
 #endif
+
+// M2: the probes and the AUv3 render kernel (this header is the module's umbrella)
+#include "RFMProbe.h"
+#include "RFMKernel.h"
 #endif

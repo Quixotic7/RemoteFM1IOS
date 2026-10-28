@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // RFMKit: libremotefm1 and FM1VST's CoreMIDI back end (in place, from vendor/FM1VST, through the vendor symlink),
-// RemoteLink (a copy, RFMCore/RemoteLink.h says what changed) and the Swift API the app uses.
+// RemoteLink (a copy, RFMCore/RemoteLink.h says what changed), the AUv3's render kernel and M2's probes, and the Swift
+// API the app and the extension use.
 import PackageDescription
 
 let rfm = "remote/RemoteFM1"            // inside vendor/FM1VST
@@ -51,8 +52,10 @@ let package = Package(
                 .headerSearchPath("\(vendorRFM)/host/include"),
                 .headerSearchPath("\(vendorRFM)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
+                .headerSearchPath("\(vendorRFM)/host/src/macos"),      // mac_priv.h (RFMProbe: cm_scan)
                 .define("FM1_REMOTE_NO_BULK", to: "1"),
-            ]
+            ],
+            linkerSettings: [.linkedFramework("AudioToolbox")]
         ),
         .target(name: "RFMKit", dependencies: ["RFMCore"]),
         .testTarget(name: "RFMKitTests", dependencies: ["RFMKit"]),

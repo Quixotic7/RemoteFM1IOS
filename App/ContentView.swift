@@ -10,6 +10,7 @@ struct ContentView: View {
     let controller: RemoteController
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showBluetooth = false
+    @State private var showAUTest = false
 
     var body: some View {
         ScrollView {
@@ -34,12 +35,14 @@ struct ContentView: View {
         .background(Theme.background.ignoresSafeArea())
         .onAppear { if !controller.isRunning { controller.start() } }
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
+        .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)) }
     }
 
     private var header: some View {
         HStack {
             Text("RemoteFM1").font(.title2.bold()).lineLimit(1).layoutPriority(1)
             Spacer(minLength: 8)
+            Button("AU test") { showAUTest = true }.buttonStyle(.bordered).fixedSize()
             StatusPill(state: controller.state, fake: controller.backend.isFake)
         }
     }
