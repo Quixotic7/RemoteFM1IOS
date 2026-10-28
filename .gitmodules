@@ -10,3 +10,6 @@
 [submodule "vendor/fm1-base"]
 	path = vendor/fm1-base
 	url = https://github.com/charlesvestal/fm1-base.git
+[submodule "vendor/boardwalk"]
+	path = vendor/boardwalk
+	url = https://github.com/charlesvestal/fm1-boardwalk.git
