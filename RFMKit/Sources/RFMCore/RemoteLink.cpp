@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copied from FM1VST v0.6.2 plugin/RemoteLink.cpp. Changed for RemoteFM1 iOS: updateStatus() fills the extra Status
 // fields (RemoteLink.h); the loop rescans CoreMIDI on requestRescan(); built without bulk (iOS), the fake unit has
-// no bulk side either, so it is SysEx only like the real unit here.
+// no bulk side either, so it is SysEx only like the real unit here. M4: no unit lock when lockPath is empty (the
+// lease decides); the gate and the drop path (no SESSION 0); the process-wide shared fake (SharedFake.h).
 // Remote FM-1: the session thread, the unit lock, the back ends (see RemoteLink.h).
 #include "RemoteLink.h"
 
@@ -19,6 +20,7 @@
 #include "rfm/macos.h"
 #include "rfm/screen.h"
 #include "rfm/session.h"
+#include "SharedFake.h"
 
 RemoteLink::Backend RemoteLink::defaultBackend()
 {
@@ -55,7 +57,11 @@ RemoteLink::RemoteLink(const Options &o) : opt_(o), t0_(std::chrono::steady_cloc
         opt_.backend = Backend::Fake;            // (the environment wins: a test never reaches a real unit)
     if (opt_.fps < 1 || opt_.fps > 60)
         opt_.fps = 20;
-    if (opt_.backend == Backend::Fake) {
+    if (opt_.backend != Backend::Fake)
+        opt_.sharedFake = false;
+    if (opt_.sharedFake) {
+        loopBuf_.resize(1u << 18);
+    } else if (opt_.backend == Backend::Fake) {
         rfm_fake_cfg_t fc;
         rfm_fake_cfg_default(&fc);
         fc.sx_rate_bps = 300000;                 // the M0 numbers (RemoteFM1 PLAN.md section 10), as fm1remote's
@@ -110,6 +116,22 @@ void RemoteLink::stop()
 
 void RemoteLink::invalidateScreen() { invalidate_.store(true, std::memory_order_release); }
 
+void RemoteLink::drop()
+{
+    dropReq_.store(true, std::memory_order_release);
+    cv_.notify_all();
+}
+
+bool RemoteLink::gateOpen()
+{
+    if (dropReq_.load(std::memory_order_acquire))
+        return false;
+    const Gate g = gate_.load(std::memory_order_acquire);
+    return !g || g(gateCtx_.load(std::memory_order_relaxed));
+}
+
+void RemoteLink::withSharedFake(const std::function<void(rfm_fake *)> &fn) { rfm::SharedFake::get().with(fn); }
+
 RemoteLink::Status RemoteLink::status() const
 {
     Status s;
@@ -122,6 +144,8 @@ RemoteLink::Status RemoteLink::status() const
     s.snapshotsTaken = snapshotsTaken_.load();
     s.fullResends = fullResends_.load();
     s.runs = runs_.load();
+    s.drops = drops_.load();
+    s.gateBlocked = gateBlocked_.load();
     return s;
 }
 
@@ -162,10 +186,8 @@ int RemoteLink::takeLock()
     lockError_.clear();
     std::error_code ec;
     const std::filesystem::path p(opt_.lockPath);
-    if (opt_.lockPath.empty()) {
-        lockError_ = "no lock file (HOME unknown)";
-        return -1;
-    }
+    if (opt_.lockPath.empty())
+        return kNoLock;                          // (RemoteFM1 iOS: no unit lock; the lease decides)
     std::filesystem::create_directories(p.parent_path(), ec);
     const int fd = ::open(opt_.lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) {
@@ -204,11 +226,23 @@ static std::string lockHolder(const std::string &path)
 void RemoteLink::runOnce()
 {
     runs_.fetch_add(1);
-    // ---- 1. the unit lock (one owner on this Mac)
+    // ---- 1. the unit lock (one owner on this Mac); the gate (RemoteFM1 iOS: the lease)
     int fd = -1;
+    dropReq_.store(false, std::memory_order_release);
+    if (!gateOpen()) {                           // (not ours to run: nothing is opened)
+        {
+            std::lock_guard<std::mutex> g(mu_);
+            want_ = false;
+        }
+        drops_.fetch_add(1);
+        setStatus(kInUse, "the panel belongs to another instance");
+        if (const DropFn d = onDrop_.load())
+            d(gateCtx_.load());
+        return;
+    }
     while (want_ && !quit_) {
         fd = takeLock();
-        if (fd >= 0)
+        if (fd >= 0 || fd == kNoLock)
             break;
         if (!lockError_.empty()) {
             setStatus(kError, lockError_);
@@ -219,7 +253,7 @@ void RemoteLink::runOnce()
         std::unique_lock<std::mutex> l(mu_);
         cv_.wait_for(l, std::chrono::milliseconds(kLockRetryMs), [this] { return !want_.load() || quit_.load(); });
     }
-    if (fd < 0) {
+    if (fd < 0 && fd != kNoLock) {
         setStatus(kOff, "off");
         return;
     }
@@ -243,12 +277,19 @@ void RemoteLink::runOnce()
             loops_[1] = {this, RFM_LINK_BK, -1};
             if (hasBulk())
                 loops_[1].id = rfm_session_add_link(s_, RFM_LINK_BK, loopWrite, &loops_[1], "fake bulk");
+        } else if (s_ && opt_.sharedFake) {      // (one port on the process's fake unit for this run)
+            sharedPort_ = rfm::SharedFake::get().open(opt_.fakeLabel.empty() ? opt_.hostName : opt_.fakeLabel);
+            loops_[0] = {this, RFM_LINK_SX, -1};
+            loops_[1] = {this, RFM_LINK_BK, -1};
+            if (sharedPort_ >= 0)
+                loops_[0].id = rfm_session_add_link(s_, RFM_LINK_SX, loopWrite, &loops_[0], "shared fake midi");
         }
     }
+    const bool fakePath = fake_ || opt_.sharedFake;
     bool ok = s_ != nullptr;
     if (!ok)
         setStatus(kError, "out of memory");
-    if (ok && !fake_) {
+    if (ok && !fakePath) {
         rfm_mac_cfg_t mc{};
         char err[200] = "";
         mc.allow_devices = 1;                    // (the real unit: CoreMIDI + the vendor bulk interface)
@@ -274,14 +315,18 @@ void RemoteLink::runOnce()
         setStatus(kSearching, "searching for the FM-1 (RemoteFM1 firmware)");
     }
 
-    // ---- 3. the loop (fm1remote's session_thread)
-    bool stopping = false;
+    // ---- 3. the loop (fm1remote's session_thread). The gate before anything that may send: closed, the run drops
+    bool stopping = false, dropped = false;
     uint32_t tStop = 0;
     while (ok) {
         const uint32_t t = now();
         std::unique_lock<std::mutex> fg(fakeMu_, std::defer_lock);
-        if (fake_)
+        if (fakePath)
             fg.lock();
+        if (!gateOpen()) {
+            dropped = true;
+            break;
+        }
         if (!want_ && !stopping) {
             rfm_session_stop(s_, t);             // SESSION start=0: the unit goes back to its waiting screen
             stopping = true;
@@ -290,12 +335,16 @@ void RemoteLink::runOnce()
         }
         if (stopping && (rfm_session_state(s_) == RFM_S_STOPPED || t - tStop > kStopMs))
             break;
-        if (!fake_ && rescan_.exchange(false, std::memory_order_acq_rel))
+        if (!fakePath && rescan_.exchange(false, std::memory_order_acq_rel))
             rfm_mac_rescan(mac_);
-        if (fake_)
+        if (fakePath)
             pumpFake(t);
         else
             rfm_mac_pump(mac_, t);
+        if (!gateOpen()) {
+            dropped = true;
+            break;
+        }
         if (const RemoteSnapshot *sn = tb_.take()) {
             rfm_session_set_frame(s_, sn->lcd);
             rfm_session_set_leds(s_, &sn->leds);
@@ -306,12 +355,16 @@ void RemoteLink::runOnce()
                 fullResends_.fetch_add(1);
             }
         }
+        if (!gateOpen()) {
+            dropped = true;
+            break;
+        }
         rfm_session_poll(s_, t);
-        if (fake_)
+        if (fakePath)
             pumpFake(t);
         if (!stopping)
             updateStatus(t);
-        if (fake_) {
+        if (fakePath) {
             fg.unlock();
             std::this_thread::sleep_for(std::chrono::microseconds(700));
         } else {
@@ -319,7 +372,8 @@ void RemoteLink::runOnce()
         }
     }
 
-    // ---- 4. the end: everything the unit held let go, the back ends closed, the lock released
+    // ---- 4. the end: everything the unit held let go, the back ends closed, the lock released. A dropped run sends
+    // nothing more (no SESSION 0), stays off, and then says so (onDrop: the lease's ack)
     engaged_.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> g(fakeMu_);
@@ -330,8 +384,23 @@ void RemoteLink::runOnce()
         rfm_session_free(s_);
         s_ = nullptr;
         loops_[0].id = loops_[1].id = -1;
+        if (sharedPort_ >= 0)
+            rfm::SharedFake::get().close(sharedPort_);
+        sharedPort_ = -1;
     }
-    ::close(fd);
+    if (fd >= 0)
+        ::close(fd);
+    if (dropped) {
+        {
+            std::lock_guard<std::mutex> g(mu_);
+            want_ = false;
+        }
+        drops_.fetch_add(1);
+        setStatus(kInUse, "the panel moved to another instance");
+        if (const DropFn d = onDrop_.load())
+            d(gateCtx_.load());
+        return;
+    }
     setStatus(kOff, "off");
 }
 
@@ -407,6 +476,13 @@ void RemoteLink::updateStatus(uint32_t t)
 
 void RemoteLink::pumpFake(uint32_t t)
 {
+    if (opt_.sharedFake) {
+        if (loops_[0].id < 0)
+            return;
+        if (const uint32_t n = rfm::SharedFake::get().take(sharedPort_, loopBuf_.data(), (uint32_t)loopBuf_.size()))
+            rfm_session_rx(s_, loops_[0].id, loopBuf_.data(), n, t);
+        return;
+    }
     rfm_fake_poll(fake_, t);
     for (const Loop &l : loops_) {
         if (l.id < 0)
@@ -421,6 +497,14 @@ void RemoteLink::pumpFake(uint32_t t)
 int RemoteLink::loopWrite(void *ctx, const uint8_t *p, uint32_t n)
 {
     const Loop *l = static_cast<const Loop *>(ctx);
+    if (l->self->opt_.sharedFake) {              // (the gate once more, right at the wire)
+        if (!l->self->gateOpen()) {
+            l->self->gateBlocked_.fetch_add(1);
+            return 0;
+        }
+        rfm::SharedFake::get().write(l->self->sharedPort_, p, n);
+        return 0;
+    }
     if (l->kind == RFM_LINK_SX)
         rfm_fake_rx_sx(l->self->fake_, p, n, l->self->now());
     else

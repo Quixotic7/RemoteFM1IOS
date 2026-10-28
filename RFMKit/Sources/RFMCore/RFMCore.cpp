@@ -2,7 +2,7 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // RFMCore: RemoteLink and the M1 producer (see include/RFMCore.h). M3: an engine (RFMEngine.cpp) can take the link
 // over (rfmc_set_external): the producer then neither pops the panel's events nor publishes, and the engine reports
-// what it applied back here for the app's Panel card.
+// what it applied back here for the app's Panel card. M4: the lease (rfmc_set_lease, rfmc_claim) and the shared fake.
 #include "RFMCore.h"
 #include "RFMInternal.h"
 
@@ -18,6 +18,7 @@
 #include "RemoteLink.h"
 #include "patterns.h"
 #include "rfm/fake.h"
+#include "SharedFake.h"
 
 // the matrix id at (packed row bit, column), -1 none: felucca-bsp's FM1_KEYMAP (Leo Kuroshita, Hügelton Instruments,
 // MPL-2.0) as RemoteFM1's firmware/src/rfm_main.c has it. Note key k is id 14 + k, matrix button b is id b.
@@ -63,6 +64,10 @@ static void rect(uint16_t *f, int x, int y, int w, int h, uint16_t c)
 
 struct rfmc {
     explicit rfmc(const RemoteLink::Options &o) : link(o), t0(std::chrono::steady_clock::now()) {}
+
+    // M4: the lease (declared before the link: the link's last stop still reads them)
+    std::atomic<rfml_t *> lease{nullptr};
+    std::atomic<uint32_t> lastBeat{0};
 
     RemoteLink link;
     uint32_t period = 50;
@@ -258,6 +263,8 @@ rfmc_t *rfmc_new(const rfmc_cfg_t *cfg)
     o.fps = cfg->fps ? cfg->fps : 20;
     o.lockPath = cfg->lock_path ? cfg->lock_path : "";
     o.hostName = cfg->host_name && *cfg->host_name ? cfg->host_name : "RemoteFM1 iOS";
+    o.sharedFake = cfg->shared_fake != 0;
+    o.fakeLabel = cfg->label ? cfg->label : "";
     rfmc_t *c = new rfmc(o);
     c->period = 1000u / (o.fps < 1 || o.fps > 60 ? 20u : o.fps);
     c->th = std::thread([c] { c->threadMain(); });
@@ -268,6 +275,8 @@ void rfmc_free(rfmc_t *c)
 {
     if (!c)
         return;
+    if (rfml_t *l = c->lease.load())
+        rfml_observe(l, nullptr, nullptr);      // (no notification handler runs once this returns)
     {
         std::lock_guard<std::mutex> l(c->mu);
         c->quit = true;
@@ -299,6 +308,74 @@ void rfmc_stop(rfmc_t *c)
 }
 
 void rfmc_set_pattern(rfmc_t *c, int on) { c->pattern.store(on != 0); }
+
+// ---- the lease
+// the session thread, before it sends: the epoch still ours; the heartbeat about once a second
+static bool leaseGate(void *ctx)
+{
+    rfmc *c = static_cast<rfmc *>(ctx);
+    rfml_t *l = c->lease.load(std::memory_order_acquire);
+    if (!l)
+        return true;
+    if (!rfml_current(l))
+        return false;
+    const uint32_t t = c->now();
+    if (t - c->lastBeat.load(std::memory_order_relaxed) >= 1000u) {
+        c->lastBeat.store(t, std::memory_order_relaxed);
+        rfml_heartbeat(l);
+    }
+    return true;
+}
+
+// the session thread, the dropped run's links closed: the ack
+static void leaseDropped(void *ctx)
+{
+    rfmc *c = static_cast<rfmc *>(ctx);
+    if (rfml_t *l = c->lease.load())
+        rfml_ack(l);
+}
+
+// the lease's notification (its own queue): an epoch newer than ours makes a running link drop (its thread acks);
+// a link that isn't running acks here
+static void leaseNotified(void *ctx)
+{
+    rfmc *c = static_cast<rfmc *>(ctx);
+    rfml_t *l = c->lease.load();
+    if (!l || !rfml_my_epoch(l) || rfml_current(l))
+        return;
+    if (c->link.wanted() || c->link.engaged())
+        c->link.drop();
+    else
+        rfml_ack(l);
+}
+
+void rfmc_set_lease(rfmc_t *c, rfml_t *l)
+{
+    if (rfml_t *old = c->lease.exchange(l))
+        rfml_observe(old, nullptr, nullptr);
+    if (l) {
+        c->link.setGate(leaseGate, leaseDropped, c);
+        rfml_observe(l, leaseNotified, c);
+    } else {
+        c->link.setGate(nullptr, nullptr, nullptr);
+    }
+}
+
+int rfmc_claim(rfmc_t *c, uint32_t wait_ms, rfml_claim_t *out)
+{
+    rfml_t *l = c->lease.load();
+    if (!l) {
+        rfmc_start(c);
+        return 1;
+    }
+    if (!rfml_claim(l, wait_ms, out) || !rfml_current(l))
+        return 0;
+    c->lastBeat.store(c->now());
+    rfmc_start(c);
+    return 1;
+}
+
+void rfmc_drop(rfmc_t *c) { c->link.drop(); }
 
 void rfmc_rescan(rfmc_t *c) { c->link.requestRescan(); }
 
@@ -342,6 +419,8 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
     st->ack_ms_max = s.ackMsMax;
     st->ack_timeouts = s.ackTimeouts;
     st->discoveries = s.discoveries;
+    st->drops = s.drops;
+    st->gate_blocked = s.gateBlocked;
     copyStr(st->text, sizeof st->text, s.text.c_str());
     copyStr(st->log, sizeof st->log, s.lastLog.c_str());
     if (s.haveHello) {
@@ -460,6 +539,32 @@ int rfmc_fake_button_lit(rfmc_t *c, uint32_t b)
     rfmc_fake_t s;
     return rfmc_fake_state(c, &s) && b < RFM_NBTN && ledIs(s.lit, (int)b);
 }
+
+void rfmc_shared_fake(rfmc_shared_t *out)
+{
+    std::memset(out, 0, sizeof *out);
+    const rfm::SharedFake::Record r = rfm::SharedFake::get().record();
+    out->session = r.session;
+    copyStr(out->last_starter, sizeof out->last_starter, r.lastStarter.c_str());
+    out->starts = r.starts;
+    out->frames = r.frames;
+    out->acks = r.acks;
+    out->open_ports = r.openPorts;
+    for (const auto &x : r.senders) {
+        if (out->nsenders >= 16)
+            break;
+        rfmc_sender_t &d = out->senders[out->nsenders++];
+        copyStr(d.label, sizeof d.label, x.label.c_str());
+        d.msgs = x.msgs;
+        d.starts = x.starts;
+        d.stops = x.stops;
+        d.tiles = x.tiles;
+        d.after_other = x.afterOther;
+        d.after_other_tiles = x.afterOtherTiles;
+    }
+}
+
+void rfmc_shared_fake_panel(uint8_t *rgba) { rfm::SharedFake::get().panelRGBA(rgba); }
 
 } // extern "C"
 

@@ -45,7 +45,7 @@ struct ContentView: View {
             .padding(16)
         }
         .background(Theme.background.ignoresSafeArea())
-        .onAppear { if !controller.isRunning { controller.start() } }
+        .onAppear { controller.appeared() }
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
         .sheet(isPresented: $showAbout) { AboutFirmware(info: player.current) }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)) }
@@ -65,11 +65,16 @@ struct ContentView: View {
             Button { showBluetooth = true } label: { Label("Bluetooth", systemImage: "dot.radiowaves.left.and.right").lineLimit(1) }
                 .buttonStyle(.bordered)
                 .fixedSize()
-            Button(controller.isRunning ? "Disconnect" : "Connect") {
+            Button(controller.isRunning ? "Disconnect" : "Use this FM-1") {
                 controller.isRunning ? controller.stop() : controller.start()
             }
             .buttonStyle(.borderedProminent)
             .fixedSize()
+            if let p = controller.panel, p.heldElsewhere {
+                Text(p.line).font(.footnote).foregroundStyle(Theme.accent).lineLimit(2)
+            } else if let w = controller.panel?.leaseWarning {
+                Text(w).font(.footnote).foregroundStyle(.orange).lineLimit(2)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -183,22 +188,6 @@ struct Card<Content: View>: View {
     }
 }
 
-/// label: value rows in small monospace
-struct Rows: View {
-    let rows: [(String, String)]
-
-    var body: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
-            ForEach(rows.indices, id: \.self) { i in
-                GridRow {
-                    Text(rows[i].0).foregroundStyle(.secondary)
-                    Text(rows[i].1).textSelection(.enabled)
-                }
-            }
-        }
-        .font(.system(.caption, design: .monospaced))
-    }
-}
 
 struct PanelCard: View {
     let controller: RemoteController
@@ -325,46 +314,5 @@ struct CoreCard: View {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f.string(from: d)
-    }
-}
-
-/// name, version, licence, source and credits of the firmware: the GPL and the cores' notices, visible
-struct AboutFirmware: View {
-    let info: CoreInfo?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let c = info {
-                        Text("\(c.name) \(c.version)").font(.title2.bold())
-                        Rows(rows: [
-                            ("licence", c.license),
-                            ("family", c.family),
-                            ("core ABI", "\(c.abi)"),
-                            ("flash", "\(c.flashSize / 1024) KiB"),
-                            ("slots", "\(c.slots) (\(c.inUse) in use)"),
-                        ])
-                        Text("Source").font(.headline)
-                        Text(c.sourceURL).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
-                        if !c.credits.isEmpty {
-                            Text("Credits and notices").font(.headline)
-                            Text(c.credits).font(.footnote).textSelection(.enabled)
-                        }
-                    }
-                    Text("RemoteFM1").font(.headline)
-                    Text("This app and the firmware above are free software under the GNU General Public License, "
-                         + "version 3 (GPL-3.0-only). The firmware runs as built from the source named above, through "
-                         + "FM1VST's core interface.")
-                        .font(.footnote)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-            }
-            .navigationTitle("About this firmware")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }
-        .preferredColorScheme(.dark)
     }
 }

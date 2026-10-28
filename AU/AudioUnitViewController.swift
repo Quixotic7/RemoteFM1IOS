@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // The extension's principal class: the AU's view controller and its factory, as in Apple's AUv3 template. The audio
-// unit itself (RFMAudioUnit) and the probes are in RFMKit.
+// unit itself (RFMAudioUnit) and the probes are in RFMKit. Sheets (Bluetooth, About this firmware) are presented with
+// UIKit: SwiftUI's .sheet crashed inside the extension (M2).
 
 import CoreAudioKit
 import RFMKit
@@ -16,6 +17,7 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
     public override func viewDidLoad() {
         super.viewDidLoad()
         model.onBluetooth = { [weak self] in self?.presentBluetooth() }
+        model.onAbout = { [weak self] info in self?.presentAbout(info) }
         let hosting = UIHostingController(rootView: AUView(model: model))
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         hosting.view.backgroundColor = .clear
@@ -29,7 +31,7 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
         ])
         hosting.didMove(toParent: self)
         view.backgroundColor = UIColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1)
-        preferredContentSize = CGSize(width: 420, height: 480)
+        preferredContentSize = CGSize(width: 400, height: 400)
         log.info("view loaded, pid \(getpid())")
     }
 
@@ -44,6 +46,17 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
         nav.modalPresentationStyle = .overCurrentContext
         definesPresentationContext = true
         present(nav, animated: false)
+    }
+
+    /// the app's "About this firmware", over the AU's view
+    func presentAbout(_ info: CoreInfo?) {
+        guard isViewLoaded, view.window != nil, presentedViewController == nil else { return }
+        let host = UIHostingController(rootView: AboutFirmware(info: info, onDone: { [weak self] in
+            self?.dismiss(animated: false)
+        }))
+        host.modalPresentationStyle = .overCurrentContext
+        definesPresentationContext = true
+        present(host, animated: false)
     }
 
     public override func viewDidAppear(_ animated: Bool) {
@@ -67,10 +80,19 @@ private struct UnitRef: @unchecked Sendable { let au: RFMAudioUnit }
 @Observable
 final class AUViewModel {
     var instance = "–"
+    var status = RFMAudioUnit.Status()
+    var cores: [CoreInfo] = []
+    var preview: CGImage?
     var report: ProbeReport?
+    var diagnosticsOpen = false
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
-    @ObservationIgnored private var au: RFMAudioUnit?
+    @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
+    @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
+    @ObservationIgnored private var previewSeq: UInt32 = 0
+    @ObservationIgnored private var ticks = 0
+
+    var current: CoreInfo? { cores.first { $0.id == status.coreID } }
 
     func attach(_ au: RFMAudioUnit) {
         self.au = au
@@ -86,7 +108,7 @@ final class AUViewModel {
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refresh()
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
@@ -94,10 +116,28 @@ final class AUViewModel {
     func refresh() {
         guard let au else { return }
         instance = au.state.short
-        let ref = UnitRef(au: au)
-        Task.detached {
-            let r = ref.au.probe.report(write: false)
-            await MainActor.run { [weak self] in self?.report = r }
+        status = au.status()
+        let p = au.preview(have: previewSeq)
+        if let img = p.image {
+            previewSeq = p.seq
+            preview = img
+        }
+        ticks += 1
+        if ticks % 10 == 1 {
+            let c = au.cores
+            if c != cores { cores = c }
+            if diagnosticsOpen {
+                let ref = UnitRef(au: au)
+                Task.detached {
+                    let r = ref.au.probe.report(write: false)
+                    await MainActor.run { [weak self] in self?.report = r }
+                }
+            }
         }
     }
+
+    func select(_ id: String) { au?.selectCore(id) }
+    func claim() { au?.claimPanel() }
+    func restart() { au?.restartCore() }
+    func setTranspose(_ t: Int) { au?.settings.transpose = t }
 }

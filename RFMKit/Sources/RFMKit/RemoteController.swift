@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // RemoteController: the app's handle on one RemoteLink (RFMCore). It starts and stops the link, turns the test pattern
-// on and off, and publishes what the link knows, read from RFMCore about 15 times a second on the main actor.
+// on and off, and publishes what the link knows, read from RFMCore about 15 times a second on the main actor. M4: with
+// a lease (PanelSession), start() is the claim ("Use this FM-1"), stop() the owner's explicit disconnect, and
+// appeared() applies the automatic rules (PLAN.md section 4) with the app's own UUID.
 
 import CoreGraphics
 import Foundation
@@ -31,9 +33,11 @@ public final class RemoteController {
     public private(set) var master: Int?
     public private(set) var preview: CGImage?          // the frame being sent (also while not connected)
     public private(set) var midiSetupChanges = 0
+    public private(set) var panel: PanelStatus?        // (with a lease) who holds the FM-1
+    @ObservationIgnored public private(set) var session: PanelSession?
 
     public static let maxEvents = 12
-    static let notFoundAfter: TimeInterval = 3
+    nonisolated static let notFoundAfter: TimeInterval = 3
 
     @ObservationIgnored nonisolated(unsafe) var core: OpaquePointer?     // (rfmc_t; CorePlayer runs its engine on it)
     @ObservationIgnored private var lastSeq: UInt32 = 0
@@ -47,10 +51,12 @@ public final class RemoteController {
     #endif
 
     /// demoInput (fake only): the fake unit presses keys and turns an encoder by itself, so the panel path shows.
+    /// lease: the shared-session lease (M4) under `identity` (no unit lock then); nil: M1's flock at lockPath
     public init(backend: Backend, patternOn: Bool = true, fps: UInt32 = 20, hostName: String = "RemoteFM1 iOS",
                 demoInput: Bool = false,
                 lockPath: String = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("remotefm1-unit.lock").path) {
+                    .appendingPathComponent("remotefm1-unit.lock").path,
+                lease: PanelSession.Config? = nil, identity: UUID = UUID(), ownerName: String = "RemoteFM1") {
         self.backend = backend
         self.patternOn = patternOn
         var cfg = rfmc_cfg_t()
@@ -61,7 +67,8 @@ public final class RemoteController {
         } else {
             cfg.backend = Int32(RFMC_DEVICE)
         }
-        core = lockPath.withCString { lp in
+        let lp0 = lease == nil ? lockPath : ""
+        core = lp0.withCString { lp in
             hostName.withCString { hn in
                 cfg.lock_path = lp
                 cfg.host_name = hn
@@ -69,6 +76,10 @@ public final class RemoteController {
             }
         }
         if let core { rfmc_set_pattern(core, patternOn ? 1 : 0) }
+        if let core, var lease {
+            lease.fake = backend.isFake
+            session = PanelSession(link: core, identity: identity, name: ownerName, config: lease)
+        }
         #if canImport(CoreMIDI)
         if backend == .device {
             watcher = MIDISetupWatcher { [weak self] in
@@ -83,7 +94,9 @@ public final class RemoteController {
     deinit {
         poller?.cancel()
         demo?.cancel()
-        if let core {
+        if let session {
+            session.finish()                    // (frees the link, then the lease, in the background)
+        } else if let core {
             let ref = CoreRef(p: core)
             DispatchQueue.global(qos: .utility).async { rfmc_free(ref.p) }   // (a stop waits up to ~600 ms)
         }
@@ -91,25 +104,34 @@ public final class RemoteController {
 
     // MARK: control
 
+    /// starts the link; with a lease, "Use this FM-1": the claim first (on the session's queue)
     public func start() {
         guard let core else { return }
-        rfmc_start(core)
+        if let session { session.claim() } else { rfmc_start(core) }
         isRunning = true
         refresh()
     }
 
     public func stop() {
         guard let core else { return }
-        rfmc_stop(core)
+        if let session { session.release() } else { rfmc_stop(core) }
         isRunning = false
         refresh()
     }
+
+    /// the app came up: with a lease, PLAN.md section 4's automatic rules; without, start()
+    public func appeared() {
+        if let session { session.appeared() } else if !isRunning { start() }
+    }
+
+    public func setOwnerName(_ name: String) { session?.setName(name) }
 
     /// Stops and frees the link now (SESSION 0 first, at most ~600 ms). The controller is inert afterwards.
     public func shutdown() {
         poller?.cancel()
         demo?.cancel()
-        if let core { rfmc_free(core) }
+        if let session { session.finish() } else if let core { rfmc_free(core) }
+        session = nil
         core = nil
         isRunning = false
         state = .stopped("")
@@ -190,6 +212,10 @@ public final class RemoteController {
         if h != hello { hello = h }
         let ls = Self.stats(of: st)
         if ls != stats { stats = ls }
+        if let session {
+            let p = session.status()
+            if p != panel { panel = p }
+        }
 
         var buf = [rfmc_event_t](repeating: rfmc_event_t(), count: Self.maxEvents)
         let n = Int(rfmc_events(core, lastSeq, &buf, UInt32(Self.maxEvents)))
@@ -214,7 +240,7 @@ public final class RemoteController {
 
     // MARK: conversions
 
-    static func state(of st: rfmc_status_t, searchingSince: inout Date?) -> LinkState {
+    nonisolated static func state(of st: rfmc_status_t, searchingSince: inout Date?) -> LinkState {
         let text = string(st.text)
         var searching = false
         defer { if !searching { searchingSince = nil } }
@@ -240,7 +266,7 @@ public final class RemoteController {
         }
     }
 
-    static func hello(of st: rfmc_status_t) -> UnitHello {
+    nonisolated static func hello(of st: rfmc_status_t) -> UnitHello {
         var h = UnitHello()
         h.name = string(st.name)
         h.version = string(st.ver)
@@ -261,7 +287,7 @@ public final class RemoteController {
         return h
     }
 
-    static func stats(of st: rfmc_status_t) -> LinkStats {
+    nonisolated static func stats(of st: rfmc_status_t) -> LinkStats {
         var s = LinkStats()
         s.fps = st.fps
         s.runs = st.runs
@@ -309,7 +335,7 @@ public final class RemoteController {
         withUnsafeBytes(of: t) { raw in String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self) }
     }
 
-    static func image(_ rgba: [UInt8]) -> CGImage? {
+    nonisolated static func image(_ rgba: [UInt8]) -> CGImage? {
         let w = Int(RFMC_W), h = Int(RFMC_H)
         guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
         return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,

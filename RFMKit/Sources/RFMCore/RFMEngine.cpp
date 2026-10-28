@@ -6,7 +6,8 @@
 // plugin/Processor.cpp mapping (applyRemote: buttons by label, encoders by role with enc_dir undone, velocity 100 for
 // the unit's keys; remoteLeds: each LED in the plane of its fm1p_led_class, PLAY green); slots instead of
 // CoreLoader's copies; the clock owned by one of audio / timer / caller at a time (rfme_set_clock); the preview
-// for the app; flash on request; the core's stats() and the render's own time.
+// for the app; flash on request; the core's stats() and the render's own time. M4: host MIDI in (FM1VST's handleMidi,
+// pushKeys, forwardMidi and toUsbPackets) and the core's MIDI out kept for the AU's MIDI output.
 #include "RFMEngine.h"
 
 #include <mach/mach_time.h>
@@ -38,6 +39,30 @@ constexpr uint32_t kPeriodMs = RemoteLink::kPeriodMs;   // the LCD and LEDs at m
 constexpr uint32_t kFlashEveryMs = 30000;
 constexpr uint32_t kStatsEveryMs = 500;
 constexpr int kRemoteVel = 100;                          // RemoteFM1 sends no velocity (Processor.cpp kRemoteVel)
+constexpr int kNoteBase = 53;                            // the MIDI note of key 0 (F3), Processor.h kNoteBase
+constexpr uint32_t kInRing = 512;                        // host MIDI packets waiting for the core's midi_in
+
+// one MIDI message -> USB-MIDI event packets (cable 0): FM1VST's toUsbPackets (plugin/EditorPort.h), channel and system
+// messages only (the host's SysEx is not passed in)
+template <typename Put> void toUsbPackets(const uint8_t *d, uint32_t n, Put &&put)
+{
+    auto pkt = [](uint32_t cin, uint32_t a, uint32_t b, uint32_t c) { return (cin & 15u) | a << 8 | b << 16 | c << 24; };
+    if (n == 0)
+        return;
+    const uint8_t st = d[0];
+    if (st >= 0xF8) {
+        put(pkt(0xF, st, 0, 0));
+    } else if (st >= 0xF0) {
+        if (st == 0xF1 || st == 0xF3)
+            put(pkt(2, st, n > 1 ? d[1] : 0u, 0));
+        else if (st == 0xF2)
+            put(pkt(3, st, n > 1 ? d[1] : 0u, n > 2 ? d[2] : 0u));
+        else if (st == 0xF6)
+            put(pkt(5, st, 0, 0));
+    } else if (st >= 0x80) {
+        put(pkt(st >> 4, st, n > 1 ? d[1] : 0u, n > 2 ? d[2] : 0u));
+    }
+}
 
 struct Preview {
     uint16_t lcd[FM1P_LCD_W * FM1P_LCD_H];
@@ -97,6 +122,17 @@ struct rfme {
 
     // the clock thread's own
     uint32_t noteKeys = 0, labels = 0, matrixButtons = 0;
+    // host MIDI (the clock's own; FM1VST's midiKeys_, midiVel_, noteKey_, keyCount_, appliedKeys_, inRing_)
+    uint32_t midiKeys = 0, appliedKeys = 0;
+    uint8_t midiVel[FM1P_NKEY] = {};
+    uint8_t keyCount[FM1P_NKEY] = {};
+    int8_t noteKey[16][128];
+    uint32_t inRing[kInRing] = {};
+    uint32_t inR = 0, inW = 0;
+    std::atomic<int> notesPlayKeys{1}, transpose{0}, keyNotesToFw{0};
+    std::atomic<bool> midiOutOn{false};
+    rfm::Spsc<uint32_t, 2048> midiOutQ;                  // the clock -> the render thread (the AU's MIDI output)
+    std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
     int32_t masterV = -1;
     uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
     rfm_leds_t lastLeds{};
@@ -155,6 +191,88 @@ struct rfme {
             tcv.notify_all();
     }
 
+    rfme() { std::memset(noteKey, -1, sizeof noteKey); }
+
+    // the keys held by the unit and by host notes, to the device; a key newly down gets its velocity first
+    // (Processor.cpp pushKeys)
+    void pushKeys()
+    {
+        const uint32_t m = noteKeys | midiKeys;
+        if (m == appliedKeys)
+            return;
+        const uint32_t down = m & ~appliedKeys;
+        for (int k = 0; k < FM1P_NKEY; k++)
+            if ((down >> k) & 1u)
+                dev->key_vel(k, (midiKeys >> k) & 1u ? midiVel[k] : (noteKeys >> k) & 1u ? kRemoteVel : 0);
+        dev->keys(m);
+        appliedKeys = m;
+    }
+
+    void resetMidi()
+    {
+        midiKeys = appliedKeys = 0;
+        std::memset(noteKey, -1, sizeof noteKey);
+        std::memset(keyCount, 0, sizeof keyCount);
+        inR = inW = 0;
+    }
+
+    void flushMidiIn()
+    {
+        while (inR != inW && dev->midi_in(inRing[inR % kInRing]))
+            inR++;                                       // (0: no room in the core: retried after the next render)
+    }
+
+    // one host MIDI message (Processor.cpp handleMidi + forwardMidi)
+    void hostMidi(const uint8_t *d, uint32_t n)
+    {
+        if (n == 0 || !(d[0] & 0x80))
+            return;
+        midiInCount.fetch_add(1, std::memory_order_relaxed);
+        bool keyNote = false;
+        if (notesPlayKeys.load(std::memory_order_relaxed) && d[0] < 0xF0) {
+            const uint8_t st = d[0] & 0xF0, ch = d[0] & 0x0F;
+            const uint8_t note = n > 1 ? (d[1] & 0x7F) : 0, vel = n > 2 ? (d[2] & 0x7F) : 0;
+            if (st == 0x90 && n >= 3 && vel > 0) {
+                const int key = (int)note - kNoteBase + 12 * transpose.load(std::memory_order_relaxed);
+                if (noteKey[ch][note] < 0 && key >= 0 && key < FM1P_NKEY) {
+                    noteKey[ch][note] = (int8_t)key;
+                    midiVel[key] = vel;
+                    keyCount[key]++;
+                    midiKeys |= 1u << key;
+                    keyNote = true;
+                    midiNotes.fetch_add(1, std::memory_order_relaxed);
+                }
+            } else if ((st == 0x80 && n >= 2) || (st == 0x90 && n >= 3)) {
+                const int key = noteKey[ch][note];
+                if (key >= 0) {
+                    noteKey[ch][note] = -1;
+                    if (keyCount[key] && --keyCount[key] == 0)
+                        midiKeys &= ~(1u << key);
+                    keyNote = true;
+                }
+            } else if (st == 0xB0 && n >= 3 && (d[1] == 123 || d[1] == 120)) {   // all notes off, all sound off
+                for (int k = 0; k < 128; k++) {
+                    const int key = noteKey[ch][k];
+                    if (key >= 0) {
+                        noteKey[ch][k] = -1;
+                        if (keyCount[key] && --keyCount[key] == 0)
+                            midiKeys &= ~(1u << key);
+                    }
+                }
+            }
+            pushKeys();
+        }
+        if (!keyNote || keyNotesToFw.load(std::memory_order_relaxed)) {
+            toUsbPackets(d, n, [this](uint32_t p) {
+                if (inW - inR < kInRing)
+                    inRing[inW++ % kInRing] = p;
+                else
+                    midiInDropped.fetch_add(1, std::memory_order_relaxed);
+            });
+            flushMidiIn();
+        }
+    }
+
     // ---- the between hook (the clock thread)
     void apply(const rfm_event_t &e)
     {
@@ -164,15 +282,13 @@ struct rfme {
             if (e.index < FM1P_NKEY) {
                 const uint32_t bit = 1u << e.index;
                 if (e.value) {
-                    if (!(noteKeys & bit)) {
-                        dev->key_vel(e.index, kRemoteVel);   // (before the key goes down: panel->key_vel)
+                    if (!(noteKeys & bit))
                         keysPressed.fetch_add(1, std::memory_order_relaxed);
-                    }
                     noteKeys |= bit;
                 } else {
                     noteKeys &= ~bit;
                 }
-                dev->keys(noteKeys);                         // (a key newly down also taps)
+                pushKeys();                                  // (its velocity first; a key newly down also taps)
             }
             break;
         case RFM_EV_BUTTON:
@@ -206,7 +322,7 @@ struct rfme {
             break;
         case RemoteLink::kEvRelease:                         // the session ended: nothing is held any more
             noteKeys = labels = matrixButtons = 0;
-            dev->keys(0);
+            pushKeys();                                      // (the host's notes stay down)
             dev->buttons(0);
             break;
         default:
@@ -266,8 +382,12 @@ struct rfme {
         while (in.pop(ev))
             apply(ev);
         devMs.store(ms, std::memory_order_relaxed);
-        for (uint32_t pkt; dev->midi_out_take(&pkt);)      // (no MIDI out in M3: counted and dropped)
+        const bool keep = midiOutOn.load(std::memory_order_relaxed);
+        for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
             midiOut.fetch_add(1, std::memory_order_relaxed);
+            if (keep)
+                (void)midiOutQ.push(pkt);
+        }
         if (!halted.load(std::memory_order_relaxed) && dev->halted()) {
             haltCode.store((uint32_t)dev->core()->halted(), std::memory_order_relaxed);
             halted.store(true, std::memory_order_release);
@@ -360,6 +480,7 @@ struct rfme {
     {
         dev->boot_from(bytes && n ? bytes : nullptr, bytes ? n : 0);
         noteKeys = labels = matrixButtons = 0;
+        resetMidi();
         masterV = -1;
         pubValid = linkValid = false;
         lastPub = lastFlashCheck = lastStats = 0;
@@ -470,9 +591,9 @@ void rfme_attach(rfme_t *e, int on)
 {
     const int prev = e->stop();
     if (e->attached.exchange(on != 0) != (on != 0) && e->owner) {
-        if (!on && e->booted) {                         // (what the unit held lets go)
+        if (!on && e->booted) {                         // (what the unit held lets go; the host's notes stay)
             e->noteKeys = e->labels = e->matrixButtons = 0;
-            e->dev->keys(0);
+            e->pushKeys();
             e->dev->buttons(0);
         }
         e->linkValid = false;
@@ -489,13 +610,28 @@ void rfme_set_clock(rfme_t *e, int owner)
 
 int rfme_clock(rfme_t *e) { return e->clock.load(); }
 
-void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate)
+void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate) { rfme_render_midi(e, L, R, n, rate, nullptr, 0); }
+
+int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev)
 {
     const uint64_t t0 = mach_absolute_time();
+    int ok;
     {
         rfme::Scope cs(e, RFME_CLOCK_AUDIO);
+        ok = cs.ok;
         if (cs.ok) {
-            e->dev->render(L, R, n, rate);
+            uint32_t pos = 0;                           // (FM1VST renderBlock: the device runs up to each event)
+            for (uint32_t i = 0; i < nev; i++) {
+                const uint32_t at = ev[i].offset < n ? ev[i].offset : n;
+                if (at > pos) {
+                    e->dev->render(L + pos, R ? R + pos : nullptr, at - pos, rate);
+                    pos = at;
+                }
+                e->hostMidi(ev[i].data, ev[i].len > 3 ? 3u : ev[i].len);
+            }
+            if (pos < n)
+                e->dev->render(L + pos, R ? R + pos : nullptr, n - pos, rate);
+            e->flushMidiIn();
         } else {
             std::memset(L, 0, n * sizeof *L);
             if (R && R != L)
@@ -512,7 +648,19 @@ void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate)
     if (us > e->renderMaxUs.load(std::memory_order_relaxed))
         e->renderMaxUs.store(us, std::memory_order_relaxed);
     e->rate.store(rate, std::memory_order_relaxed);
+    return ok;
 }
+
+void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware)
+{
+    e->notesPlayKeys.store(notes_play_keys != 0);
+    e->transpose.store(transpose < -2 ? -2 : transpose > 2 ? 2 : transpose);
+    e->keyNotesToFw.store(key_notes_to_firmware != 0);
+}
+
+void rfme_midi_out_enable(rfme_t *e, int on) { e->midiOutOn.store(on != 0); }
+
+int rfme_midi_out_take(rfme_t *e, uint32_t *pkt) { return e->midiOutQ.pop(*pkt) ? 1 : 0; }
 
 void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
 {
@@ -581,6 +729,9 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->events_dropped = e->dropped.load();
     st->keys_pressed = e->keysPressed.load();
     st->midi_out = e->midiOut.load();
+    st->midi_in = e->midiInCount.load();
+    st->midi_notes = e->midiNotes.load();
+    st->midi_in_dropped = e->midiInDropped.load();
     st->shed = e->shed.load();
     st->cpu_pct = e->cpuPct.load();
     st->have_stats = e->haveStats.load();
@@ -682,6 +833,14 @@ int rfme_param_set(rfme_t *e, const char *name, int32_t value)
         return 0;
     p->set(value);
     return 1;
+}
+
+int rfme_param_read(rfme_t *e, const char *name, int32_t *value)
+{
+    const int prev = e->stop();
+    const int ok = rfme_param_get(e, name, value);
+    e->resume(prev);
+    return ok;
 }
 
 int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t *max, int32_t *value)

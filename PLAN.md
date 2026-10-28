@@ -1,10 +1,11 @@
 # RemoteFM1 for iOS (plan)
 
 Status (2026-10-27): M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
-On the simulator, with the fake unit: the app sends the test pattern and shows panel events; the AUv3 extension
-loads, renders silence and answers section 5's checks that the simulator can; ChoralRoot, Felucca and Melodee run in
-the standalone app with the fake unit as their panel, and make sound. Nothing yet on the iPhone or the real
-"FM-1 7938" (M1's test, M2's and M3's device parts). Owner's decisions in section 7.
+On the simulator, with the fake unit: the app sends the test pattern and shows panel events; ChoralRoot, Felucca
+and Melodee run in the standalone app and in the AUv3, and make sound; AU instances keep their core and flash in
+`fullState`, and share one FM-1 through the lease (section 4: takeover both ways, reconnect after a reload, between
+the app and the extension). Nothing yet on the iPhone, the real "FM-1 7938" or a real host (AUM, GarageBand): the
+device parts of M1–M4. Owner's decisions in section 7.
 
 An iPhone/iPad host for FM-1 firmware cores, with a real FM-1 running RemoteFM1 firmware 0.2.2 as the panel: keys,
 buttons, encoders and MASTER come in; the firmware's 240×240 screen and LEDs go out; sound plays on the iOS device.
@@ -102,6 +103,15 @@ So the device can't share. The instances must agree among themselves, and only o
 - **Across devices.** A Mac running FM1VST and an iPhone running this app will fight over the unit as above. The app
   can only say so ("the FM-1 has a session from elsewhere": HELLO_R `session8` = 1 with no lease owner). The fix
   belongs in the protocol (e.g. an owner token in SESSION, or a "taken" notice): proposed to RemoteFM1, not done here.
+- **As built (M4).** The record is 4 KiB, `lease.bin` in the App Group (`RFMCore/RFMLease.cpp`); the rules are in
+  `RFMKit/PanelSession.swift`. RemoteLink's session thread checks the epoch before each run, pump, frame and poll;
+  on a newer epoch it drops the run (no SESSION 0), closes its CoreMIDI links, then acks. A deallocated owner sets
+  the pid to 0 and keeps its UUID, so a reload reconnects. Instances that come back together wait 2 s before
+  claiming a free or stale unit. A restored UUID that is already live (a duplicated track) gets a new UUID and never
+  claims by itself. "The FM-1 has a session from elsewhere" is a guess: HELLO_R's session flag with no owner here
+  in the last 6 s. Limit: between the epoch check and a write already under way, a stale owner can still finish
+  that one write (microseconds); the new owner starts only after the old one's ack. On the simulator an ack took
+  2 ms, within one process and between the app and the extension.
 - **Fallback without an App Group** (if one turns out not to work for an extension): Darwin notify state
   (`notify_set_state`, 64 bits: a short owner ID + epoch) carries the same lease, without the host/core names. M2 on
   the simulator: the App Group container, an mmap'd file in it, Darwin notifications and notify state all work between
@@ -121,9 +131,10 @@ probes run on the iPhone from the app's "AU test" button.
 | USB on the owner's iPhone 13 Pro Max: with FIZZ, the FM-1 did not appear over the Lightning camera adapter | Bluetooth first. USB is tested on a USB-C iPad when there is one | not testable | device only |
 | Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) runs there too, as in FM1VST. 44.1 kHz resampled to the session rate | C++ kernel renders silence, takes host MIDI; a std::thread in the extension keeps running while it renders | timing under load |
 | Memory | measured with 1, 4 and 8 instances | `os_proc_available_memory` is 0 (no limit on the simulator); footprint ~23 MB | the real limit: device only |
-| State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does | instance UUID and format version survive save and restore into a new instance (keys `rfm1.instance`, `rfm1.format`) | (the rest comes with M3/M4) |
+| State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does | M4: core id and version, settings and the flash (LZFSE: 1 MiB → ~1.3 KB for a near-empty image) survive a restore into a new instance; ChoralRoot's saved tempo comes back | real hosts' project save and reload |
 | Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background | key added; the session activates | behaviour in the background; the save-on-background path (not run headless) |
 | Cores on the render thread (M3) | the core runs in the AVAudioSourceNode's callback; with sound off, on a timer thread | 48 kHz, 512-frame renders: average 90–190 µs (1–2 % of the buffer), one early peak of 3.3 ms on the iPhone simulator; sound after the fake unit's key presses on all three cores | timing on the iPhone 13 Pro Max; Melodee's `swapcontext` (deprecated API) on a device; a team-signed build loading the slot frameworks |
+| Cores in the AU's render kernel (M4) | `rfme_render_midi`: host MIDI applied at its frame, the core's MIDI out to the AU's MIDI output | two instances (ChoralRoot, Felucca) in one extension: average 50–120 µs, max under 0.7 ms per ~470 frames at 44.1 kHz; host notes sound | timing in AUM/GarageBand; many instances; the MIDI output (built, not tested); host SysEx to the core (not passed yet) |
 
 ## 6. Milestones
 
@@ -136,7 +147,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M1 | Standalone: Bluetooth sheet, find the FM-1 by HELLO, session, test pattern; HELLO_R fields and link stats on screen. The fake unit for the simulator | on the owner's iPhone: the pattern moves on the FM-1, its keys light their LEDs on the pattern screen |
 | M2 | AUv3 test run (no core yet): the extension loads in AUM; CoreMIDI from the extension; Bluetooth sheet inside it; App Group with the team; memory limit; the Bluetooth link after the app closes | each row of section 5 answered and written here; fallback chosen if needed. Simulator part done; device part waits for the iPhone |
 | M3 | Cores on iOS: ChoralRoot, Felucca, Melodee cross-compiled, slots, Device on AVAudioEngine; FM-1 as the panel, sound from the phone; flash saved in Documents | play ChoralRoot on the FM-1, hear it on the phone; reboot keeps its settings. Simulator part done (fake unit, all three cores); device part waits for the iPhone |
-| M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect |
+| M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect. Simulator part done (`scripts/sim_aucoretest.sh`, a shared fake unit); device part waits for the iPhone |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship |
 

@@ -3,18 +3,21 @@
 An iPhone and iPad host for FM-1 firmware cores, with a real M-VAVE FM-1 running RemoteFM1 firmware 0.2.2 as the
 panel. See [PLAN.md](PLAN.md) for the design and the milestones.
 
-Status: M1, M2 on the simulator, and M3 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
+Status: M1, and M2, M3 and M4 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
 SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In Core mode it runs a real firmware
 (ChoralRoot 0.26.1, Felucca 1.6.1 or Melodee 1.4.5) with the FM-1 as its panel and the sound on the iOS device; the
 firmware's flash is kept in `Documents/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
-and probes for PLAN.md section 5. Not yet tried on a real FM-1 or iPhone.
+and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MIDI in, the core's MIDI out, the flash
+in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
+FM-1"). Not yet tried on a real FM-1, iPhone or third-party host.
 
 ## Layout
 
-- `App/`: the SwiftUI app (one screen), and the AU test (`AUTestHost`, `AUTestView`): the app as a small AUv3 host for
-  its own extension.
+- `App/`: the SwiftUI app (one screen), and the AU tests (`AUTestHost`, `AUTestView`; M4's `AUCoreTest`): the app as
+  a small AUv3 host for its own extension.
 - `AU/`: the AUv3 extension `RemoteFM1AU` (aumu `Rfm1` `Qx7u`, "Quixotic7: RemoteFM1"): its view controller, which is
-  also the AU factory, and its SwiftUI view (instance, Bluetooth button, Diagnostics).
+  also the AU factory, and its SwiftUI view (firmware, LCD mirror, panel status, Use this FM-1, Bluetooth, About,
+  Settings and Diagnostics).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
   `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
   needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
@@ -28,8 +31,12 @@ and probes for PLAN.md section 5. Not yet tried on a real FM-1 or iPhone.
     parts (`RFMProbe`: CoreMIDI candidates, an mmap'd shared file, Darwin notifications, notify state, memory).
     M3: the slot loader (`RFMSlots`, `rfms_*`) and the core engine (`RFMEngine`, `rfme_*`: FM1VST's Device on one
     clock thread, fm1remote's design), its AVAudioSourceNode, and FM1VST's `engine/device.cpp` compiled in place.
-  - `RFMKit`: `RemoteController`, the Swift API the app uses; `CorePlayer` (the core, its audio and its flash); `AUv3/`: the audio unit (`RFMAudioUnit`), its state
-    (`InstanceState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel and the Diagnostics view.
+    M4: the lease (`RFMLease`, `rfml_*`), RemoteLink's gate and drop path (`rfmc_set_lease`, `rfmc_claim`), and the
+    process-wide shared fake unit (`SharedFake`, tests).
+  - `RFMKit`: `RemoteController`, the Swift API the app uses; `CorePlayer` (the core, its audio and its flash);
+    `PanelSession` (M4: when to claim the FM-1); `AUv3/`: the audio unit (`RFMAudioUnit`), its state (`InstanceState`,
+    `CoreState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel, About this firmware and the
+    Diagnostics view.
 - `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
   with its `firmware/engines`, `cores/melodee`). Read-only.
 
@@ -60,7 +67,9 @@ The tests run on the Mac against libremotefm1's fake unit only; nothing touches 
 cover the AU's state and render block and the probes' shared file and notifications within one process. The core
 tests (`CoreTests`) use the macOS builds of `scripts/build_cores.sh macos` and skip without them: each core boots and
 plays, two slots of one core don't share state, a fifth slot is refused, a released slot comes back fresh, the flash
-round trip, a firmware reboot, and a core on the fake unit.
+round trip, a firmware reboot, and a core on the fake unit. M4 adds `LeaseTests` (the lease with two clients and with
+a forked second process, a takeover on the shared fake that never sends SESSION 0, and `PanelSession`'s rules) and
+`AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence).
 
 FM1VST's own conformance test against the macOS builds of our libraries:
 
@@ -81,6 +90,17 @@ The AU test on a simulator, headless (Simulator.app stays closed):
 It builds, boots the simulator if needed, installs, launches with `-autest`, prints the summary, saves `autest.json`,
 the log and two screenshots under `$OUT` (default `$TMPDIR/remotefm1-autest`), and shuts down a simulator it booted.
 
+M4's AU core test on a simulator, headless, the same way:
+
+    scripts/sim_aucoretest.sh [UDID]
+
+Two instances out of process (ChoralRoot and Felucca) play host MIDI notes for 3 s (RMS per instance, render times);
+the panel moves A -> B -> A on the extension's shared fake unit (who started its session, what the old owner sent
+after, its SESSION 0s); A's `fullState` (a tempo saved on the fake panel) restores into C, which reconnects under A's
+UUID; a duplicate D gets a new UUID; the app's own link and C take the lease from each other. It saves
+`aucoretest.json`, the log and screenshots of both instances' views (owner and "in use") under `$OUT` (default
+`$TMPDIR/remotefm1-aucoretest`).
+
 libremotefm1's own tests, built outside the source tree:
 
     cmake -S vendor/FM1VST/remote/RemoteFM1/host -B /tmp/rfm-host -DRFM_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
@@ -90,6 +110,9 @@ libremotefm1's own tests, built outside the source tree:
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
 - `-fakeble`: the fake unit over Bluetooth (paced, lossy tiles, HOLD).
+- `-aucoretest`: only M4's AU core test (above). It writes `au-backend.txt` ("fake") to the App Group before it
+  instantiates, so the extension uses its shared fake unit and not CoreMIDI, and removes it at the end. In the
+  simulator the extension uses the shared fake anyway unless that file says "device".
 - `-autest`: only the AU test, run at launch (the FM-1 link is never created). Its summary goes to `autest.json` in the
   app's Documents and the App Group container. On a device, the "AU test" button runs the same thing.
 - `-coretest`: the core test (above) on the normal screen; `-core <id>` picks the firmware (also without `-coretest`).

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copied from FM1VST v0.6.2 plugin/RemoteLink.h. Changed for RemoteFM1 iOS: Status also carries the unit's HELLO_R,
 // the session state and more of rfm_session_stats_t (budget, bytes, ACK times); requestRescan() (CoreMIDI's setup
-// changed). Everything else as there.
+// changed). M4: the unit lock is optional (an empty lockPath: none; the lease of PLAN.md section 4 decides instead,
+// through a gate: below); drop(); a process-wide fake unit shared by several links (tests). Everything else as there.
 // Remote FM-1 (RemoteFM1 M3): a real M-VAVE FM-1 running the RemoteFM1 firmware as the panel of the core inside the
 // plugin. The protocol and the host library are RemoteFM1's (remote/RemoteFM1: docs/PROTOCOL.md, host/include/rfm);
 // this is fm1remote's design (host/tools/fm1remote/engine.h, main.cpp) inside a plugin instance.
@@ -27,15 +28,23 @@
 // STOPPING (stop(), the destructor): SESSION start=0 (the unit goes back to its waiting screen), up to kStopMs for its
 // ACK, then the back ends closed and the lock released. The destructor joins the thread (bounded by kStopMs).
 //
+// THE GATE (M4, RemoteFM1 iOS): setGate(gate, onDrop, ctx). The session thread calls gate() before it starts a run
+// and before every pump, frame and poll (anything that may write to the unit), and the shared fake's write checks it
+// too. When it says no (another instance took the unit: the lease's epoch moved), the run DROPS: nothing more is sent,
+// the back ends are closed, no SESSION 0 (it could end the new owner's session), the link stays off, and onDrop() runs
+// on the session thread once its links are closed (the lease's ack). drop() asks for the same from any thread.
+//
 // THE FAKE UNIT (tests): Backend::Fake runs libremotefm1's fake (host/src/fake.c) in this process behind a loopback at
 // the measured M0 rates; nothing on USB or CoreMIDI is touched. FM1EMU_REMOTE_FAKE=1 in the environment forces it for
 // every link (defaultBackend()). The fake belongs to the link (it outlives each run, as a unit stays plugged in);
-// withFake() reaches it under the session thread's lock.
+// withFake() reaches it under the session thread's lock. sharedFake (M4): every such link in the process talks to ONE
+// fake unit (SharedFake.h) while its run lasts, as several CoreMIDI clients connected to one FM-1 would.
 #pragma once
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -71,6 +80,10 @@ public:
         // (tests) the fake unit as a RemoteFM1 0.2.2 unit over Bluetooth MIDI: SysEx only, its HELLO_R says
         // Bluetooth, HOLD in its caps, the wire at Bluetooth's rate (the session paces and reduces tiles for it)
         bool fakeBluetooth = false;
+        // (RemoteFM1 iOS, tests) Backend::Fake: the process-wide shared fake unit instead of this link's own; the
+        // label names this link in the shared fake's record of who sent what
+        bool sharedFake = false;
+        std::string fakeLabel;
     };
     explicit RemoteLink(const Options &o);
     ~RemoteLink();                                  // stop(), then the thread joined (<= kStopMs + a poll)
@@ -81,6 +94,16 @@ public:
     void start();
     void stop();
     bool wanted() const { return want_.load(); }
+    // (RemoteFM1 iOS) the gate (above); set before the first start(). gate(ctx) runs on the session thread
+    using Gate = bool (*)(void *ctx);
+    using DropFn = void (*)(void *ctx);
+    void setGate(Gate g, DropFn onDrop, void *ctx)
+    {
+        gateCtx_.store(ctx);
+        onDrop_.store(onDrop);
+        gate_.store(g);
+    }
+    void drop();                                    // the run ends without SESSION 0 (any thread; returns at once)
     Backend backend() const { return opt_.backend; }
     static bool hasBulk();                          // built with libusb (else SysEx only)
 
@@ -103,6 +126,7 @@ public:
         rfm_hello_t hello{};
         uint32_t budget = 0, wireBytes = 0, bodyBytes = 0, ackMsLast = 0, ackMsAvg = 0, ackMsMax = 0;
         uint32_t ackTimeouts = 0, discoveries = 0, hold = 0, wireCap = 0, frameMs = 0;
+        uint32_t drops = 0, gateBlocked = 0;        // (M4) runs dropped; shared-fake writes the gate refused
     };
     Status status() const;
     static const char *stateName(State s);
@@ -130,12 +154,17 @@ public:
     // ---- tests: the fake unit, under the session thread's lock (Backend::Fake only; f is nullptr otherwise)
     template <typename F> void withFake(F &&fn)
     {
+        if (opt_.sharedFake && opt_.backend == Backend::Fake) {
+            withSharedFake([&](rfm_fake *f) { fn(f); });
+            return;
+        }
         std::lock_guard<std::mutex> g(fakeMu_);
         fn(fake_);
     }
 
     static constexpr uint32_t kStopMs = 600;        // the longest a stop waits for the unit's ACK
     static constexpr uint32_t kLockRetryMs = 1000;
+    static constexpr int kNoLock = -2;              // (takeLock: no lock path, none taken)
 
 private:
     // single producer (the session thread), single consumer (the audio thread)
@@ -202,6 +231,8 @@ private:
     void updateStatus(uint32_t now);
     void pumpFake(uint32_t now);
     void releasePanel();                            // kEvRelease, and the decoder forgets what it held
+    bool gateOpen();                                // the gate says this link may send (no gate: yes)
+    static void withSharedFake(const std::function<void(rfm_fake *)> &fn);
 
     static void cbEvent(void *ctx, const rfm_event_t *e);
     static void cbState(void *ctx, int st, const char *why);
@@ -222,6 +253,12 @@ private:
     rfm_fake *fake_ = nullptr;                      // Backend::Fake: for the link's lifetime
     std::mutex fakeMu_;
     Loop loops_[2] = {};
+    int sharedPort_ = -1;                           // the shared fake's port while a run lasts
+    std::atomic<Gate> gate_{nullptr};
+    std::atomic<DropFn> onDrop_{nullptr};
+    std::atomic<void *> gateCtx_{nullptr};
+    std::atomic<bool> dropReq_{false};
+    std::atomic<uint32_t> drops_{0}, gateBlocked_{0};
     std::vector<uint8_t> loopBuf_;
     int lastState_ = -1;
     bool wasConnected_ = false;

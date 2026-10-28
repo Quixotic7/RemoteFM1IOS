@@ -9,6 +9,8 @@
 #define RFMCORE_H
 #include <stdint.h>
 
+#include "RFMLease.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,8 +29,11 @@ typedef struct {
     int backend;                // RFMC_DEVICE (CoreMIDI, FM-1 candidates only) or RFMC_FAKE (in-process fake unit)
     int fake_ble;               // the fake as a 0.2.2 unit over Bluetooth MIDI
     uint32_t fps;               // the session's cap (20)
-    const char *lock_path;      // RemoteLink's unit lock (flock), in the app's own temporary directory
+    const char *lock_path;      // RemoteLink's unit lock (flock), in the app's own temporary directory; NULL / "": none
+                                // (M4: the lease decides, rfmc_set_lease)
     const char *host_name;      // HELLO's body, at most 16 bytes
+    int shared_fake;            // (M4, RFMC_FAKE) the process-wide shared fake unit instead of this link's own
+    const char *label;          // (M4) this link's name in the shared fake's record
 } rfmc_cfg_t;
 
 typedef struct rfmc rfmc_t;
@@ -39,6 +44,16 @@ void rfmc_start(rfmc_t *c);
 void rfmc_stop(rfmc_t *c);
 void rfmc_set_pattern(rfmc_t *c, int on);
 void rfmc_rescan(rfmc_t *c);    // CoreMIDI's setup changed
+
+// ---- the lease (M4, PLAN.md section 4; RFMLease.h). With a lease the link runs only while the lease's epoch is this
+// client's: the session thread checks it before it sends (RemoteLink's gate) and heartbeats about once a second; on a
+// newer epoch (seen there, or on the lease's notification) the link drops: nothing more sent, its CoreMIDI links
+// closed, no SESSION 0, then the ack. l must outlive c (rfmc_free lets go of it first).
+void rfmc_set_lease(rfmc_t *c, rfml_t *l);
+// blocking (up to wait_ms + a little; not on the main thread's critical path): the claim, then the link started.
+// 1: claimed and started
+int rfmc_claim(rfmc_t *c, uint32_t wait_ms, rfml_claim_t *out);
+void rfmc_drop(rfmc_t *c);      // the run ends without SESSION 0 (any thread)
 
 typedef struct {
     int state;                  // RFMC_*
@@ -55,6 +70,7 @@ typedef struct {
     char name[17], ver[9], fw_ver[9], identity[9];
     uint8_t proto, transports, usb_mode, session, max_in_flight;
     uint16_t caps, sxq, sx_body_max, bk_body_max, screen_w, screen_h;
+    uint32_t drops, gate_blocked;   // (M4) runs dropped (the lease moved); writes the gate refused (shared fake)
 } rfmc_status_t;
 void rfmc_status(rfmc_t *c, rfmc_status_t *st);
 
@@ -87,11 +103,28 @@ int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out);   // 0: not the fake backend
 int rfmc_fake_key_lit(rfmc_t *c, uint32_t k);
 int rfmc_fake_button_lit(rfmc_t *c, uint32_t b);
 
+// ---- (M4, tests) the process-wide shared fake unit: its record of who sent what (SharedFake.h), and its screen
+typedef struct {
+    char label[40];
+    uint32_t msgs, starts, stops, tiles;
+    uint32_t after_other, after_other_tiles;    // sent after another sender's SESSION start (HELLO not counted)
+} rfmc_sender_t;
+typedef struct {
+    int session;                // 0 none, 1 SysEx
+    char last_starter[40];
+    uint32_t starts, frames, acks, open_ports, nsenders;
+    rfmc_sender_t senders[16];
+} rfmc_shared_t;
+void rfmc_shared_fake(rfmc_shared_t *out);
+void rfmc_shared_fake_panel(uint8_t *rgba);                     // 240 x 240 x 4
+static inline rfmc_sender_t rfmc_shared_sender(const rfmc_shared_t *s, uint32_t i) { return s->senders[i]; }
+
 #ifdef __cplusplus
 }
 #endif
 
-// M2: the probes and the AUv3 render kernel; M3: the slots and the core engine (this header is the module's umbrella)
+// M2: the probes and the AUv3 render kernel; M3: the slots and the core engine; M4: the lease (this header is the
+// module's umbrella)
 #include "RFMProbe.h"
 #include "RFMKernel.h"
 #include "RFMEngine.h"

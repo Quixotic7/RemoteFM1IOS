@@ -17,6 +17,10 @@
 //                   engine's preview at most every 50 device ms and only when they changed
 //   core -> files   the flash image copied by the clock every 30 device s when flash_dirty moved, or when asked; the
 //                   caller writes it (never on the audio thread)
+//   host -> core    (M4, the AUv3) host MIDI at its frame in the render (rfme_render_midi): FM1VST's mapping (notes
+//                   53.. play the keys, with the host's velocity, transposed by octaves; everything else, and the key
+//                   notes too if asked, to the core's midi_in as USB-MIDI packets)
+//   core -> host    (M4) the core's midi_out_take packets, to the AU's MIDI output (rfme_midi_out_take)
 // Load, boot, unload and power cycle run on one control thread (the main thread) with the clock stopped
 // (rfme_set_clock(NONE) waits until the clock is out). Nothing in rfme_render allocates or locks.
 #ifndef RFMENGINE_H
@@ -79,6 +83,23 @@ int rfme_clock(rfme_t *e);
 
 // RFME_CLOCK_AUDIO: n frames at `rate` into L and R (silence while not booted or not the owner). Real-time safe.
 void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate);
+// ---- host MIDI (M4)
+typedef struct {
+    uint32_t offset;            // the frame in this render it applies at (events in order)
+    uint8_t len;                // 1..3 (a channel or system message; SysEx is not passed here)
+    uint8_t data[3];
+} rfme_midi_t;
+// RFME_CLOCK_AUDIO: rfme_render with host MIDI applied at each event's frame. Returns 1 when the core rendered,
+// 0 silence (not booted, or not the clock's owner). Real-time safe.
+int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev);
+// (any thread) FM1VST's settings: MIDI notes play the keys (default 1), transpose -2..2 octaves (0), key notes also
+// to the firmware (0)
+void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware);
+// the core's MIDI out kept for rfme_midi_out_take (on: the AU has a MIDI output; off: counted and dropped)
+void rfme_midi_out_enable(rfme_t *e, int on);
+// the render thread, after rfme_render_midi: one USB-MIDI packet of the core's; 0: none
+int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);
+
 // RFME_CLOCK_CALLER (tests): `ms` device milliseconds on this thread; the sound measured, then dropped
 typedef struct {
     uint64_t frames;
@@ -99,6 +120,7 @@ typedef struct {
     int slot;                   // 1..4, 0 none
     char core_id[32];
     uint32_t dev_ms, lcd_writes, snapshots, events_applied, events_dropped, keys_pressed, midi_out;
+    uint32_t midi_in, midi_notes, midi_in_dropped;  // (M4) host MIDI messages; of them notes that played a key; lost
     uint32_t shed, cpu_pct, have_stats;   // the core's stats(), read every 500 device ms
     uint64_t renders, render_frames;
     uint32_t render_last_us, render_avg_us, render_max_us, render_last_frames;   // rfme_render's own time
@@ -128,6 +150,8 @@ int rfme_param_get(rfme_t *e, const char *name, int32_t *value);    // 1: found
 int rfme_param_set(rfme_t *e, const char *name, int32_t value);
 // the first FM1P_PERSIST entry: its name, range and value; 0: none
 int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t *max, int32_t *value);
+// (control thread, any clock: the clock stopped for the read; diagnostics and tests) 1: found
+int rfme_param_read(rfme_t *e, const char *name, int32_t *value);
 
 #ifdef __cplusplus
 }

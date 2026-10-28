@@ -1,24 +1,68 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The AUv3 instrument (M2: no core yet). One stereo output bus, MIDI in, a render kernel in C++ (RFMCore's
-// RFMKernel) that writes silence and counts renders and MIDI. Its fullState carries the instance UUID and a format
-// version (InstanceState). A message channel (RFMShared.diagnosticsChannel) gives a host the probe report, which
-// out-of-process hosts can't get from a custom property.
+// The AUv3 instrument. M2: one stereo output bus, MIDI in, a C++ render kernel (RFMCore's RFMKernel), the instance
+// UUID in fullState, and a message channel for the probes. M4: the instance plays a firmware core and shares one FM-1
+// with every other instance (PLAN.md section 4):
+//
+//   the core     ChoralRoot, Felucca or Melodee from the app bundle's slot frameworks (rfms_scan finds
+//                <appex>/../../Frameworks); loaded and booted off the render thread (the caller's, under `ctl`),
+//                the clock handed over explicitly: the render callback while render resources are allocated
+//                (RFME_CLOCK_AUDIO), the engine's timer otherwise (the panel keeps working, no sound)
+//   MIDI         the host's MIDI to the core at its frame (FM1VST's mapping); the core's MIDI out to the host's
+//                MIDI output (midiOutputNames, MIDIOutputEventBlock)
+//   fullState    the instance UUID and format (InstanceState), the core, its version, its flash (flash_sync first,
+//                LZFSE) and the settings (CoreState); restoring boots the core from that flash
+//   the panel    a RemoteLink of its own (CoreMIDI, or on the simulator the process-wide shared fake unit) run only
+//                while this instance holds the lease (PanelSession)
+//   halted       exit code 0 (0x100): powered on again from its flash; otherwise it stays halted (restartCore())
 //
 // It lives in RFMKit, not in the extension, so the Mac tests can create and render it directly.
 
 import AVFoundation
 import AudioToolbox
+import CoreGraphics
 import Foundation
 import RFMCore
 
 public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
+    public struct Config: Sendable {
+        public enum Link: Sendable, Equatable {
+            case none                           // no panel (the Mac tests of M2)
+            case fake                           // a fake unit of its own
+            case sharedFake                     // the process-wide shared fake unit
+            case device                         // CoreMIDI (FM-1 candidates only)
+            case auto                           // device; the simulator: the shared fake; the App Group file decides
+        }
+        public var runProbes = true
+        public var defaultCore: String? = "choralroot"
+        public var link: Link = .auto
+        public var panel = PanelSession.Config()
+        public var slotsDir: String?            // nil: the bundle (and from an appex the app's) Frameworks
+        public init() {}
+    }
+
     private let kernel: OpaquePointer
+    private let e: OpaquePointer                // rfme_t
+    private let link: OpaquePointer?            // rfmc_t
+    public let session: PanelSession?
+    public let backend: String                  // "none", "fake", "shared fake", "device"
+    public let fakeLabel: String
     private let outBus: AUAudioUnitBus
     private var outputs: AUAudioUnitBusArray!
     private var inputs: AUAudioUnitBusArray!
-    private let lock = NSLock()
+    private let lock = NSLock()                 // instanceState, channel
+    private let ctl = NSLock()                  // the core: load, boot, power cycle, flash, settings
+    private let pvLock = NSLock()               // the preview
     private var instanceState = InstanceState()
+    private var coreID: String?
+    private var coreError = ""
+    private var settings_ = AUSettings()
+    private var bootedFrom = ""
+    private var powerCycles = 0
+    private var lastName = ""
+    private var pvSeq: UInt32 = 0
+    private var pvRGBA = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
+    private var timer: DispatchSourceTimer?
     private let log = RFMShared.log("au")
     private var channel: DiagnosticsChannel?
 
@@ -28,14 +72,13 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     public nonisolated(unsafe) var onEvent: (@Sendable (Event) -> Void)?
     public enum Event: Sendable { case stateRestored, bluetoothRequested }
 
-    /// runProbes false: no CoreMIDI and no shared files (the Mac tests); the probe then writes only to a temp folder
     public init(componentDescription: AudioComponentDescription, options: AudioComponentInstantiationOptions = [],
-                runProbes: Bool) throws {
+                config: Config) throws {
         let k = rfmk_new()!
         kernel = k
         let ref = KernelRef(p: k)
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("rfm-au-\(UUID().uuidString)")
-        probe = Probe(role: .ext, includeMIDI: runProbes, directory: runProbes ? nil : tmp) {
+        probe = Probe(role: .ext, includeMIDI: config.runProbes, directory: config.runProbes ? nil : tmp) {
             var s = rfmk_stats_t()
             rfmk_stats(ref.p, &s)
             let last = Array(withUnsafeBytes(of: s.last_midi) { Array($0) }.prefix(Int(s.last_midi_len)))
@@ -43,19 +86,68 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
                     .init(renders: s.renders, frames: s.frames, midiEvents: s.midi_events, lastMIDI: last,
                           sampleRate: s.sample_rate, maxFrames: s.max_frames))
         }
+
+        // the panel's link
+        var mode = config.link
+        if mode == .auto {
+            #if targetEnvironment(simulator)
+            mode = RFMShared.extensionBackend() == "device" ? .device : .sharedFake
+            #else
+            mode = RFMShared.extensionBackend() == "fake" ? .sharedFake : .device
+            #endif
+        }
+        let state = InstanceState()
+        let label = "AU-" + String(state.instance.uuidString.prefix(8))
+        fakeLabel = mode == .sharedFake || mode == .fake ? label : ""
+        backend = ["none": "none", "fake": "fake", "shared": "shared fake", "device": "device"][
+            mode == .none ? "none" : mode == .fake ? "fake" : mode == .sharedFake ? "shared" : "device"]!
+        if mode != .none {
+            var cfg = rfmc_cfg_t()
+            cfg.backend = Int32(mode == .device ? RFMC_DEVICE : RFMC_FAKE)
+            cfg.shared_fake = mode == .sharedFake ? 1 : 0
+            cfg.fps = 20
+            link = "RemoteFM1 AU".withCString { hn in label.withCString { lb in
+                cfg.host_name = hn
+                cfg.label = lb
+                cfg.lock_path = nil                 // (no unit lock: the lease decides)
+                return rfmc_new(&cfg)
+            } }
+        } else {
+            link = nil
+        }
+        e = rfme_new(link)
+        rfmk_set_engine(k, e)
+        instanceState = state
+
         guard let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2) else {
             rfmk_free(k)
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FormatNotSupported))
         }
         outBus = try AUAudioUnitBus(format: fmt)
         outBus.maximumChannelCount = 2
+        if let link {
+            var pc = config.panel
+            pc.fake = mode != .device
+            session = PanelSession(link: link, identity: state.instance, name: "RemoteFM1 AU", config: pc)
+        } else {
+            session = nil
+        }
         try super.init(componentDescription: componentDescription, options: options)
         outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outBus])
         inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: [])
         maximumFramesToRender = 4096
         probe.setInstance(instanceState.instance.uuidString)
-        log.info("instance \(self.instanceState.short, privacy: .public) created, pid \(getpid())")
-        if runProbes {
+        Self.register(self)
+
+        // the core (a new instance: the default firmware, a fresh flash; a restored state replaces it)
+        if let d = config.slotsDir { rfms_scan(d) } else if rfms_count() == 0 { rfms_scan(nil) }
+        if link != nil { rfme_attach(e, 1) }
+        if let id = config.defaultCore { _ = ctl.withLock { loadLocked(id, flash: nil, from: "a fresh flash") } }
+        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
+        updateName()
+        session?.appeared()
+        log.info("instance \(self.instanceState.short, privacy: .public) created, pid \(getpid()), panel \(self.backend, privacy: .public)")
+        if config.runProbes {
             let p = probe
             // CoreMIDI delivers a client's notifications on the run loop it was created on: the main thread's
             DispatchQueue.main.async {
@@ -64,14 +156,31 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
                 p.report()
             }
         }
+        startTimer()
+    }
+
+    /// M2's: runProbes false is the Mac tests' AU (no core, no panel, no CoreMIDI)
+    public convenience init(componentDescription: AudioComponentDescription,
+                            options: AudioComponentInstantiationOptions = [], runProbes: Bool) throws {
+        var c = Config()
+        c.runProbes = runProbes
+        if !runProbes {
+            c.defaultCore = nil
+            c.link = .none
+        }
+        try self.init(componentDescription: componentDescription, options: options, config: c)
     }
 
     public override convenience init(componentDescription: AudioComponentDescription,
                                      options: AudioComponentInstantiationOptions = []) throws {
-        try self.init(componentDescription: componentDescription, options: options, runProbes: true)
+        try self.init(componentDescription: componentDescription, options: options, config: Config())
     }
 
     deinit {
+        timer?.cancel()
+        Self.unregister(self)
+        rfme_free(e)                            // (the clock stopped, the slot released; before the link goes)
+        if let session { session.finish() }     // (the link and the lease freed in the background)
         rfmk_free(kernel)
     }
 
@@ -83,6 +192,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     public override var inputBusses: AUAudioUnitBusArray { inputs }
     public override var isMusicDeviceOrEffect: Bool { true }
     public override var virtualMIDICableCount: Int { 1 }
+    public override var midiOutputNames: [String] { ["RemoteFM1"] }
 
     public override func allocateRenderResources() throws {
         try super.allocateRenderResources()
@@ -90,9 +200,13 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
         if rfmk_allocate(kernel, f.sampleRate, f.channelCount, maximumFramesToRender) == 0 {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FormatNotSupported))
         }
+        rfmk_set_midi_out(kernel, midiOutputEventBlock)
+        rfme_set_clock(e, Int32(RFME_CLOCK_AUDIO))     // (the host's render callback runs the core from now)
     }
 
     public override func deallocateRenderResources() {
+        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))     // (waits until the render thread has left the core)
+        rfmk_set_midi_out(kernel, nil)
         rfmk_deallocate(kernel)
         super.deallocateRenderResources()
     }
@@ -103,14 +217,30 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
         get {
             var s = super.fullState ?? [:]
             state.encode(into: &s)
+            if let c = coreStateForSave() { c.encode(into: &s) }
             return s
         }
         set {
             // (not passed to super: AUAudioUnit's own setter only reads a v2 unit's "data", and logs "no data")
             guard let restored = InstanceState(newValue) else { return }
-            lock.withLock { instanceState = restored }
-            probe.setInstance(restored.instance.uuidString)
-            log.info("instance \(restored.short, privacy: .public) restored from state, format \(restored.format)")
+            if let c = CoreState(newValue) {
+                ctl.withLock {
+                    settings_ = c.settings
+                    applySettingsLocked()
+                    var info = rfms_info_t()
+                    let have = rfms_find(c.core, &info) != 0
+                    let ver = RemoteController.string(info.version)
+                    if have && !c.version.isEmpty && ver != c.version {
+                        log.info("restore: \(c.core, privacy: .public) \(c.version, privacy: .public) saved, \(ver, privacy: .public) here: booting from the saved flash anyway")
+                    }
+                    _ = loadLocked(c.core, flash: c.flash, from: c.flash == nil ? "a fresh flash (none saved)" : "the saved flash")
+                }
+            }
+            let id = session?.restore(restored.instance) ?? restored.instance
+            lock.withLock { instanceState = InstanceState(instance: id) }
+            probe.setInstance(id.uuidString)
+            updateName()
+            log.info("instance \(restored.short, privacy: .public) restored from state, format \(restored.format)\(id == restored.instance ? "" : ": a duplicate, now \(String(id.uuidString.prefix(8)))", privacy: .public)")
             onEvent?(.stateRestored)
         }
     }
@@ -123,7 +253,272 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
         }
     }
 
+    // MARK: the core (any thread but the render thread)
+
+    /// the cores this instance can pick
+    public var cores: [CoreInfo] { CorePlayer.catalog() }
+
+    /// loads `id` with a fresh flash (the old core's flash is not kept: the host's project holds an instance's flash)
+    public func selectCore(_ id: String) {
+        ctl.withLock {
+            guard id != coreID || !CorePlayer.status(e).booted else { return }
+            _ = loadLocked(id, flash: nil, from: "a fresh flash")
+        }
+        updateName()
+    }
+
+    /// the firmware powered off and on again from its flash (a halted core, or the user's Restart)
+    public func restartCore() {
+        ctl.withLock {
+            guard coreID != nil else { return }
+            var err = [CChar](repeating: 0, count: 256)
+            if rfme_power_cycle(e, &err, 256) == 0 {
+                coreError = "restart failed: " + CorePlayer.string(err)
+            } else {
+                powerCycles += 1
+                coreError = ""
+            }
+            var scratch = [UInt8](repeating: 0, count: Int(rfme_flash_size(e)))
+            _ = scratch.withUnsafeMutableBufferPointer { rfme_take_flash(e, $0.baseAddress, UInt32($0.count)) }
+        }
+    }
+
+    public var settings: AUSettings {
+        get { ctl.withLock { settings_ } }
+        set { ctl.withLock { settings_ = newValue; applySettingsLocked() } }
+    }
+
+    private func applySettingsLocked() {
+        rfme_set_midi(e, settings_.notesPlayKeys ? 1 : 0, Int32(settings_.transpose), settings_.keyNotesToFirmware ? 1 : 0)
+    }
+
+    /// (ctl held) the core loaded into a free slot and booted; the clock given back to its owner
+    private func loadLocked(_ id: String, flash: Data?, from: String) -> Bool {
+        var err = [CChar](repeating: 0, count: 256)
+        guard rfme_load(e, id, &err, 256) != 0 else {
+            coreError = CorePlayer.string(err)
+            coreID = id
+            log.error("load \(id, privacy: .public): \(self.coreError, privacy: .public)")
+            return false
+        }
+        let ok: Int32
+        if let flash, !flash.isEmpty {
+            ok = flash.withUnsafeBytes { rfme_boot(e, $0.bindMemory(to: UInt8.self).baseAddress, UInt32($0.count)) }
+        } else {
+            ok = rfme_boot(e, nil, 0)
+        }
+        applySettingsLocked()
+        coreID = id
+        coreError = ok != 0 ? "" : "boot failed"
+        bootedFrom = from
+        log.info("booted \(id, privacy: .public) from \(from, privacy: .public)")
+        return ok != 0
+    }
+
+    /// (main thread, possibly while the host renders) flash_sync and the image, by the clock's rules: the clock
+    /// makes the copy at its next between hook; a clock that doesn't answer in 200 ms is stopped for it
+    private func coreStateForSave() -> CoreState? {
+        ctl.withLock {
+            let s = CorePlayer.status(e)
+            guard let id = coreID, s.booted else { return nil }
+            var info = rfms_info_t()
+            _ = rfms_find(id, &info)
+            var buf = [UInt8](repeating: 0, count: Int(rfme_flash_size(e)))
+            var got = false
+            let clock = rfme_clock(e)
+            if !buf.isEmpty && (clock == Int32(RFME_CLOCK_AUDIO) || clock == Int32(RFME_CLOCK_TIMER)) {
+                _ = buf.withUnsafeMutableBufferPointer { rfme_take_flash(e, $0.baseAddress, UInt32($0.count)) }  // (an old copy)
+                rfme_request_flash(e)
+                for _ in 0..<100 where !got {
+                    usleep(2000)
+                    got = buf.withUnsafeMutableBufferPointer { rfme_take_flash(e, $0.baseAddress, UInt32($0.count)) } != 0
+                }
+            }
+            if !got && !buf.isEmpty {
+                got = buf.withUnsafeMutableBufferPointer { rfme_final_flash(e, $0.baseAddress, UInt32($0.count)) } != 0
+            }
+            return CoreState(core: id, version: RemoteController.string(info.version), flash: got ? Data(buf) : nil,
+                             settings: settings_)
+        }
+    }
+
+    // MARK: status
+
+    public struct Status: Sendable {
+        public var instance = ""
+        public var coreID = "", coreName = "", coreVersion = "", coreError = "", bootedFrom = ""
+        public var core = CoreStatus()
+        public var panel: PanelStatus?
+        public var settings = AUSettings()
+        public var renders: UInt64 = 0, sounding: UInt64 = 0, midiEvents: UInt64 = 0, midiOutMsgs: UInt32 = 0
+        public var levelRMS = 0.0
+        public var midiIn: UInt32 = 0, midiNotes: UInt32 = 0
+        public var powerCycles = 0
+        public init() {}
+    }
+
+    public func status() -> Status {
+        var s = Status()
+        s.instance = state.short
+        ctl.withLock {
+            s.coreID = coreID ?? ""
+            s.coreError = coreError
+            s.bootedFrom = bootedFrom
+            s.settings = settings_
+            s.powerCycles = powerCycles
+        }
+        s.core = CorePlayer.status(e)
+        var info = rfms_info_t()
+        if !s.coreID.isEmpty, rfms_find(s.coreID, &info) != 0 {
+            s.coreName = RemoteController.string(info.name)
+            s.coreVersion = RemoteController.string(info.version)
+        }
+        s.panel = session?.status()
+        var k = rfmk_stats_t()
+        rfmk_stats(kernel, &k)
+        s.renders = k.renders
+        s.sounding = k.sounding
+        s.midiEvents = k.midi_events
+        s.midiOutMsgs = k.midi_out_msgs
+        s.levelRMS = k.level_rms
+        var r = rfme_status_t()
+        rfme_status(e, &r)
+        s.midiIn = r.midi_in
+        s.midiNotes = r.midi_notes
+        return s
+    }
+
+    public func resetLevel() {
+        rfmk_reset_level(kernel)
+        rfme_reset_render_stats(e)
+    }
+
+    /// the LCD as last published: a new image when its number differs from `have`
+    public func preview(have: UInt32) -> (seq: UInt32, image: CGImage?) {
+        pvLock.withLock {
+            let seq = pvRGBA.withUnsafeMutableBufferPointer { rfme_preview(e, pvSeq, $0.baseAddress) }
+            pvSeq = seq
+            guard seq != have, seq != 0 else { return (seq, nil) }
+            return (seq, RemoteController.image(pvRGBA))
+        }
+    }
+
+    /// the LCD as last published, RGBA (for the shared fake's comparison)
+    func previewRGBA() -> [UInt8] {
+        pvLock.withLock {
+            pvSeq = pvRGBA.withUnsafeMutableBufferPointer { rfme_preview(e, pvSeq, $0.baseAddress) }
+            return pvRGBA
+        }
+    }
+
+    /// a core parameter, read with the clock stopped for a moment (diagnostics, the AU test)
+    public func param(_ name: String) -> Int32? {
+        ctl.withLock {
+            var v: Int32 = 0
+            return rfme_param_read(e, name, &v) != 0 ? v : nil
+        }
+    }
+
+    /// (the fake backends) a press, a turn on the fake unit's panel: by label / knob role, as this core maps them
+    public func fakePanel(button label: Int32? = nil, knob role: Int32? = nil, key: Int? = nil, down: Bool = true,
+                          detents: Int32 = 1) {
+        guard let link else { return }
+        if let label {
+            let id = rfme_matrix_button(e, label)
+            if id >= 0 { rfmc_fake_button(link, UInt32(id), down ? 1 : 0) }
+        }
+        if let role {
+            let id = rfme_matrix_encoder(e, role)
+            if id >= 0 { rfmc_fake_enc(link, UInt32(id), detents) }
+        }
+        if let key { rfmc_fake_key(link, UInt32(key), down ? 1 : 0) }
+    }
+
+    // MARK: the panel
+
+    public func claimPanel() { session?.claim() }
+
+    /// the owner's name in the lease: "<host's context name, or this process's name> / <core name>"
+    private func updateName() {
+        guard let session else { return }
+        let ctx = (contextName?.isEmpty == false ? contextName : nil) ?? ProcessInfo.processInfo.processName
+        let id = ctl.withLock { coreID }
+        var info = rfms_info_t()
+        let core = id.flatMap { rfms_find($0, &info) != 0 ? RemoteController.string(info.name) : $0 } ?? "no core"
+        let name = "\(ctx) / \(core)"
+        guard name != lastName else { return }
+        lastName = name
+        session.setName(name)
+    }
+
+    /// the main queue, 4 times a second: a firmware that rebooted itself (exit 0) is powered on again; the owner's
+    /// name follows the host's context name
+    private func startTimer() {
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 0.25, repeating: 0.25)
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            var r = rfme_status_t()
+            rfme_status(self.e, &r)
+            if r.halted != 0 && r.halt_code == 0x100 {
+                self.log.info("the firmware rebooted (exit 0): powered on again from its flash")
+                self.restartCore()
+            }
+            self.updateName()
+        }
+        t.resume()
+        timer = t
+    }
+
+    // MARK: the instances in this process (the AU test's view of the shared fake)
+
+    private static let liveLock = NSLock()
+    nonisolated(unsafe) private static var liveUnits: [ObjectIdentifier: Weak] = [:]
+    private struct Weak { weak var au: RFMAudioUnit? }
+    private static func register(_ a: RFMAudioUnit) { liveLock.withLock { liveUnits[ObjectIdentifier(a)] = Weak(au: a) } }
+    private static func unregister(_ a: RFMAudioUnit) { liveLock.withLock { liveUnits[ObjectIdentifier(a)] = nil } }
+    static var live: [RFMAudioUnit] { liveLock.withLock { liveUnits.values.compactMap(\.au) } }
+
+    /// the process-wide shared fake: who started its session, what each link sent, and how much of the fake's
+    /// screen each live instance's LCD matches
+    public static func sharedFakeReport() -> [String: Any] {
+        var r = rfmc_shared_t()
+        rfmc_shared_fake(&r)
+        var panel = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
+        rfmc_shared_fake_panel(&panel)
+        var senders: [[String: Any]] = []
+        for i in 0..<r.nsenders {
+            let s = rfmc_shared_sender(&r, i)
+            senders.append(["label": RemoteController.string(s.label), "msgs": s.msgs, "starts": s.starts,
+                            "stops": s.stops, "tiles": s.tiles, "afterOther": s.after_other,
+                            "afterOtherTiles": s.after_other_tiles])
+        }
+        var match: [String: Double] = [:]
+        for au in live where !au.fakeLabel.isEmpty {
+            let p = au.previewRGBA()
+            var same = 0
+            for i in stride(from: 0, to: p.count, by: 4) where p[i] == panel[i] && p[i + 1] == panel[i + 1] && p[i + 2] == panel[i + 2] {
+                same += 1
+            }
+            match[au.fakeLabel] = Double(same) / Double(p.count / 4)
+        }
+        return ["session": r.session, "lastStarter": RemoteController.string(r.last_starter), "starts": r.starts,
+                "frames": r.frames, "acks": r.acks, "openPorts": r.open_ports, "senders": senders, "screenMatch": match]
+    }
+
     // MARK: for the Mac tests
+
+    /// a panel event straight into the core (as the FM-1 sends it), by label / knob role
+    func panelEvent(button label: Int32? = nil, knob role: Int32? = nil, down: Bool = true, detents: Int16 = 1) {
+        if let label {
+            let id = rfme_matrix_button(e, label)
+            if id >= 0 { _ = rfme_event(e, UInt8(RFMC_EV_BUTTON), UInt8(id), down ? 1 : 0) }
+        }
+        if let role {
+            let id = rfme_matrix_encoder(e, role)
+            if id >= 0 { _ = rfme_event(e, UInt8(RFMC_EV_ENC), UInt8(id), detents) }
+        }
+    }
 
     /// renders `frames` frames with no host, plus one MIDI message
     public func renderForTest(frames: Int, midi: [UInt8] = []) -> [[Float]] {
@@ -142,10 +537,13 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     }
 }
 
-/// The host's way to the probes, through AUMessageChannel (plist types only). Messages, by "cmd":
+/// The host's way to the probes and the instance, through AUMessageChannel (plist types only). Messages, by "cmd":
 ///   "report"    → ["json": the probe report, "instance": the UUID, "pid": the extension's pid]
 ///   "ping"      → posts this process's Darwin ping again, then as "report"
 ///   "bluetooth" → asks the view controller to present the Bluetooth MIDI panel
+///   (M4) "status" → ["json": this instance (AUReport)]; "claim" → Use this FM-1; "core" + "id" → another core;
+///   "param" + "name" → a core parameter; "fake" → the shared fake unit's record (sharedFakeReport);
+///   "fakePanel" + "button" (label) / "knob" (role) / "key", "down", "detents" → the fake unit's panel
 final class DiagnosticsChannel: NSObject, AUMessageChannel, @unchecked Sendable {
     private weak var owner: RFMAudioUnit?
     /// set by an out-of-process host's side of the channel when it connects (not used yet; without it the
@@ -156,9 +554,31 @@ final class DiagnosticsChannel: NSObject, AUMessageChannel, @unchecked Sendable 
 
     func callAudioUnit(_ message: [AnyHashable: Any]) -> [AnyHashable: Any] {
         guard let au = owner else { return ["error": "gone"] }
+        let num = { (k: String) -> Int32? in (message[k] as? NSNumber)?.int32Value }
         switch message["cmd"] as? String {
         case "bluetooth":
             au.onEvent?(.bluetoothRequested)
+            return ["ok": true]
+        case "status":
+            return ["json": AUReport(au).json, "instance": au.state.instance.uuidString, "pid": Int(getpid())]
+        case "claim":
+            au.claimPanel()
+            return ["ok": true]
+        case "core":
+            au.selectCore(message["id"] as? String ?? "")
+            return ["ok": true]
+        case "param":
+            return au.param(message["name"] as? String ?? "").map { ["value": Int($0)] } ?? ["error": "no such parameter"]
+        case "fake":
+            let r = RFMAudioUnit.sharedFakeReport()
+            let data = (try? JSONSerialization.data(withJSONObject: r, options: [.sortedKeys])) ?? Data()
+            return ["json": String(decoding: data, as: UTF8.self)]
+        case "fakePanel":
+            au.fakePanel(button: num("button"), knob: num("knob"), key: num("key").map(Int.init),
+                         down: (message["down"] as? NSNumber)?.boolValue ?? true, detents: num("detents") ?? 1)
+            return ["ok": true]
+        case "resetLevel":
+            au.resetLevel()
             return ["ok": true]
         case "ping":
             au.probe.ping()
@@ -168,6 +588,86 @@ final class DiagnosticsChannel: NSObject, AUMessageChannel, @unchecked Sendable 
             return ["json": r.json(pretty: false), "instance": au.state.instance.uuidString, "pid": Int(getpid())]
         }
     }
+}
+
+/// One instance as the AU test reads it (JSON through the message channel)
+public struct AUReport: Codable, Sendable {
+    public var instance = "", fakeLabel = "", backend = ""
+    public var pid = Int(getpid())
+    public var core = "", coreName = "", coreVersion = "", coreError = "", bootedFrom = ""
+    public var slot = 0, booted = false, halted = false, clock = 0, powerCycles = 0
+    public var renders: UInt64 = 0, sounding: UInt64 = 0, renderAvgUs = 0, renderMaxUs = 0, renderFrames = 0
+    public var rate = 0.0, renderLoadPct = 0.0, levelRMS = 0.0
+    public var midiEvents: UInt64 = 0, midiIn = 0, midiNotes = 0, midiOut = 0, keysPressed = 0, devMs = 0
+    public var owner = false, ownerName = "", ownerPid = 0, ownerStale = true, epoch: UInt64 = 0
+    public var link = "", linkText = "", line = ""
+    public var drops = 0, gateBlocked = 0, duplicate = false, autoClaims = 0, claims = 0
+    public var claimWaited = false, claimAcked = false, claimWaitMs = 0
+    public var leaseWarning: String?
+    public var foreignSession = false
+    public var transpose = 0
+
+    public init() {}
+
+    init(_ au: RFMAudioUnit) {
+        let s = au.status()
+        instance = au.state.instance.uuidString
+        fakeLabel = au.fakeLabel
+        backend = au.backend
+        core = s.coreID
+        coreName = s.coreName
+        coreVersion = s.coreVersion
+        coreError = s.coreError
+        bootedFrom = s.bootedFrom
+        slot = s.core.slot
+        booted = s.core.booted
+        halted = s.core.halted
+        clock = s.core.clock
+        powerCycles = s.powerCycles
+        renders = s.core.renders
+        sounding = s.sounding
+        renderAvgUs = Int(s.core.renderAvgUs)
+        renderMaxUs = Int(s.core.renderMaxUs)
+        renderFrames = Int(s.core.renderLastFrames)
+        rate = s.core.rate
+        renderLoadPct = s.core.renderLoad * 100
+        levelRMS = s.levelRMS
+        midiEvents = s.midiEvents
+        midiIn = Int(s.midiIn)
+        midiNotes = Int(s.midiNotes)
+        midiOut = Int(s.core.midiOut)
+        keysPressed = Int(s.core.keysPressed)
+        devMs = Int(s.core.devMs)
+        transpose = s.settings.transpose
+        if let p = s.panel {
+            owner = p.owner
+            ownerName = p.ownerName
+            ownerPid = Int(p.ownerPid)
+            ownerStale = p.ownerStale
+            epoch = p.epoch
+            link = p.link.title
+            linkText = p.linkText
+            line = p.line
+            drops = Int(p.drops)
+            gateBlocked = Int(p.gateBlocked)
+            duplicate = p.duplicate
+            autoClaims = p.autoClaims
+            claims = p.claims
+            claimWaited = p.lastClaimWaited
+            claimAcked = p.lastClaimAcked
+            claimWaitMs = Int(p.lastClaimWaitMs)
+            leaseWarning = p.leaseWarning
+            foreignSession = p.foreignSession
+        }
+    }
+
+    public var json: String {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        return (try? e.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    }
+
+    public static func decode(_ s: String) -> AUReport? { try? JSONDecoder().decode(AUReport.self, from: Data(s.utf8)) }
 }
 
 private struct KernelRef: @unchecked Sendable { let p: OpaquePointer }

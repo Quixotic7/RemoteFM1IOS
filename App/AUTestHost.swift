@@ -192,7 +192,7 @@ final class AUTestHost {
                     + "candidates \($0.candidates)" } ?? "no result")
         }
 
-        // 6: state: A's fullState into a new instance C; the UUID must come along
+        // 6: state: A's fullState into a new instance C while A lives: a duplicate (M4), so C must get a new UUID
         if let a = units.first, let saved = a.auAudioUnit.fullState {
             let want = InstanceState(saved)?.instance.uuidString
             do {
@@ -202,7 +202,10 @@ final class AUTestHost {
                 let got = call(c, "report")
                 let fromState = InstanceState(c.auAudioUnit.fullState)?.instance.uuidString
                 summary.instances.append(.init(label: "C", instance: got.instance, pid: got.pid, report: got.report))
-                step("fullState restore", want != nil && got.instance == want && fromState == want,
+                // (M4: A is still alive in the same process, so C is a duplicate: it takes a new UUID, PLAN.md
+                // section 4; the restore of an owner's UUID is in -aucoretest)
+                step("fullState restore (a duplicate of a live A)",
+                     want != nil && got.instance != nil && got.instance != want && fromState == got.instance,
                      "A \(Self.short(want)), C new \(Self.short(fresh)), C restored \(Self.short(got.instance)), "
                         + "C's fullState \(Self.short(fromState)); keys \(saved.keys.sorted())")
                 units.append(c)

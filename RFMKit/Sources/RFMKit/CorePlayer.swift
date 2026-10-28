@@ -335,6 +335,12 @@ public final class CorePlayer {
     }
 
     private func rescan() {
+        let list = Self.catalog()
+        if list != cores { cores = list }
+    }
+
+    /// the cores the slot loader found (rfms_scan), ChoralRoot, Felucca and Melodee first
+    nonisolated static func catalog() -> [CoreInfo] {
         var list: [CoreInfo] = []
         for i in 0..<rfms_count() {
             var r = rfms_info_t()
@@ -356,12 +362,12 @@ public final class CorePlayer {
         }
         let order = ["choralroot", "felucca", "melodee"]
         list.sort { (order.firstIndex(of: $0.id) ?? 99, $0.id) < (order.firstIndex(of: $1.id) ?? 99, $1.id) }
-        if list != cores { cores = list }
+        return list
     }
 
     // MARK: conversions
 
-    static func status(_ e: OpaquePointer) -> CoreStatus {
+    nonisolated static func status(_ e: OpaquePointer) -> CoreStatus {
         var r = rfme_status_t()
         rfme_status(e, &r)
         var s = CoreStatus()
@@ -397,13 +403,13 @@ public final class CorePlayer {
 
     public func resetRenderStats() { rfme_reset_render_stats(e) }
 
-    static func string<T>(_ t: T) -> String { RemoteController.string(t) }
+    nonisolated static func string<T>(_ t: T) -> String { RemoteController.string(t) }
 
-    static func string(_ a: [CChar]) -> String {
+    nonisolated static func string(_ a: [CChar]) -> String {
         String(decoding: a.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
-    static func credits(_ id: String) -> String {
+    nonisolated static func credits(_ id: String) -> String {
         let n = Int(rfms_credits(id, nil, 0))
         guard n > 0 else { return "" }
         var b = [CChar](repeating: 0, count: n + 1)
@@ -411,7 +417,7 @@ public final class CorePlayer {
         return string(b)
     }
 
-    static func text(_ f: (UnsafeMutablePointer<CChar>?, UInt32) -> UInt32) -> String {
+    nonisolated static func text(_ f: (UnsafeMutablePointer<CChar>?, UInt32) -> UInt32) -> String {
         var b = [CChar](repeating: 0, count: 2048)
         _ = f(&b, 2048)
         return string(b)

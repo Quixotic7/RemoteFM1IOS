@@ -58,6 +58,15 @@ final class TapMeter: @unchecked Sendable {
         lock.unlock()
     }
 
+    func reset() {
+        lock.lock()
+        sum = 0
+        peak = 0
+        frames = 0
+        samples = 0
+        lock.unlock()
+    }
+
     var result: (rms: Double, peak: Double, frames: Int) {
         lock.lock()
         defer { lock.unlock() }

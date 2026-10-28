@@ -5,6 +5,8 @@
 // -fakeble the fake over Bluetooth. The simulator uses the fake unless launched with -device (its CoreMIDI may see the
 // Mac's MIDI devices). -autest (M2): only the AU test (AUTestView), run at launch; the FM-1 link is never created.
 // -coretest (M3): the core test (CoreTest.swift) runs on the normal screen; -core <id> picks the firmware.
+// M4: the app's link shares the FM-1 with the AU's instances through the lease (PLAN.md section 4), under its own
+// UUID (UserDefaults rfm1.instance). -aucoretest (M4): only the AU core test (AUCoreTest.swift), run at launch.
 
 import RFMKit
 import SwiftUI
@@ -20,11 +22,14 @@ struct RemoteFM1App: App {
     init() {
         let args = ProcessInfo.processInfo.arguments
         coreTest = args.contains("-coretest")
-        guard !args.contains("-autest") else { return }
+        guard !args.contains("-autest") && !args.contains("-aucoretest") else { return }
         let backend = Self.backend(args)
-        let c = RemoteController(backend: backend, demoInput: backend.isFake)
-        _controller = State(initialValue: c)
         let d = UserDefaults.standard
+        let id = d.string(forKey: "rfm1.instance").flatMap(UUID.init(uuidString:)) ?? UUID()
+        d.set(id.uuidString, forKey: "rfm1.instance")
+        let c = RemoteController(backend: backend, demoInput: backend.isFake, lease: PanelSession.Config(),
+                                 identity: id, ownerName: "RemoteFM1 app")
+        _controller = State(initialValue: c)
         var core = d.string(forKey: "rfm1.core") ?? "choralroot"
         if let i = args.firstIndex(of: "-core"), i + 1 < args.count { core = args[i + 1] }
         let p = CorePlayer(link: c, selected: core)
@@ -41,9 +46,18 @@ struct RemoteFM1App: App {
                 if let controller, let player {
                     ContentView(controller: controller, player: player)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
-                        .onChange(of: player.mode) { _, m in UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode") }
-                        .onChange(of: player.selected) { _, id in UserDefaults.standard.set(id, forKey: "rfm1.core") }
+                        .onChange(of: player.mode) { _, m in
+                            UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")
+                            controller.setOwnerName(Self.ownerName(player))
+                        }
+                        .onChange(of: player.selected) { _, id in
+                            UserDefaults.standard.set(id, forKey: "rfm1.core")
+                            controller.setOwnerName(Self.ownerName(player))
+                        }
+                        .onAppear { controller.setOwnerName(Self.ownerName(player)) }
                         .onChange(of: player.audioOn) { _, on in UserDefaults.standard.set(on, forKey: "rfm1.audio") }
+                } else if ProcessInfo.processInfo.arguments.contains("-aucoretest") {
+                    AUCoreTestView(host: AUCoreTestHost())
                 } else {
                     AUTestView(host: AUTestHost(auto: true))
                 }
@@ -64,6 +78,11 @@ struct RemoteFM1App: App {
             await player.didEnterBackground()
             task.end()
         }
+    }
+
+    /// the lease's owner name: "RemoteFM1 app / <core>" (or the test pattern)
+    @MainActor static func ownerName(_ p: CorePlayer) -> String {
+        "RemoteFM1 app / " + (p.mode == .core ? (p.current?.name ?? p.selected) : "test pattern")
     }
 
     static func backend(_ args: [String]) -> Backend {
