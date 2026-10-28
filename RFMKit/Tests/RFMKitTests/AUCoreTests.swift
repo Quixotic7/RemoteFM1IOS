@@ -141,6 +141,42 @@ final class AUCoreTests: XCTestCase {
         XCTAssertEqual(c.status().bootedFrom, "a fresh flash (none saved)")
     }
 
+    /// a default or a restored state naming a core this build lacks (a store build has FIZZ only): the first core
+    /// it has, booted, with a note; a restored state is saved back as it was until another core is picked
+    func testMissingCoreFallsBack() throws {
+        let a = try makeAU("nosuchcore")
+        render(a, ms: 800)
+        var s = a.status()
+        XCTAssertTrue(s.core.booted)
+        XCTAssertEqual(s.coreID, "choralroot")
+        XCTAssertEqual(s.coreError, "")
+        XCTAssertEqual(s.coreNote, "nosuchcore is not in this build: ChoralRoot instead")
+        XCTAssertGreaterThan(render(a, ms: 300, midi: [0x90, 62, 100]), 0)
+
+        var saved: [String: Any] = [:]
+        InstanceState().encode(into: &saved)
+        CoreState(core: "nosuchcore", version: "9", flash: Data([1, 2, 3])).encode(into: &saved)
+        let b = try makeAU("felucca")
+        b.fullState = saved
+        render(b, ms: 800)
+        s = b.status()
+        XCTAssertTrue(s.core.booted)
+        XCTAssertEqual(s.coreID, "choralroot")
+        XCTAssertEqual(s.bootedFrom, "a fresh flash")
+        XCTAssertTrue(s.coreNote.hasPrefix("nosuchcore is not in this build"), s.coreNote)
+        let back = try XCTUnwrap(b.fullState.flatMap(CoreState.init))
+        XCTAssertEqual(back.core, "nosuchcore")
+        XCTAssertEqual(back.flash, Data([1, 2, 3]))
+        b.selectCore("fizz")
+        render(b, ms: 800)
+        XCTAssertEqual(b.status().coreID, "fizz")
+        XCTAssertEqual(b.status().coreNote, "")
+        XCTAssertEqual(b.fullState.flatMap(CoreState.init)?.core, "fizz")
+        b.selectCore("nosuchcore")                  // (stays on FIZZ)
+        XCTAssertEqual(b.status().coreID, "fizz")
+        XCTAssertEqual(b.status().coreNote, "nosuchcore is not in this build")
+    }
+
     /// a fifth ChoralRoot in one process: the slot error, silence, no crash
     func testFifthInstanceRendersSilence() throws {
         let four = try (0..<4).map { _ in try makeAU() }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // The core test (M3, -coretest): the app's real path with the fake unit. It waits for the fake's session, boots the
-// firmware (-core <id>, default choralroot) in Core mode with the sound on, lets the fake's demo input play, taps
-// the main mixer for 3 s, saves the flash, powers the firmware off and on again, and writes coretest.json to
-// Documents (scripts/sim_coretest.sh reads it). The screen stays as the user would see it, for the screenshot.
+// firmware (-core <id>, default the app's) in Core mode with the sound on, lets the fake's demo input play (FIZZ:
+// PLAY on the fake unit first, its keys being steps), taps the main mixer for 3 s, saves the flash, powers the
+// firmware off and on again, and writes coretest.json to Documents (scripts/sim_coretest.sh reads it). The screen stays as the user would see it, for the screenshot.
 
 import AVFoundation
 import Foundation
@@ -128,6 +128,15 @@ final class CoreTest {
         let session = AVAudioSession.sharedInstance()
         s.ioBufferMs = session.ioBufferDuration * 1000
 
+        // (FIZZ: the fake's keys are steps, silent; PLAY on the fake unit starts its demo pattern)
+        if let label = Self.startButton[player.selected] {
+            let id = player.withPanelEngine { rfme_matrix_button($0, label) }
+            controller.fakeButton(Int(id), down: true)
+            try? await Task.sleep(for: .milliseconds(80))
+            controller.fakeButton(Int(id), down: false)
+            step("start button", id >= 0, "button \(label) (btn_id \(id)) tapped on the fake unit")
+        }
+
         // 3: let it play; the tap on the main mixer for 3 s
         try? await Task.sleep(for: .milliseconds(500))
         player.refresh()
@@ -210,6 +219,9 @@ final class CoreTest {
             log.error("coretest: \(error.localizedDescription, privacy: .public)")
         }
     }
+
+    /// a button tapped before listening, by label (RFME_B_*), for a core whose keys alone don't sound
+    static let startButton: [String: Int32] = ["fizz": Int32(RFME_B_PLAY)]
 
     private func step(_ name: String, _ ok: Bool?, _ detail: String) {
         s.steps.append(.init(name: name, ok: ok, detail: detail))

@@ -225,6 +225,12 @@ final class OnScreenInputTests: XCTestCase {
             let c = try TestCore(id)
             c.boot()
             c.run(1500)
+            if let b = CoreTests.keyPrelude[id] {           // (FIZZ: REC makes the keys a keyboard)
+                c.button(b, true)
+                c.run(60)
+                c.button(b, false)
+                c.run(100)
+            }
             let host = TestEngineHost(c)
             let feed = PanelFeed(host: host)
             feed.poll()

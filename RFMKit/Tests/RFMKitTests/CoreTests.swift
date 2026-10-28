@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// M3 on the Mac: the three cores through the slot loader and the engine (RFMEngine.h), on the macOS builds of
+// M3 on the Mac: the four cores (ChoralRoot, Felucca, Melodee, FIZZ) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
 // scripts/build_cores.sh macos (build/cores/macos/frameworks, or RFM_CORES_DIR). Skipped, saying so, when they are
 // not built. The engine runs on the test's thread (RFME_CLOCK_CALLER); the only link is libremotefm1's fake unit.
 
@@ -61,7 +61,10 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "melodee"]
+    static let ids = ["choralroot", "felucca", "melodee", "fizz"]
+    static let licences = ["fizz": "MPL-2.0"]    // (the others: GPL-3.0-only)
+    /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
+    static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC)]
     static let keyD4 = 9                // (conformance: the note key D4; key 0 is F3)
 
     static var coresDir: String {
@@ -93,7 +96,8 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(i.in_use, 0, id)
             XCTAssertEqual(i.abi, 6, id)
             XCTAssertGreaterThanOrEqual(i.flash_size, 1 << 20, id)
-            XCTAssertEqual(RemoteController.string(i.license), "GPL-3.0-only", id)
+            XCTAssertEqual(RemoteController.string(i.license), Self.licences[id] ?? "GPL-3.0-only", id)
+            XCTAssertEqual(RemoteController.string(i.gated), "", id)
             XCTAssertFalse(name.isEmpty || ver.isEmpty, id)
             let credits = rfms_credits(id, nil, 0)
             print("core \(id): \(name) \(ver), \(RemoteController.string(i.source_url)), credits \(credits) bytes")
@@ -113,6 +117,12 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(s0.dev_ms, 2999, id)
             XCTAssertGreaterThan(s0.lcd_writes, 0, id)
             XCTAssertNotEqual(h0, blank, "\(id): the LCD never changed")
+            if let b = Self.keyPrelude[id] {
+                c.button(b, true)
+                c.run(60)
+                c.button(b, false)
+                c.run(100)
+            }
             c.key(Self.keyD4, true)
             let a1 = c.run(500)
             c.key(Self.keyD4, false)
@@ -127,6 +137,63 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(a1.frames, 22050, accuracy: 128, id)
             XCTAssertEqual(s1.halted, 0, id)
         }
+    }
+
+    /// FIZZ: its descriptor (MPL-2.0, the source at its commit, the third parties' notices); its screen draws (not
+    /// one colour); PLAY starts the demo project's pattern, which sounds with no key held
+    func testFizz() throws {
+        var i = rfms_info_t()
+        XCTAssertEqual(rfms_find("fizz", &i), 1)
+        XCTAssertEqual(RemoteController.string(i.name), "FIZZ")
+        XCTAssertEqual(RemoteController.string(i.version), "0.12.0-beta.12")
+        let url = RemoteController.string(i.source_url)
+        XCTAssertTrue(url.hasPrefix("https://github.com/Quixotic7/FIZZ@") && url.count == 34 + 40, url)
+        let credits = CorePlayer.credits("fizz")
+        for s in ["FIZZ", "plutovg", "The FreeType Project", "stb", "Inter Tight", "Mozilla Public License Version 2.0",
+                  "SIL OPEN FONT LICENSE"] {
+            XCTAssertTrue(credits.contains(s), "fizz credits lack \(s)")
+        }
+
+        let c = try TestCore("fizz")
+        c.boot()
+        c.run(1500)
+        var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
+        XCTAssertNotEqual(rgba.withUnsafeMutableBufferPointer { rfme_preview(c.e, 0, $0.baseAddress) }, 0)
+        var colours = Set<UInt32>()
+        for p in stride(from: 0, to: rgba.count, by: 4) {
+            colours.insert(UInt32(rgba[p]) << 16 | UInt32(rgba[p + 1]) << 8 | UInt32(rgba[p + 2]))
+        }
+        XCTAssertGreaterThan(colours.count, 8, "FIZZ's screen is (nearly) one colour")
+        let quiet = c.run(500)
+        XCTAssertEqual(quiet.peak, 0, "FIZZ sounds before PLAY")
+        c.button(Int32(RFME_B_PLAY), true)
+        c.run(60)
+        c.button(Int32(RFME_B_PLAY), false)
+        var peak: Int32 = 0, rms = 0.0
+        for _ in 0..<8 {
+            let a = c.run(500)
+            peak = max(peak, a.peak)
+            rms = max(rms, Double(a.rms))
+        }
+        print(String(format: "core fizz: %d colours on screen, demo after PLAY: peak %d, rms %.5f, keys %u",
+                     colours.count, peak, rms, c.status.keys_pressed))
+        XCTAssertGreaterThan(peak, 64, "FIZZ's demo pattern is silent after PLAY")
+        XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// the default core: the preferred one if this build has it, else the first in CorePlayer.order (a store build
+    /// has FIZZ only)
+    func testDefaultCoreFallsBack() {
+        let all = CorePlayer.catalog()
+        XCTAssertEqual(all.map(\.id), Self.ids, "the picker's order")
+        XCTAssertEqual(CorePlayer.pick("melodee", in: all), "melodee")
+        XCTAssertEqual(CorePlayer.pick(nil, in: all), "choralroot")
+        XCTAssertEqual(CorePlayer.pick("nosuchcore", in: all), "choralroot")
+        let store = all.filter { $0.id == "fizz" }
+        XCTAssertEqual(CorePlayer.pick("choralroot", in: store), "fizz")
+        XCTAssertEqual(CorePlayer.pick(nil, in: store), "fizz")
+        XCTAssertNil(CorePlayer.pick("choralroot", in: []))
+        XCTAssertEqual(CorePlayer.missingNote("choralroot", "fizz", store), "choralroot is not in this build: FIZZ instead")
     }
 
     /// two slots of one core are two firmwares: the same boot gives the same screen; input in one changes only it.
