@@ -1,7 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# Archives a Release build and uploads it to App Store Connect for internal TestFlight testing. A store build
+# Archives a Release build and uploads it to App Store Connect for TestFlight (internal and external testers;
+# INTERNAL_ONLY=1 marks it internal only). A store build
 # (RFM_STORE_BUILD=YES): only the cores in cores/store-cores.txt are embedded (scripts/embed_cores.sh); the archive's
 # cores are printed and checked against that list before the upload, and a core's store variant (Saadet's) against
 # build/cores/ios/frameworks-store.
@@ -20,13 +21,15 @@ KEY=$(ls ~/.appstoreconnect/private_keys/*AuthKey_"$ASC_KEY_ID".p8 | head -1)
 OUT=${OUT:-$ROOT/build/testflight}
 AUTH=(-authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 BUILD=()
+INTERNAL=false
+[ "${INTERNAL_ONLY:-0}" = 1 ] && INTERNAL=true
 [ $# -ge 1 ] && BUILD=(CURRENT_PROJECT_VERSION="$1")
 
 # Homebrew's rsync 3.x breaks Xcode's .ipa step (Apple's rsync runs the first rsync on PATH as its server).
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 rm -rf "$OUT" && mkdir -p "$OUT"
-cat > "$OUT/ExportOptions.plist" <<'EOF'
+cat > "$OUT/ExportOptions.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -42,7 +45,7 @@ cat > "$OUT/ExportOptions.plist" <<'EOF'
 		<key>com.quixotic7.remotefm1.au</key><string>RemoteFM1 AU App Store</string>
 	</dict>
 	<key>uploadSymbols</key><true/>
-	<key>testFlightInternalTestingOnly</key><true/>
+	<key>testFlightInternalTestingOnly</key><$INTERNAL/>
 </dict>
 </plist>
 EOF
