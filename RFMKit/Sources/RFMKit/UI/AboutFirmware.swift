@@ -57,9 +57,9 @@ public struct AboutFirmware: View {
                         }
                     }
                     Text("RemoteFM1").font(.headline)
-                    Text("This app and the firmware above are free software under the GNU General Public License, "
-                         + "version 3 (GPL-3.0-only). The firmware runs as built from the source named above, through "
-                         + "FM1VST's core interface.")
+                    Text("This app is free software under the GNU General Public License, version 3 (GPL-3.0-only). "
+                         + (info.map { "The firmware above is free software under \(Self.licence($0.license)); it runs as "
+                                       + "built from the source named above, through FM1VST's core interface." } ?? ""))
                         .font(.footnote)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -69,5 +69,14 @@ public struct AboutFirmware: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { if let onDone { onDone() } else { dismiss() } } } }
         }
         .preferredColorScheme(.dark)
+    }
+
+    static func licence(_ spdx: String) -> String {
+        switch spdx {
+        case "GPL-3.0-only": return "the GNU General Public License, version 3 (GPL-3.0-only)"
+        case "MPL-2.0": return "the Mozilla Public License, version 2.0 (MPL-2.0)"
+        case "": return "its own licence"
+        default: return spdx
+        }
     }
 }

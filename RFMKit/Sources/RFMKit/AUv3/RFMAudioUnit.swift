@@ -4,10 +4,11 @@
 // UUID in fullState, and a message channel for the probes. M4: the instance plays a firmware core and shares one FM-1
 // with every other instance (PLAN.md section 4):
 //
-//   the core     ChoralRoot, Felucca or Melodee from the app bundle's slot frameworks (rfms_scan finds
+//   the core     a core from the app bundle's slot frameworks (ChoralRoot, Felucca, Melodee, FIZZ; a store build: FIZZ) (rfms_scan finds
 //                <appex>/../../Frameworks); loaded and booted off the render thread (the caller's, under `ctl`),
 //                the clock handed over explicitly: the render callback while render resources are allocated
-//                (RFME_CLOCK_AUDIO), the engine's timer otherwise (the panel keeps working, no sound)
+//                (RFME_CLOCK_AUDIO), the engine's timer otherwise (the panel keeps working, no sound). A core this
+//                build doesn't have (a default, a restored state): the first it has, with a note (Status.coreNote)
 //   MIDI         the host's MIDI to the core at its frame (FM1VST's mapping); the core's MIDI out to the host's
 //                MIDI output (midiOutputNames, MIDIOutputEventBlock)
 //   fullState    the instance UUID and format (InstanceState), the core, its version, its flash (flash_sync first,
@@ -34,7 +35,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
             case auto                           // device; the simulator: the shared fake; the App Group file decides
         }
         public var runProbes = true
-        public var defaultCore: String? = "choralroot"
+        public var defaultCore: String? = CorePlayer.order[0]   // (nil: none; one this build lacks: the first it has)
         public var link: Link = .auto
         public var panel = PanelSession.Config()
         public var slotsDir: String?            // nil: the bundle (and from an appex the app's) Frameworks
@@ -56,6 +57,8 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     private var instanceState = InstanceState()
     private var coreID: String?
     private var coreError = ""
+    private var coreNote = ""                   // a core asked for that this build doesn't have
+    private var unrestored: CoreState?          // a restored state whose core is missing here: saved back as it was
     private var settings_ = AUSettings()
     private var bootedFrom = ""
     private var powerCycles = 0
@@ -234,6 +237,8 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
                         log.info("restore: \(c.core, privacy: .public) \(c.version, privacy: .public) saved, \(ver, privacy: .public) here: booting from the saved flash anyway")
                     }
                     _ = loadLocked(c.core, flash: c.flash, from: c.flash == nil ? "a fresh flash (none saved)" : "the saved flash")
+                    unrestored = have ? nil : c
+                    if !have && !coreNote.isEmpty { coreNote += " (the saved state is kept)" }
                 }
             }
             let id = session?.restore(restored.instance) ?? restored.instance
@@ -261,7 +266,13 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     /// loads `id` with a fresh flash (the old core's flash is not kept: the host's project holds an instance's flash)
     public func selectCore(_ id: String) {
         ctl.withLock {
+            var info = rfms_info_t()
+            guard rfms_find(id, &info) != 0 else {
+                coreNote = "\(id) is not in this build"
+                return
+            }
             guard id != coreID || !CorePlayer.status(e).booted else { return }
+            unrestored = nil
             _ = loadLocked(id, flash: nil, from: "a fresh flash")
         }
         updateName()
@@ -293,7 +304,20 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     }
 
     /// (ctl held) the core loaded into a free slot and booted; the clock given back to its owner
-    private func loadLocked(_ id: String, flash: Data?, from: String) -> Bool {
+    private func loadLocked(_ wanted: String, flash wantedFlash: Data?, from wantedFrom: String) -> Bool {
+        var id = wanted, flash = wantedFlash, from = wantedFrom
+        var info = rfms_info_t()
+        coreNote = ""
+        if rfms_find(wanted, &info) == 0 {
+            let cores = CorePlayer.catalog()
+            if let use = CorePlayer.pick(nil, in: cores) {     // (another core's flash means nothing to this one)
+                coreNote = CorePlayer.missingNote(wanted, use, cores)
+                log.error("load \(wanted, privacy: .public): not in this build, \(use, privacy: .public) instead")
+                id = use
+                flash = nil
+                from = "a fresh flash"
+            }
+        }
         var err = [CChar](repeating: 0, count: 256)
         guard rfme_load(e, id, &err, 256) != 0 else {
             coreError = CorePlayer.string(err)
@@ -319,6 +343,10 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     /// makes the copy at its next between hook; a clock that doesn't answer in 200 ms is stopped for it
     private func coreStateForSave() -> CoreState? {
         ctl.withLock {
+            if var u = unrestored {
+                u.settings = settings_
+                return u
+            }
             let s = CorePlayer.status(e)
             guard let id = coreID, s.booted else { return nil }
             var info = rfms_info_t()
@@ -346,7 +374,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
 
     public struct Status: Sendable {
         public var instance = ""
-        public var coreID = "", coreName = "", coreVersion = "", coreError = "", bootedFrom = ""
+        public var coreID = "", coreName = "", coreVersion = "", coreError = "", coreNote = "", bootedFrom = ""
         public var core = CoreStatus()
         public var panel: PanelStatus?
         public var settings = AUSettings()
@@ -363,6 +391,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
         ctl.withLock {
             s.coreID = coreID ?? ""
             s.coreError = coreError
+            s.coreNote = coreNote
             s.bootedFrom = bootedFrom
             s.settings = settings_
             s.powerCycles = powerCycles
@@ -594,7 +623,7 @@ final class DiagnosticsChannel: NSObject, AUMessageChannel, @unchecked Sendable 
 public struct AUReport: Codable, Sendable {
     public var instance = "", fakeLabel = "", backend = ""
     public var pid = Int(getpid())
-    public var core = "", coreName = "", coreVersion = "", coreError = "", bootedFrom = ""
+    public var core = "", coreName = "", coreVersion = "", coreError = "", coreNote = "", bootedFrom = ""
     public var slot = 0, booted = false, halted = false, clock = 0, powerCycles = 0
     public var renders: UInt64 = 0, sounding: UInt64 = 0, renderAvgUs = 0, renderMaxUs = 0, renderFrames = 0
     public var rate = 0.0, renderLoadPct = 0.0, levelRMS = 0.0
@@ -618,6 +647,7 @@ public struct AUReport: Codable, Sendable {
         coreName = s.coreName
         coreVersion = s.coreVersion
         coreError = s.coreError
+        coreNote = s.coreNote
         bootedFrom = s.bootedFrom
         slot = s.core.slot
         booted = s.core.booted

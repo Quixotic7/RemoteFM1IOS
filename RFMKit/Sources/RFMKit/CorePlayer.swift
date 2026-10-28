@@ -76,23 +76,44 @@ public final class CorePlayer {
     @ObservationIgnored private var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
     @ObservationIgnored private var flashBuf: [UInt8] = []
     @ObservationIgnored private var bootedID: String?
+    @ObservationIgnored private var fallbackNote = ""    // (kept as the message until another core is picked)
     @ObservationIgnored private var configObserver: NSObjectProtocol?
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
 
-    /// slotsDir: where the slot frameworks are (nil: the app's Frameworks)
-    public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String = "choralroot") {
+    /// slotsDir: where the slot frameworks are (nil: the app's Frameworks). selected: the core to start with (a saved
+    /// choice); nil, or one this build doesn't have: the first of `order` that it has
+    public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil) {
         self.link = link
-        self.selected = selected
+        self.selected = selected ?? ""
         self.flashDir = flashDir ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("cores")
         try? FileManager.default.createDirectory(at: self.flashDir, withIntermediateDirectories: true)
         e = rfme_new(link?.core)
         rfms_scan(slotsDir)
         rescan()
-        if !cores.contains(where: { $0.id == selected }), let first = cores.first { self.selected = first.id }
+        if let pick = Self.pick(selected, in: cores) {
+            self.selected = pick
+            if let selected, pick != selected { fallbackNote = Self.missingNote(selected, pick, cores) }
+            message = fallbackNote
+        }
         if cores.isEmpty { message = "no cores in the app (" + Self.text(rfms_dirs) + ")" }
         startPolling()
+    }
+
+    /// the cores' order in the picker and for a default: the first of these this build has
+    public nonisolated static let order = ["choralroot", "felucca", "melodee", "fizz"]
+
+    /// `preferred` if `cores` has it, else the first of `cores` (sorted by `order`); nil when there are none
+    public nonisolated static func pick(_ preferred: String?, in cores: [CoreInfo]) -> String? {
+        if let preferred, cores.contains(where: { $0.id == preferred }) { return preferred }
+        return cores.first?.id
+    }
+
+    /// the status line for a core this build doesn't have
+    nonisolated static func missingNote(_ missing: String, _ used: String, _ cores: [CoreInfo]) -> String {
+        let name = cores.first { $0.id == used }?.name ?? used
+        return "\(missing) is not in this build: \(name.isEmpty ? used : name) instead"
     }
 
     deinit {
@@ -107,6 +128,7 @@ public final class CorePlayer {
     public func select(_ id: String) {
         guard id != selected || bootedID == nil else { return }
         guard cores.contains(where: { $0.id == id }) else { return }
+        if id != selected { fallbackNote = "" }
         if bootedID != nil, bootedID != id {
             saveStopped()
             rfme_unload(e)
@@ -206,7 +228,7 @@ public final class CorePlayer {
         footprintAfter = rfmp_footprint()
         bootedID = selected
         flashBuf = [UInt8](repeating: 0, count: Int(rfme_flash_size(e)))
-        message = ok != 0 ? "" : "boot failed"
+        message = ok != 0 ? fallbackNote : "boot failed"
         log.info("booted \(self.selected, privacy: .public) from \(bytes == nil ? "a fresh flash" : "\(url.lastPathComponent)", privacy: .public)")
         rescan()
         return ok != 0
@@ -339,7 +361,7 @@ public final class CorePlayer {
         if list != cores { cores = list }
     }
 
-    /// the cores the slot loader found (rfms_scan), ChoralRoot, Felucca and Melodee first
+    /// the cores the slot loader found (rfms_scan), in `order`
     nonisolated static func catalog() -> [CoreInfo] {
         var list: [CoreInfo] = []
         for i in 0..<rfms_count() {
@@ -360,7 +382,7 @@ public final class CorePlayer {
             c.credits = Self.credits(c.id)
             list.append(c)
         }
-        let order = ["choralroot", "felucca", "melodee"]
+        let order = Self.order
         list.sort { (order.firstIndex(of: $0.id) ?? 99, $0.id) < (order.firstIndex(of: $1.id) ?? 99, $1.id) }
         return list
     }

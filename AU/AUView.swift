@@ -79,6 +79,7 @@ struct AUSheet: View {
                     }
                     .padding(.top, 20)
                     if !model.status.coreError.isEmpty { SheetNote(model.status.coreError, color: .orange) }
+                    else if !model.status.coreNote.isEmpty { SheetNote(model.status.coreNote, color: .orange) }
                 }
                 .padding(.bottom, 8)
             }

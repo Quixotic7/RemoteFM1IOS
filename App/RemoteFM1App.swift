@@ -33,7 +33,7 @@ struct RemoteFM1App: App {
         let c = RemoteController(backend: backend, demoInput: backend.isFake, lease: PanelSession.Config(),
                                  identity: id, ownerName: "RemoteFM1 app")
         _controller = State(initialValue: c)
-        var core = d.string(forKey: "rfm1.core") ?? "choralroot"
+        var core = d.string(forKey: "rfm1.core")      // (nil, or a core this build lacks: CorePlayer picks one)
         if let i = args.firstIndex(of: "-core"), i + 1 < args.count { core = args[i + 1] }
         let p = CorePlayer(link: c, selected: core)
         _player = State(initialValue: p)
