@@ -3,6 +3,7 @@
 # FIZZ is MPL-2.0 and the owner's; Saadet is MPL-2.0 (Kerem Kilic gave the owner permission to include it), and a
 # store build takes its store variant (build/cores/<plat>/frameworks-store: without the Roland, Sequential and Casio
 # factory banks, which Saadet's own builds carry with no licence granted). Every core is still built; a store build
-# embeds only these.
+# embeds only these. Boardwalk is MPL-2.0 throughout (Charles Vestal) with no vendor data.
 fizz
 saadet
+boardwalk

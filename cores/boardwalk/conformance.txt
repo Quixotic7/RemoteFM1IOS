@@ -1,0 +1,18 @@
+# Boardwalk 0.9: tests/core_conformance.cpp's script for this core (see its header for the directives). The sound:
+# the boardwalk plays the cabinet's attract tune and the sea from power-on; a key adds a note (no prelude).
+# the flash round trip: OCT+ walks to the next cabinet (the save's cab); flash_sync saves it (the lazy save, now);
+# after the reboot the boardwalk shows that cabinet
+save wait 800
+save btn OCT+ 60
+save wait 800
+save quit
+saved wait 1200
+saved quit
+saved-lcd-differs
+# OCT- + OCT+ held 5 s: UBOOT (base/device/main_fm1.c, plat_glue.h); four failed boots in a row: UBOOT
+reboot-guard 3
+reboot wait 600
+reboot btn OCT- down
+reboot btn OCT+ down
+reboot wait 6000
+reboot quit

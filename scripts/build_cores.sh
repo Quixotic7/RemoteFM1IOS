@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 RemoteFM1 contributors
-# Builds the FM-1 cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet) with cores/CMakeLists.txt and makes each one's four slot
+# Builds the FM-1 cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet, Boardwalk) with cores/CMakeLists.txt and makes each one's four slot
 # frameworks (PLAN.md section 3): FM1Core_<id>_<n>.framework, n = 1..4, the same code with its own install name
 # (@rpath/FM1Core_<id>_<n>.framework/FM1Core_<id>_<n>) and bundle id (com.quixotic7.remotefm1.core.<id>.<n>).
 #
@@ -22,6 +22,7 @@
 # fm1_add_core reads the right commit. FIZZ comes from vendor/FIZZ (cores/FIZZ in the copy: its licence files, core/
 # without core/tests/, third_party/, the font licence; nothing GPL of it). Saadet comes from vendor/saadet (cores/saadet
 # in the copy, without tests/ and docs/; its generators are in tools/) with vendor/fm1-base as its base/ (without bsp/).
+# Boardwalk comes from vendor/boardwalk (cores/boardwalk, without mockups/, tests/ and its base's bsp/).
 # A core with a store variant (<id>_store in cores.txt: saadet_store) gets its slots in <platform>/frameworks-store,
 # named as the core's (FM1Core_saadet_<n>); scripts/embed_cores.sh takes them from there for a store build. CR_PYTHON=... picks the python with Pillow
 # and fontTools; RFM_CORES="a;b" the cores to build (default: all four; the store build embeds a subset of them,
@@ -32,8 +33,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 FM1VST=$ROOT/vendor/FM1VST
 FIZZ=$ROOT/vendor/FIZZ
 SAADET=$ROOT/vendor/saadet
+BOARDWALK=$ROOT/vendor/boardwalk
 FM1BASE=$ROOT/vendor/fm1-base
-CORES=${RFM_CORES:-choralroot;felucca;melodee;fizz;saadet}
+CORES=${RFM_CORES:-choralroot;felucca;melodee;fizz;saadet;boardwalk}
 B=$ROOT/build/cores
 SRC=$B/src
 PY=${CR_PYTHON:-/Library/Frameworks/Python.framework/Versions/3.11/bin/python3}
@@ -73,6 +75,10 @@ sync_sources() {
     rsync -a --delete --exclude=.git --exclude=/build/ --exclude=/bsp/ --exclude=/tests/ --exclude=/examples/ \
         "$FM1BASE/" "$SRC/cores/saadet/base/"
     git_pointer "$SAADET" "$SRC/cores/saadet"
+    [ -f "$BOARDWALK/base/host/plat_host.c" ] || { echo "$BOARDWALK is empty: git submodule update --init vendor/boardwalk && git -C vendor/boardwalk submodule update --init base"; exit 1; }
+    rsync -a --delete --exclude=.git --exclude=/app/build/ --exclude=/base/bsp/ --exclude=/base/build/ --exclude=/mockups/ \
+        --exclude=/tests/ "$BOARDWALK/" "$SRC/cores/boardwalk/"
+    git_pointer "$BOARDWALK" "$SRC/cores/boardwalk"
     cmp -s "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt" || cp "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt"
 }
 
