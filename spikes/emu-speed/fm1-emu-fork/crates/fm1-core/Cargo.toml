@@ -1,0 +1,12 @@
+[package]
+name = "fm1-core"
+description = "FM-1 CPU interpreter core; talks to the outside only through the Bus trait"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+fm1-isa = { path = "/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/emu/cores/fm1-emu/crates/fm1-isa" }
+
+[features]
+stats = []

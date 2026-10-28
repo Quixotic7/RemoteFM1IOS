@@ -1,0 +1,25 @@
+[package]
+name = "fm1bench"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+name = "fm1bench"
+path = "../../bench/src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "fm1bench"
+path = "../../bench/src/main.rs"
+
+[dependencies]
+fm1-core = { path = "../crates/fm1-core" }
+fm1-soc = { path = "../crates/fm1-soc" }
+
+[features]
+fork-stats = ["fm1-core/stats"]
+
+[lints.rust]
+unexpected_cfgs = { level = "allow" }

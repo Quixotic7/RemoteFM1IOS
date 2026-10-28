@@ -40,7 +40,7 @@ Nothing in either repo is edited from here; a change they need is reported to th
   and, later, the parameter tree, which we write ourselves.
 - **No emulator engine.** fm1emu (Rust) runs real firmware binaries, but iOS forbids JIT, and its interpreter runs
   Felucca at about 0.9× real time natively on an M5 Max (emulator evaluation, 2026-10-27). Too slow on a phone.
-  Native cores only.
+  Native cores built in; imported firmware is section 9 (measured on the iPhone, 2026-10-28).
 
 ## 3. One firmware image per instance: slots
 
@@ -152,6 +152,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect. Simulator part done (`scripts/sim_aucoretest.sh`, a shared fake unit); device part waits for the iPhone |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship. The flag is built (`RFM_STORE_BUILD`); the store build carries FIZZ |
+| M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
@@ -216,3 +217,50 @@ So:
   ships.
 - App size: 4 identical slots per core cost 4× on disk.
 - The App Store build depends on other authors' permission; without it, only amb can ship there.
+
+## 9. Imported firmware: .rfm1 and .fwsc
+
+The owner's aim: users drop firmware files into the app's folder (Files) and switch between them. iOS loads no
+unsigned native code and allows no JIT, so an imported firmware runs in an interpreter. Two kinds were measured on the
+owner's iPhone 13 Pro Max (A15, iOS 26.3) on 2026-10-28. Details and raw numbers: `spikes/wasm-speed/README.md`,
+`spikes/emu-speed/README.md`.
+
+**.rfm1: a firmware's host build (the fm1core ABI, FM1VST's glue) compiled to WebAssembly**, run by wasm3 (MIT).
+Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, chord held, mean / p99:
+
+| | 1 instance | 2 | 4 | 8 |
+| --- | --- | --- | --- | --- |
+| Felucca | 6 / 13 | 13 / 27 | 26 / 54 | 51 / 110 |
+| ChoralRoot (its screen redrawing) | 11 / 15, max 77 | 22 / 135 | | |
+
+(Native: under 1%. WAMR's fast interpreter: the same within ~10%.)
+- Sound costs 15–25× native. A screen redraw costs a few ms interpreted and today runs inside the audio callback:
+  ChoralRoot's redraws are what drop out. Running `frame()` off the audio thread is the key change.
+- Each Wasm instance has its own memory, so .rfm1 cores need no slots and have no 4-instance cap.
+- Porting was small: Felucca built unchanged, ChoralRoot with one stand-in header (`<os/lock.h>`).
+- The format must fix: flat exported entry points (a host can't call wasm32 function-table pointers), wasm32 struct
+  offsets (`fm1panel_t` matches; the descriptor doesn't), a fixed import list (a few WASI stubs), fixed memory, Wasm
+  MVP + sign-ext, sat-float-to-int and bulk memory, no clock or entropy that changes the output.
+- Licensing: the app ships only the interpreter; a user's .rfm1 comes from its author's release (GPL source there).
+  FM1VST's glue could build .rfm1 files for the cores it already has, published with their source.
+
+**.fwsc: the FM-1's own package, run by fm1-emu's interpreter** (MIT). x real time at 240 MHz (the FM-1's clock),
+idle / chord:
+
+| | Mac (M5 Max) interpreter | Mac JIT | iPhone interpreter |
+| --- | --- | --- | --- |
+| Felucca 1.6.1 | 1.30 / 1.28 | 5.05 / 4.95 | 0.79 / 0.74 |
+| stock M-VAVE V15 | 5.35 / 2.85 | 7.50 / 4.55 | 2.99 / 1.42 |
+| ChoralRoot 0.27, one-core build | 1.36 / 1.26 | 5.02 / 5.09 | 0.73 / 0.69 |
+
+- On the iPhone heavy firmware runs below real time: not even one instance of Felucca or ChoralRoot.
+- fm1-emu already pre-decodes and caches blocks; no cheap 2× is left. A ~40-line fork gains ~6%.
+- The biggest lever is the emulated clock: Felucca and ChoralRoot spend spare cycles in a key-scan busy wait. At
+  120 MHz the Mac runs them ~1.8× faster with the same sound on the test input (iPhone estimate ~1.3×, not run), but
+  firmware may depend on its real clock.
+- ChoralRoot's dual-core builds don't boot on fm1-emu (it doesn't model the P33 power interface they use).
+
+**Decision (proposed):** .rfm1 first (M7): the firmware folder, file types, a wasm3 host behind the same engine as
+the native cores, `frame()` off the audio thread, and a build target in FM1VST that makes .rfm1 files. .fwsc
+emulation stays a later option for light or closed firmware (stock V15 already runs at 1.4×), and on newer iPhones.
+App Review may still object to running imported code (guidelines 2.5.2, 4.7).

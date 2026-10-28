@@ -1,0 +1,22 @@
+[package]
+name = "fm1bench"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+name = "fm1bench"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "fm1bench"
+path = "src/main.rs"
+
+[dependencies]
+fm1-core = { path = "/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/emu/cores/fm1-emu/crates/fm1-core" }
+fm1-soc = { path = "/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/emu/cores/fm1-emu/crates/fm1-soc" }
+
+[lints.rust]
+unexpected_cfgs = { level = "allow" }

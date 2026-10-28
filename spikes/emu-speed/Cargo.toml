@@ -1,0 +1,19 @@
+# The emu-speed spike: fm1-emu (joakimeriksson/fm1-emu, MIT, pinned 5fbb066) timed on real .fwsc packages.
+# Its crates are used by path, read-only, from the FM1VST emu worktree (FM1EMU_SRC below), unmodified.
+[workspace]
+resolver = "2"
+members = ["bench"]
+exclude = ["fm1-emu-fork"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
+strip = false
+panic = "unwind"
+
+# a release build with symbols, for `sample`
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
