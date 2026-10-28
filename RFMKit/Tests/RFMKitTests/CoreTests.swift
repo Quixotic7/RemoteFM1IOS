@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// M3 on the Mac: the cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet, Boardwalk) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
+// M3 on the Mac: the cores (ChoralRoot, Felucca, Melodee, FIZZ, Saadet, Boardwalk, LOOM-8) through the slot loader and the engine (RFMEngine.h), on the macOS builds of
 // scripts/build_cores.sh macos (build/cores/macos/frameworks, or RFM_CORES_DIR). Skipped, saying so, when they are
 // not built. The engine runs on the test's thread (RFME_CLOCK_CALLER); the only link is libremotefm1's fake unit.
 
@@ -61,10 +61,13 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk"]
-    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0"]    // (the others: GPL-3.0-only)
+    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk", "loom"]
+    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0", "loom": "MPL-2.0"]    // (the others: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
-    static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC)]
+    static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC), "loom": Int32(RFME_B_PLAY)]
+    /// keys tapped before that (conformance.txt's): LOOM-8 opens T1, a drum kit, on its Steps page, so four kicks are
+    /// written (G3, C4, G4, D5: steps 2, 5, 9, 13) and PLAY starts them; D4 then toggles a step as it plays
+    static let stepPrelude: [String: [Int]] = ["loom": [2, 7, 14, 21]]
     static let keyD4 = 9                // (conformance: the note key D4; key 0 is F3)
 
     static var coresDir: String {
@@ -119,6 +122,12 @@ final class CoreTests: XCTestCase {
             if h0 == blank {        // (Saadet draws its whole screen at power-on, before the first device ms)
                 XCTAssertGreaterThan(Self.colours(c), 8, "\(id): the LCD never changed and is (nearly) one colour")
             }
+            for k in Self.stepPrelude[id] ?? [] {
+                c.key(k, true)
+                c.run(60)
+                c.key(k, false)
+                c.run(100)
+            }
             if let b = Self.keyPrelude[id] {
                 c.button(b, true)
                 c.run(60)
@@ -133,7 +142,7 @@ final class CoreTests: XCTestCase {
             print(String(format: "core %@: slot %d, idle rms %.5f peak %d; key rms %.5f peak %d; LCD %08x -> %08x -> %08x, "
                          + "writes %u -> %u, stats %u (cpu %u%%, shed %u)", id, s1.slot, a0.rms, a0.peak, a1.rms, a1.peak,
                          blank, h0, c.lcd, s0.lcd_writes, s1.lcd_writes, s1.have_stats, s1.cpu_pct, s1.shed))
-            XCTAssertEqual(s1.keys_pressed, 1, id)
+            XCTAssertEqual(s1.keys_pressed, 1 + UInt32(Self.stepPrelude[id]?.count ?? 0), id)
             XCTAssertGreaterThan(a1.peak, 64, "\(id): a held D4 is silent")
             XCTAssertGreaterThan(a1.rms, 1e-4, id)
             XCTAssertEqual(a1.frames, 22050, accuracy: 128, id)
@@ -286,6 +295,58 @@ final class CoreTests: XCTestCase {
         print(String(format: "core boardwalk: attract tune peak %d rms %.5f", tune.peak, tune.rms))
         XCTAssertEqual(c.status.halted, 0)
     }
+
+    /// LOOM-8: its descriptor (MPL-2.0, the source at its commit, the credits: athousanddetails as his permission
+    /// asks); the 909 closed hat (GPL-3.0) is not in the binary (none of its ADPCM, as LOOM-8's gen_samples.py
+    /// encodes it into the synced tree's reference header, while the kick it encodes before it is there); the
+    /// written kicks play
+    func testLoom() throws {
+        var i = rfms_info_t()
+        XCTAssertEqual(rfms_find("loom", &i), 1)
+        XCTAssertEqual(RemoteController.string(i.name), "LOOM-8")
+        XCTAssertEqual(RemoteController.string(i.version), "0.9.3")
+        let url = RemoteController.string(i.source_url)
+        XCTAssertTrue(url.hasPrefix("https://github.com/charlesvestal/fm1-loom@") && url.count == 42 + 40, url)
+        let credits = CorePlayer.credits("loom")
+        for s in ["Charles Vestal", "Leo Kuroshita", "athousanddetails", "u/FCTRYBEATS", "VSCO 2 CE", "Braids",
+                  "Mozilla Public License Version 2.0", "SIL OPEN FONT LICENSE", "no 909 closed hat"] {
+            XCTAssertTrue(credits.contains(s), "loom credits lack \(s)")
+        }
+        let bin = try Data(contentsOf: URL(fileURLWithPath: Self.coresDir + "/FM1Core_loom_1.framework/FM1Core_loom_1"))
+        let gen = (Self.coresDir as NSString).deletingLastPathComponent + "/../src/cores/loom/app/build/gen/samples.h"
+        let rows = try String(contentsOfFile: gen, encoding: .utf8)
+        XCTAssertTrue(rows.contains("{\"hat\", 11831u, 186u, 0u,"), "the hat's row is not empty in \(gen)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (gen as NSString).deletingLastPathComponent
+                                                       + "/../../samples/909_hat.wav"), "909_hat.wav was synced")
+        let adp = try Self.cArray(gen, "SMP_FACT_ADP", 64)
+        XCTAssertNotNil(bin.range(of: Data(adp)), "the kick's ADPCM is not in the binary: the check finds nothing")
+        // the hat's bytes as LOOM-8 encodes them (its first 32 of 644 B of ADPCM: tools/gen_samples.py, v0.9.3)
+        let hat: [UInt8] = Self.loomHat
+        XCTAssertNil(bin.range(of: Data(hat)), "the 909 hat's ADPCM is in the LOOM-8 core")
+
+        let c = try TestCore("loom")
+        c.boot()
+        c.run(500)
+        XCTAssertGreaterThan(Self.colours(c), 8)
+        for k in Self.stepPrelude["loom"]! {
+            c.key(k, true)
+            c.run(60)
+            c.key(k, false)
+            c.run(100)
+        }
+        c.button(Int32(RFME_B_PLAY), true)
+        c.run(60)
+        c.button(Int32(RFME_B_PLAY), false)
+        let a = c.run(2000)
+        print(String(format: "core loom: kicks after PLAY: peak %d rms %.5f, binary %d B", a.peak, a.rms, bin.count))
+        XCTAssertGreaterThan(a.peak, 64, "LOOM-8's written kicks are silent")
+        XCTAssertEqual(c.status.halted, 0)
+    }
+
+    /// the first 32 bytes of the 909 closed hat's IMA ADPCM as LOOM-8 v0.9.3's tools/gen_samples.py encodes
+    /// app/samples/909_hat.wav (SMP_FACT_ADP[11831...]): what testLoom looks for in the binary
+    static let loomHat: [UInt8] = [127, 247, 103, 249, 179, 97, 78, 139, 131, 178, 212, 56, 163, 77, 77, 176, 161, 196,
+                                   81, 155, 195, 89, 140, 150, 41, 153, 130, 208, 50, 79, 192, 32]
 
     /// the colours on a core's screen
     static func colours(_ c: TestCore) -> Int {

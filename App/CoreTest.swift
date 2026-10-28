@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // The core test (M3, -coretest): the app's real path with the fake unit. It waits for the fake's session, boots the
-// firmware (-core <id>, default the app's) in Core mode with the sound on, lets the fake's demo input play (FIZZ:
-// PLAY on the fake unit first, its keys being steps), taps the main mixer for 3 s, saves the flash, powers the
+// firmware (-core <id>, default the app's) in Core mode with the sound on, lets the fake's demo input play (FIZZ,
+// LOOM-8: PLAY on the fake unit first, its keys being steps), taps the main mixer for 3 s, saves the flash, powers the
 // firmware off and on again, and writes coretest.json to Documents (scripts/sim_coretest.sh reads it). The screen stays as the user would see it, for the screenshot.
 
 import AVFoundation
@@ -221,7 +221,7 @@ final class CoreTest {
     }
 
     /// a button tapped before listening, by label (RFME_B_*), for a core whose keys alone don't sound
-    static let startButton: [String: Int32] = ["fizz": Int32(RFME_B_PLAY)]
+    static let startButton: [String: Int32] = ["fizz": Int32(RFME_B_PLAY), "loom": Int32(RFME_B_PLAY)]
 
     private func step(_ name: String, _ ok: Bool?, _ detail: String) {
         s.steps.append(.init(name: name, ok: ok, detail: detail))

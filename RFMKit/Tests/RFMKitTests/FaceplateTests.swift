@@ -225,6 +225,12 @@ final class OnScreenInputTests: XCTestCase {
             let c = try TestCore(id)
             c.boot()
             c.run(1500)
+            for k in CoreTests.stepPrelude[id] ?? [] {      // (LOOM-8: four kicks written, then PLAY)
+                c.key(k, true)
+                c.run(60)
+                c.key(k, false)
+                c.run(100)
+            }
             if let b = CoreTests.keyPrelude[id] {           // (FIZZ: REC makes the keys a keyboard)
                 c.button(b, true)
                 c.run(60)
@@ -242,7 +248,7 @@ final class OnScreenInputTests: XCTestCase {
             let a = c.run(300)
             feed.poll()
             XCTAssertNotEqual(feed.lights.heldKeys & (1 << UInt32(k)), 0, "\(id): the core holds key \(k)")
-            XCTAssertEqual(c.status.keys_pressed, 1, id)
+            XCTAssertEqual(c.status.keys_pressed, 1 + UInt32(CoreTests.stepPrelude[id]?.count ?? 0), id)
             XCTAssertGreaterThan(a.peak, 64, "\(id): the touched key sounds")
             let lit = feed.lights.keys[k]
             print("faceplate \(id): key \(k) LED \(before) -> \(lit) while held; buttons \(feed.lights.buttons)")
