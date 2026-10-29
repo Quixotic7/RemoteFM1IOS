@@ -7,6 +7,8 @@
 #
 #   scripts/sim_autest.sh [UDID]        (default: RFM iPhone 17, CEB2B846-...)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-autest); NOBUILD=1 reuses the last build
+#   AUPAGE=midi | learn | learn:KN1   (M8) the second screenshot is that page of the AU's view (au-page.png), not the
+#             Bluetooth panel
 #
 # The app's -autest never starts the FM-1 link; its probes never send MIDI or connect to an endpoint.
 set -euo pipefail
@@ -50,9 +52,9 @@ echo "data: $DATA"
 echo "group: ${GDIR:-none}"
 if [ -n "$GDIR" ]; then rm -f "$GDIR"/probe-*.json "$GDIR"/autest*.json "$GDIR"/lease-probe.bin; fi
 
-say "launch -autest"
+say "launch -autest${AUPAGE:+ -aupage $AUPAGE}"
 T0=$(date +%s)
-xcrun simctl launch "$UDID" "$BUNDLE" -autest
+xcrun simctl launch "$UDID" "$BUNDLE" -autest ${AUPAGE:+-aupage "$AUPAGE"}
 for _ in $(seq 1 120); do
     if [ -f "$DATA/Documents/autest.json" ] && grep -q '"done" : true' "$DATA/Documents/autest.json"; then break; fi
     sleep 1
@@ -60,9 +62,15 @@ done
 [ -f "$DATA/Documents/autest.json" ] || echo "no summary after 120 s"
 sleep 2
 xcrun simctl io "$UDID" screenshot "$RES/au.png" >/dev/null 2>&1 && echo "screenshot: $RES/au.png"
-for _ in $(seq 1 20); do [ -f "$DATA/Documents/autest-bt.json" ] && break; sleep 1; done
-sleep 2
-xcrun simctl io "$UDID" screenshot "$RES/bluetooth.png" >/dev/null 2>&1 && echo "screenshot: $RES/bluetooth.png"
+if [ -n "${AUPAGE:-}" ]; then
+    for _ in $(seq 1 20); do [ -f "$DATA/Documents/autest-page.json" ] && break; sleep 1; done
+    sleep 2
+    xcrun simctl io "$UDID" screenshot "$RES/au-page.png" >/dev/null 2>&1 && echo "screenshot: $RES/au-page.png"
+else
+    for _ in $(seq 1 20); do [ -f "$DATA/Documents/autest-bt.json" ] && break; sleep 1; done
+    sleep 2
+    xcrun simctl io "$UDID" screenshot "$RES/bluetooth.png" >/dev/null 2>&1 && echo "screenshot: $RES/bluetooth.png"
+fi
 
 say "collect"
 cp "$DATA"/Documents/*.json "$RES/" 2>/dev/null || true

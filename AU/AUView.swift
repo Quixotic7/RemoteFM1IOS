@@ -6,7 +6,9 @@
 // grabber sits inside the view's top edge; its sheet holds the AU's own items: the FM-1 (Use this FM-1, Bluetooth),
 // the view, the theme (shared with the app through the App Group), the firmware (About, Restart), the MIDI octave,
 // and Diagnostics (the instance's numbers and M2's probes). M7: the firmware page lists the imported .rfm1 files too
-// (the app's mirror in the App Group); a Wasm core that can't keep up shows a note over the faceplate.
+// (the app's mirror in the App Group); a Wasm core that can't keep up shows a note over the faceplate. M8: Knobs from
+// MIDI (MIDI learn on the host's MIDI, the knob speed, the mappings: global, shared with the app); learn mode on the
+// faceplate, its bar and the toasts over the sheet (FaceplateOverlay).
 
 import RFMKit
 import SwiftUI
@@ -26,6 +28,8 @@ struct AUView: View {
                 PullDownSheet(open: Binding(get: { model.ui.sheetOpen }, set: { model.ui.sheetOpen = $0 })) {
                     AUSheet(model: model)
                 }
+                FaceplateOverlay(feed: model.feed, bottom: !model.ui.sheetOpen && !model.perfNote.isEmpty ? 56 : 10,
+                                 barAtTop: model.ui.page == .controls && model.ui.deck == .buttons)
             }
             .onAppear { model.fit(geo.size) }
             .onChange(of: geo.size) { _, s in model.fit(s) }
@@ -40,7 +44,11 @@ struct AUSheet: View {
     @Bindable var model: AUViewModel
     private let store = ThemeStore.shared
 
-    var body: some View { sheet.onChange(of: model.ui.sheetOpen) { _, open in if !open { model.page = nil } } }
+    var body: some View {
+        sheet.onChange(of: model.ui.sheetOpen) { _, open in
+            if open { model.learn.stop() } else { model.page = nil }
+        }
+    }
 
     private var chip: PanelChip { model.chip }
 
@@ -49,6 +57,7 @@ struct AUSheet: View {
     @ViewBuilder private var sheet: some View {
         switch model.page {
         case .firmware: firmwarePage
+        case .midi: midiPage
         case .diagnostics: diagnosticsPage
         case nil: mainSheet
         }
@@ -69,13 +78,10 @@ struct AUSheet: View {
                         SheetRow("Firmware", value: model.status.coreName.isEmpty ? "–" : model.status.coreName) {
                             model.page = .firmware
                         }
-                        Stepper(value: Binding(get: { model.status.settings.transpose }, set: { model.setTranspose($0) }),
-                                in: -2...2) {
-                            Text("MIDI octave \(model.status.settings.transpose > 0 ? "+" : "")\(model.status.settings.transpose)")
-                                .font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText)
-                        }
-                        .padding(.horizontal, 16).frame(height: 52)
-                        .overlay(alignment: .bottom) { Palette.sheetLine.frame(height: 1) }
+                        SheetStepper("MIDI octave", value: Binding(get: { model.status.settings.transpose },
+                                                                   set: { model.setTranspose($0) }), in: -2...2)
+                        SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
+                                 : "\(MidiMapStore.shared.mappings.count) learned") { model.page = .midi }
                         SheetRow("Diagnostics", divider: false) {
                             model.page = .diagnostics
                             model.diagnosticsOpen = true
@@ -154,6 +160,15 @@ struct AUSheet: View {
             if !model.perfNote.isEmpty { SheetNote(model.perfNote, color: .orange) }
             SheetNote(s.booted ? "\(model.status.coreName)\(s.slot > 0 ? ", slot \(s.slot)" : " (imported)") · instance \(model.instance)"
                       : "No firmware running · instance \(model.instance)")
+        }
+    }
+
+    /// Knobs from MIDI: learned from the host's MIDI (route a controller to this instrument in the host)
+    private var midiPage: some View {
+        SheetPage("Knobs from MIDI", back: { model.page = nil }) {
+            MidiMapSection(top: 12, titled: false) { model.startLearn() }
+            SheetNote("Learn listens to the MIDI the host sends this instrument: route your controller to it. The "
+                      + "mappings are shared by the RemoteFM1 app and every instance.")
         }
     }
 

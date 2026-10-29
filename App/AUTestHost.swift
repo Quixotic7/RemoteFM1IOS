@@ -4,7 +4,8 @@
 // instances out of process, plays them (silence) on an AVAudioEngine with a MIDI note, collects each instance's
 // probe report through the AU's message channel, saves one instance's fullState into a third, shows the AU's view,
 // and writes everything to autest.json (Documents, and the App Group container when there is one). With -autest it
-// runs by itself at launch and then asks the extension to present its Bluetooth panel (autest-bt.json).
+// runs by itself at launch and then asks the extension to present its Bluetooth panel (autest-bt.json); with -aupage
+// <midi | learn | learn:KN1> (M8) it asks the view for that page instead (autest-page.json).
 //
 // It never starts the FM-1 link, and the probes never send MIDI or connect to an endpoint.
 
@@ -228,7 +229,14 @@ final class AUTestHost {
         }
         finish()
 
-        if auto {
+        if auto, let i = CommandLine.arguments.firstIndex(of: "-aupage"), i + 1 < CommandLine.arguments.count {
+            // (M8) a page of the AU's view instead (scripts/sim_autest.sh AUPAGE=midi | learn | learn:KN1)
+            try? await Task.sleep(for: .seconds(2))
+            let what = CommandLine.arguments[i + 1]
+            let r = units.first.map { call($0, "show", ["what": what]) }
+            try? await Task.sleep(for: .seconds(1))
+            write(["page": what, "reply": r?.error ?? "ok", "time": Date().timeIntervalSince1970], name: "autest-page.json")
+        } else if auto {
             // the Bluetooth panel inside the extension's view, for the second screenshot
             try? await Task.sleep(for: .seconds(3))
             let r = units.first.map { call($0, "bluetooth") }
@@ -293,13 +301,15 @@ final class AUTestHost {
     }
 
     /// one message to the instance's diagnostics channel (AUMessageChannel: works out of process)
-    private func call(_ u: AVAudioUnit, _ cmd: String) -> Reply {
+    private func call(_ u: AVAudioUnit, _ cmd: String, _ extra: [String: Any] = [:]) -> Reply {
         // (through the ObjC runtime: an extension that died gives a nil channel, which the Swift signature can't hold)
         let sel = NSSelectorFromString("messageChannelFor:")
         guard let obj = u.auAudioUnit.perform(sel, with: RFMShared.diagnosticsChannel)?.takeUnretainedValue(),
               let ch = obj as? AUMessageChannel, let call = ch.callAudioUnit
         else { return Reply(error: "no message channel (the extension may have exited)") }
-        let m = call(["cmd": cmd])
+        var msg: [AnyHashable: Any] = ["cmd": cmd]
+        for (k, v) in extra { msg[k] = v }
+        let m = call(msg)
         var r = Reply(instance: m["instance"] as? String, pid: (m["pid"] as? NSNumber)?.intValue)
         if let j = m["json"] as? String { r.report = ProbeReport.decode(Data(j.utf8)) }
         if r.instance == nil && m["ok"] == nil { r.error = "empty reply: \(m)" }

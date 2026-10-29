@@ -2,7 +2,8 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // The extension's principal class: the AU's view controller and its factory, as in Apple's AUv3 template. The audio
 // unit itself (RFMAudioUnit) and the probes are in RFMKit. Sheets (Bluetooth, About this firmware) are presented with
-// UIKit: SwiftUI's .sheet crashed inside the extension (M2).
+// UIKit: SwiftUI's .sheet crashed inside the extension (M2). M8: MIDI learn on this instance's host MIDI (MidiLearnMode on
+// the faceplate's feed); the learned map is global (MidiMapStore, observed here).
 
 import CoreAudioKit
 import RFMKit
@@ -17,6 +18,7 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
     public override func viewDidLoad() {
         super.viewDidLoad()
         RFMFonts.register()
+        MidiMapStore.shared.observe()
         model.onBluetooth = { [weak self] in self?.presentBluetooth() }
         model.onAbout = { [weak self] info in self?.presentAbout(info) }
         let hosting = UIHostingController(rootView: AUView(model: model))
@@ -81,7 +83,7 @@ private struct UnitRef: @unchecked Sendable { let au: RFMAudioUnit }
 @MainActor
 @Observable
 final class AUViewModel {
-    enum Page { case firmware, diagnostics }
+    enum Page { case firmware, midi, diagnostics }
     var instance = "–"
     var status = RFMAudioUnit.Status()
     var cores: [CoreInfo] = []
@@ -91,6 +93,7 @@ final class AUViewModel {
     var chip = PanelChip.emulator                       // (set only when it changes: the faceplate reads it)
     let ui = FaceplateUI()
     let feed = PanelFeed(host: nil)
+    @ObservationIgnored private(set) lazy var learn = MidiLearnMode(feed: feed, host: nil)
     @ObservationIgnored var userPicked = false          // (a view picked in the sheet: no more fitting to the size)
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
     @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
@@ -105,11 +108,13 @@ final class AUViewModel {
     func attach(_ au: RFMAudioUnit) {
         self.au = au
         feed.attach(au)
+        learn.attach(au)
         au.onEvent = { [weak self] e in
             Task { @MainActor in
                 switch e {
                 case .stateRestored: self?.refresh()
                 case .bluetoothRequested: self?.onBluetooth?()
+                case .show(let what): self?.show(what)
                 }
             }
         }
@@ -156,6 +161,20 @@ final class AUViewModel {
         guard !userPicked, size.width > 0, size.height > 0 else { return }
         let p: FaceplateUI.Page = min(size.width, size.height) < 260 ? .screen : size.height > size.width * 1.1 ? .controls : .full
         if p != ui.page { ui.page = p }
+    }
+
+    /// Learn: the sheet closes, the faceplate picks controls (the host's MIDI is what it learns from)
+    func startLearn() { withAnimation(.easeInOut(duration: 0.28)) { learn.start(ui) } }
+
+    /// (the AU test) a page for a screenshot
+    func show(_ what: String) {
+        if what == "midi" {
+            ui.sheetOpen = true
+            page = .midi
+        } else if what.hasPrefix("learn") {
+            learn.start(ui)
+            if let t = what.split(separator: ":").dropFirst().first { learn.pick(String(t)) }
+        }
     }
 
     func select(_ id: String) { au?.selectCore(id) }

@@ -81,7 +81,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     /// Called (on any thread) when the instance's identity changed (a restored state) or a host asked for the
     /// Bluetooth panel. The extension's view controller sets it.
     public nonisolated(unsafe) var onEvent: (@Sendable (Event) -> Void)?
-    public enum Event: Sendable { case stateRestored, bluetoothRequested }
+    /// show: (the AU test's screenshots) "midi" the Knobs from MIDI page, "learn" learn mode, "learn:KN1" with KN1 picked
+    public enum Event: Sendable { case stateRestored, bluetoothRequested, show(String) }
 
     public init(componentDescription: AudioComponentDescription, options: AudioComponentInstantiationOptions = [],
                 config: Config) throws {
@@ -611,6 +612,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 ///   "report"    → ["json": the probe report, "instance": the UUID, "pid": the extension's pid]
 ///   "ping"      → posts this process's Darwin ping again, then as "report"
 ///   "bluetooth" → asks the view controller to present the Bluetooth MIDI panel
+///   (M8) "show" + "what" → the view shows a page for a screenshot ("midi", "learn", "learn:KN1")
 ///   (M4) "status" → ["json": this instance (AUReport)]; "claim" → Use this FM-1; "core" + "id" → another core;
 ///   "param" + "name" → a core parameter; "fake" → the shared fake unit's record (sharedFakeReport);
 ///   "fakePanel" + "button" (label) / "knob" (role) / "key", "down", "detents" → the fake unit's panel
@@ -628,6 +630,9 @@ final class DiagnosticsChannel: NSObject, AUMessageChannel, @unchecked Sendable 
         switch message["cmd"] as? String {
         case "bluetooth":
             au.onEvent?(.bluetoothRequested)
+            return ["ok": true]
+        case "show":
+            au.onEvent?(.show(message["what"] as? String ?? ""))
             return ["ok": true]
         case "status":
             return ["json": AUReport(au).json, "instance": au.state.instance.uuidString, "pid": Int(getpid())]
