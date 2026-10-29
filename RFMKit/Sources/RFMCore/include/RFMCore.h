@@ -128,4 +128,5 @@ static inline rfmc_sender_t rfmc_shared_sender(const rfmc_shared_t *s, uint32_t 
 #include "RFMProbe.h"
 #include "RFMKernel.h"
 #include "RFMEngine.h"
+#include "RFMWasm.h"
 #endif

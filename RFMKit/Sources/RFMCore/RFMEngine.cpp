@@ -1085,6 +1085,7 @@ int rfme_midi_out_take_at(rfme_t *e, uint32_t *pkt, uint32_t *offset) { return e
 void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
 {
     rfme_audio_t a{};
+    a.hash = 2166136261u;
     double sum = 0;
     rfme::Scope cs(e, RFME_CLOCK_CALLER);
     if (cs.ok) {
@@ -1094,6 +1095,7 @@ void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
             for (uint32_t got; (got = e->dev->take_s16(buf, 256)) > 0;) {
                 for (uint32_t k = 0; k < 2 * got; k++) {
                     const int32_t v = buf[k];
+                    a.hash = (a.hash ^ (uint16_t)v) * 16777619u;
                     sum += (double)v * v;
                     const int32_t m = v < 0 ? -v : v;
                     if (m > a.peak)
@@ -1140,8 +1142,10 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->clock = e->clock.load();
     st->attached = e->attached.load();
     st->slot = e->core ? e->core->slot() : 0;
-    if (e->core)
+    if (e->core) {
         putErr(st->core_id, sizeof st->core_id, e->core->info().id);
+        putErr(st->kind, sizeof st->kind, e->core->kind());
+    }
     st->dev_ms = e->devMs.load();
     st->lcd_writes = e->lcdWrites.load();
     st->snapshots = e->snapshots.load();

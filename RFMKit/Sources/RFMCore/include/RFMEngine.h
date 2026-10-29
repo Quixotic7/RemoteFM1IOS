@@ -133,6 +133,7 @@ typedef struct {
     uint64_t frames;
     double rms;                 // over both channels, full scale 1.0
     int32_t peak;               // the largest |sample| (int16)
+    uint32_t hash;              // FNV-1a over the samples (each int16 as 16 bits), for bit-exact comparisons
 } rfme_audio_t;
 void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out);
 
@@ -162,7 +163,7 @@ uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out);
 typedef struct {
     int loaded, booted, halted, clock, attached;
     uint32_t halt_code;         // halted(): 0x100 | exit code
-    int slot;                   // 1..4, 0 none
+    int slot;                   // 1..4, 0 none (or a Wasm core: no slots)
     char core_id[32];
     uint32_t dev_ms, lcd_writes, snapshots, events_applied, events_dropped, keys_pressed, midi_out;
     uint32_t midi_in, midi_notes, midi_in_dropped;  // (M4) host MIDI messages; of them notes that played a key; lost
@@ -183,6 +184,7 @@ typedef struct {
     int32_t realtime;           // the core thread got the time-constraint policy
     int32_t workgroup;          // the core thread is in the host's audio workgroup
     uint32_t workgroup_joins;
+    char kind[8];               // (M7) the backend: "native" (a slot), "wasm" (an .rfm1 in wasm3), "" none
 } rfme_status_t;
 void rfme_status(rfme_t *e, rfme_status_t *st);
 void rfme_reset_render_stats(rfme_t *e);

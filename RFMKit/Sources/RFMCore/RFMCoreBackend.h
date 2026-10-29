@@ -5,7 +5,7 @@
 //
 //   NativeCore   a slot framework's fm1core_t (core-api/fm1core.h, ABI 5..6), dlopen'd by the slot loader
 //                (RFMSlots.h): the entry points are the descriptor's function pointers, the panel is the module's
-//   WasmCore     (next) an .rfm1 module (docs/RFM1-FORMAT.md) in an interpreter: the entry points are its rfm1_*
+//   WasmCore     an .rfm1 module (docs/RFM1-FORMAT.md) in an interpreter: the entry points are its rfm1_*
 //                exports, the panel lives in the module's linear memory
 //
 // THREADING: fm1core.h's contract, unchanged. Every method that runs firmware code, and every read or write through
@@ -107,6 +107,12 @@ using CoreFactory = std::function<std::unique_ptr<CoreBackend>(std::string *err)
 
 // a native core in a slot of `id` (the slot loader's first free one)
 CoreFactory nativeCoreFactory(const std::string &id);
+
+// an .rfm1 file (docs/RFM1-FORMAT.md) read and checked once (RFMWasmCore.cpp; cached by path, size and modification
+// time), and a factory that makes a WasmCore over it: its own wasm3 instance per call (each engine, each power cycle)
+struct WasmFile;
+std::shared_ptr<const WasmFile> wasmOpen(const std::string &path, std::string *err);
+CoreFactory wasmCoreFactory(std::shared_ptr<const WasmFile> file);
 
 // rfme_load with any backend (the control thread): the clock stopped, the old core unloaded, `factory` kept for power
 // cycles, the clock given back (rfme_boot next). false: the factory failed (err)
