@@ -140,3 +140,8 @@ phone:
 | `analyze.py` | the slice-continuity detector |
 | `build.sh`, `run.sh`, `matrix.sh`, `matrix2.sh` | build, one run, the run sets above |
 | `build/runs/` | each run's WAV, `.json`, `.sx.log`, `.loop.log` (not committed: build/) |
+
+**Update (2026-10-28):** the USB audio input bug is fixed in RemoteFM1 0.2.3 (felucca-bsp patch 0003: the 20 ms stall
+check timed by a new `FELUCCA_USB_MS` hook instead of counted polls; github.com/Quixotic7/RemoteFM1/releases/tag/v0.2.3).
+Measured with `fm1loop` on 0.2.3: 100 % of the recorded samples are real audio, no gap over 1 ms (15 % on 0.2.2). With
+0.2.3 the loopback sees the whole output, so dropout rates no longer need scaling by the valid share.
