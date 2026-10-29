@@ -133,7 +133,7 @@ probes run on the iPhone from the app's "AU test" button.
 | Bluetooth pairing UI | in the app (`CABTMIDICentralViewController`) and inside the extension's view. Hosts have their own (AUM's Bluetooth MIDI button) | presents inside the extension and scans. On iOS 27.0 the panel crashed in the app and the extension (`UIScreen.main.applicationFrame` is NaN there); `RFMKit/UI/BluetoothSheet.swift` builds its table itself only in that case. SwiftUI `.sheet` crashed in the extension too: it presents with UIKit | real pairing; whether iOS 27 devices have the same bug |
 | The Bluetooth link belongs to the app that made it: FIZZ saw it drop when its app was relaunched | if a link made in the app doesn't survive the app closing, pair from the host or from the extension | not testable | device only |
 | USB on the owner's iPhone 13 Pro Max: with FIZZ, the FM-1 did not appear over the Lightning camera adapter | Bluetooth first. USB is tested on a USB-C iPad when there is one | not testable | device only |
-| Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) runs there too, as in FM1VST. 44.1 kHz resampled to the session rate | C++ kernel renders silence, takes host MIDI; a std::thread in the extension keeps running while it renders | timing under load |
+| Render thread | no allocation, no locks: Device and the queues already are. The core's `frame()` (screen drawing) ran there too, as in FM1VST (M7: the core now renders ahead on its own thread, section 9). 44.1 kHz resampled to the session rate | C++ kernel renders silence, takes host MIDI; a std::thread in the extension keeps running while it renders | timing under load |
 | Memory | measured with 1, 4 and 8 instances | `os_proc_available_memory` is 0 (no limit on the simulator); footprint ~23 MB | the real limit: device only |
 | State (`fullState`) | core id, version, instance UUID, settings, and the 1 MiB flash image compressed (`flash_sync` first). A core whose version changed boots from the saved flash as FM1VST does | M4: core id and version, settings and the flash (LZFSE: 1 MiB → ~1.3 KB for a near-empty image) survive a restore into a new instance; ChoralRoot's saved tempo comes back | real hosts' project save and reload |
 | Background audio (standalone) | `UIBackgroundModes: audio`, an active audio session, so the unit keeps its panel while the app is in the background | key added; the session activates | behaviour in the background; the save-on-background path (not run headless) |
@@ -154,7 +154,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect. Simulator part done (`scripts/sim_aucoretest.sh`, a shared fake unit); device part waits for the iPhone |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship. The flag is built (`RFM_STORE_BUILD`); the store build carries FIZZ |
-| M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ |
+| M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ. Part 1 done (2026-10-28): the core backend interface (`RFMCoreBackend.h`, native cores behind it) and the render-ahead core thread (section 9); next: the wasm3 backend, the firmware folder |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
@@ -246,8 +246,20 @@ Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, ch
 | ChoralRoot (its screen redrawing) | 11 / 15, max 77 | 22 / 135 | | |
 
 (Native: under 1%. WAMR's fast interpreter: the same within ~10%.)
-- Sound costs 15–25× native. A screen redraw costs a few ms interpreted and today runs inside the audio callback:
+- Sound costs 15–25× native. A screen redraw costs a few ms interpreted and ran inside the audio callback:
   ChoralRoot's redraws are what drop out. Running `frame()` off the audio thread is the key change.
+- **Render ahead (built, M7 part 1).** Every core, native or Wasm, now runs on its engine's own core thread
+  (`RFMEngine.cpp`), never in the audio callback. In audio mode the thread renders into a lock-free ring kept a host
+  buffer + 6 ms ahead (`rfme_set_latency`), in 64-frame chunks; the callback only copies from the ring, queues the
+  host's MIDI stamped with its frame and wakes the thread (a Mach semaphore). Latency = target + one chunk: 512 frames
+  (10.7 ms) at 128-frame buffers and 48 kHz, 896 (18.7 ms) with the simulator's 512-frame renders; the AU reports it
+  as `latency`. Host MIDI sounds exactly that much later than its frame, and the core's MIDI out keeps its place.
+  Missing frames are silence, counted (underruns). The thread is a Mach real-time thread with the host buffer as its
+  period and joins the audio workgroup (the AU's `renderContextObserver`; the app's output unit's
+  `kAudioOutputUnitProperty_OSWorkgroup`). Without audio it runs the timer clock. Measured on the simulator (7 cores,
+  48 kHz, 512-frame renders): the callback went from 71–962 µs average (FIZZ; max 3.2 ms) to 3–4 µs (max 12 µs),
+  0 underruns; on the Mac, a frame() made 3 ms slower every 15 ms gives 0 underruns in 10 s of 128-frame callbacks,
+  12 ms slower gives counted underruns. A host's offline render (`renderingOffline`) waits for the core thread.
 - Each Wasm instance has its own memory, so .rfm1 cores need no slots and have no 4-instance cap.
 - Porting was small: Felucca built unchanged, ChoralRoot with one stand-in header (`<os/lock.h>`).
 - The format must fix: flat exported entry points (a host can't call wasm32 function-table pointers), wasm32 struct
