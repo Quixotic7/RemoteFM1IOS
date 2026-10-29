@@ -58,5 +58,13 @@ void rfmk_set_midi_out(rfmk_t *k, AUMIDIOutputEventBlock block);
 #ifdef __cplusplus
 }
 #endif
+
+// The AU's base class: AUAudioUnit's renderContextObserver (unavailable in Swift: it is called on the render thread).
+// Its block hands the render context's workgroup to the engine set here (rfme_set_workgroup: the engine's core thread
+// joins it), so the core thread rendering ahead runs in the host's audio workgroup. Plain C on the render thread.
+@interface RFMAudioUnitBase : AUAudioUnit
+// the engine whose core thread joins the host's workgroup (NULL: none; set NULL before freeing the engine)
+- (void)rfmSetRenderContextEngine:(rfme_t *)engine;
+@end
 #endif
 #endif

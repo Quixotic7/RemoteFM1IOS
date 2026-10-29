@@ -25,7 +25,7 @@ import CoreGraphics
 import Foundation
 import RFMCore
 
-public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
+public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     public struct Config: Sendable {
         public enum Link: Sendable, Equatable {
             case none                           // no panel (the Mac tests of M2)
@@ -137,6 +137,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
             session = nil
         }
         try super.init(componentDescription: componentDescription, options: options)
+        rfmSetRenderContextEngine(e)            // (the core thread joins the host's render workgroup: RFMKernel.h)
         outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outBus])
         inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: [])
         maximumFramesToRender = 4096
@@ -186,6 +187,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     deinit {
         timer?.cancel()
         Self.unregister(self)
+        rfmSetRenderContextEngine(nil)
         rfme_free(e)                            // (the clock stopped, the slot released; before the link goes)
         if let session { session.finish() }     // (the link and the lease freed in the background)
         rfmk_free(kernel)

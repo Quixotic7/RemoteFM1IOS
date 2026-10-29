@@ -273,6 +273,8 @@ public final class CorePlayer {
         engine = eng
         node = n
         audioRunning = true
+        // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup)
+        if let au = eng.outputNode.audioUnit { rfme_use_output_workgroup(e, UnsafeMutableRawPointer(au)) }
         #if os(iOS)
         let s = AVAudioSession.sharedInstance()
         let route = s.currentRoute.outputs.map(\.portName).joined(separator: ", ")
@@ -291,6 +293,7 @@ public final class CorePlayer {
         configObserver = nil
         engine?.stop()
         engine = nil
+        rfme_set_workgroup(e, nil)
         node = nil
         audioRunning = false
         audioText = ""

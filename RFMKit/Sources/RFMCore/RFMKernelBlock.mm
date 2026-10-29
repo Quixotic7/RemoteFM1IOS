@@ -3,7 +3,9 @@
 // The AUInternalRenderBlock: Objective-C++ only for the block itself; everything it calls is plain C++.
 #import "RFMKernelImpl.h"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
 
 // a MIDI 1.0 status byte's message length (0: not a channel or system message we pass)
 static uint32_t midi1Len(uint8_t st)
@@ -146,3 +148,50 @@ void rfmk_drop_midi_out(rfmk *k)
 #endif
     k->midiOut = nullptr;
 }
+
+// ---- RFMAudioUnitBase: the render context observer
+@implementation RFMAudioUnitBase {
+    // shared with the observer block, which the OS caches and may call after this object is gone (then: NULL)
+    std::shared_ptr<std::atomic<rfme_t *>> _rcEngine;
+}
+
+- (instancetype)initWithComponentDescription:(AudioComponentDescription)componentDescription
+                                     options:(AudioComponentInstantiationOptions)options
+                                       error:(NSError **)outError
+{
+    self = [super initWithComponentDescription:componentDescription options:options error:outError];
+    if (self)
+        _rcEngine = std::make_shared<std::atomic<rfme_t *>>(nullptr);
+    return self;
+}
+
+- (void)rfmSetRenderContextEngine:(rfme_t *)engine
+{
+    if (_rcEngine)
+        _rcEngine->store(engine, std::memory_order_release);
+}
+
+- (AURenderContextObserver)renderContextObserver
+{
+    std::shared_ptr<std::atomic<rfme_t *>> h = _rcEngine;
+    return ^(const AudioUnitRenderContext *ctx) {
+        rfme_t *e = h ? h->load(std::memory_order_acquire) : nullptr;
+        if (!e)
+            return;
+#if __has_feature(objc_arc)
+        rfme_set_workgroup(e, ctx ? (__bridge void *)ctx->workgroup : nullptr);
+#else
+        rfme_set_workgroup(e, ctx ? (void *)ctx->workgroup : nullptr);
+#endif
+    };
+}
+
+- (void)dealloc
+{
+    if (_rcEngine)
+        _rcEngine->store(nullptr, std::memory_order_release);
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
+}
+@end
