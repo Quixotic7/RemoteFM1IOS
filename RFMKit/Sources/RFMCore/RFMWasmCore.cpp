@@ -746,7 +746,7 @@ constexpr int NLAYOUT = (int)(sizeof LAYOUT / sizeof LAYOUT[0]);
 constexpr uint32_t STR_CAP = 1024;          // the scratch block: a string, MIDI / stats words, the audio
 constexpr uint32_t WORDS = 16;
 constexpr uint32_t AUDIO_FRAMES = 2048;
-constexpr uint32_t SCRATCH = STR_CAP + WORDS + AUDIO_FRAMES * 4;
+constexpr uint32_t SCRATCH = STR_CAP + WORDS + AUDIO_FRAMES * 4 + 16;
 constexpr uint32_t HALT_TRAP = 0x200;
 
 double usNow()
