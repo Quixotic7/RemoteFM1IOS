@@ -12,6 +12,8 @@
 // M7: imported firmware (RFMKit's Firmware.swift): Documents/Firmware, synced into the App Group at launch, on
 // returning to the foreground and after an import or a delete; an opened .rfm1 (Files, Safari, AirDrop) is copied in
 // and selected. The selection is saved as a CoreRef (UserDefaults rfm1.coreRef; rfm1.core, the key, as before).
+// M8: the MIDI side (AppMidi: controllers, MIDI learn, the OMX-27) is made here with the player and lives as long as
+// the app.
 
 import RFMKit
 import SwiftUI
@@ -22,6 +24,7 @@ struct RemoteFM1App: App {
     @State private var controller: RemoteController?
     @State private var player: CorePlayer?
     @State private var library: FirmwareLibrary?
+    @State private var midi: AppMidi?
     @Environment(\.scenePhase) private var phase
     private let coreTest: Bool
 
@@ -48,6 +51,7 @@ struct RemoteFM1App: App {
             ?? d.string(forKey: "rfm1.core").map { CoreRef(id: $0) }   // (a choice saved before M7)
         let p = CorePlayer(link: c, selected: core, ref: core == nil ? ref : nil)
         _player = State(initialValue: p)
+        _midi = State(initialValue: AppMidi(player: p))
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
             if (d.string(forKey: "rfm1.mode") ?? "core") == "core" { p.setMode(.core) }
@@ -57,8 +61,8 @@ struct RemoteFM1App: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let controller, let player, let library {
-                    MainScreen(controller: controller, player: player, library: library)
+                if let controller, let player, let library, let midi {
+                    MainScreen(controller: controller, player: player, library: library, midi: midi)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
                         .onChange(of: player.mode) { _, m in
                             UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")

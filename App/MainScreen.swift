@@ -8,6 +8,9 @@
 // M7: the Firmware page lists the built-in cores and the imported .rfm1 files (Documents/Firmware: FirmwareLibrary),
 // with "Add firmware…" (a document picker), a long press to delete one, and each invalid file with its error; a Wasm
 // core that can't keep up shows a note over the faceplate (PerfBanner).
+// M8: the MIDI & audio page has the MIDI input (a sub-page), the notes' settings, Knobs from MIDI (MIDI learn, the
+// knob speed, the mappings) and the OMX-27; Learn closes the sheet and puts the faceplate in learn mode (its bar and
+// the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
 
 import UniformTypeIdentifiers
 
@@ -26,6 +29,10 @@ struct LaunchOptions {
     var themeEditor = false
     var landscape: Bool?
     var steps = false
+    var learn = false                                   // (M8) learn mode at launch; learnPick: a control picked
+    var learnPick: String?
+    var sheetScroll: String?                            // an id on the sheet's page shown at the top (knobs, omx)
+    var demoMap = false                                 // a few mappings, as if learned (writes the global map)
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -41,16 +48,21 @@ struct LaunchOptions {
         themeEditor = a.contains("-themeeditor")
         if let o = value("-orientation") { landscape = o == "landscape" }
         steps = a.contains("-steps")
+        learnPick = value("-learnpick")
+        learn = a.contains("-learn") || learnPick != nil
+        demoMap = a.contains("-demomap")
+        sheetScroll = value("-sheetscroll")
     }
 }
 
 enum SoundSource: String { case phone, fm1 }
-enum AppSheetPage: String { case firmware, midi, settings }
+enum AppSheetPage: String { case firmware, midi, midiInput = "midiinput", settings }
 
 struct MainScreen: View {
     let controller: RemoteController
     let player: CorePlayer
     let library: FirmwareLibrary
+    let midi: AppMidi
     @State private var ui = FaceplateUI()
     @State private var showImporter = false
     @State private var feed: PanelFeed
@@ -65,11 +77,12 @@ struct MainScreen: View {
     private let store = ThemeStore.shared
     private let options = LaunchOptions()
 
-    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary) {
+    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, midi: AppMidi) {
         self.controller = controller
         self.player = player
         self.library = library
-        _feed = State(initialValue: PanelFeed(host: player))
+        self.midi = midi
+        _feed = State(initialValue: midi.feed)
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
         _source = State(initialValue: LaunchOptions().source ?? saved ?? .fm1)
     }
@@ -110,6 +123,10 @@ struct MainScreen: View {
                     .transition(.move(edge: .bottom))
                     .zIndex(2)
             }
+            // MIDI learn's bar and the toasts (over the sheet; above the perf note when it shows)
+            FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && !player.perfNote.isEmpty ? 64 : 14,
+                             barAtTop: ui.page == .controls && ui.deck == .buttons)
+                .zIndex(3)
         }
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || theme.body.luminance < 0.3 ? .dark : .light)
@@ -133,7 +150,9 @@ struct MainScreen: View {
         .onChange(of: ui.page) { _, _ in saveView() }
         .onChange(of: ui.deck) { _, _ in saveView() }
         .onChange(of: ui.knobSet) { _, _ in saveView() }
-        .onChange(of: ui.sheetOpen) { _, open in if !open { page = nil } }
+        .onChange(of: ui.sheetOpen) { _, open in
+            if open { midi.learn.stop() } else { page = nil }
+        }
     }
 
     // MARK: launch, the view per source
@@ -150,6 +169,11 @@ struct MainScreen: View {
         if options.sheet || options.sheetPage != nil { ui.sheetOpen = true }
         page = options.sheetPage
         if options.themeEditor { ui.editorOpen = true }
+        if options.demoMap { midi.demoMap() }
+        if options.learn {
+            midi.learn.start(ui)
+            if let t = options.learnPick { midi.learn.pick(t) }
+        }
         if source == .fm1 { controller.appeared() } else if controller.isRunning { controller.stop() }
         if let l = options.landscape, let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             // (an iPad's windowing mode refuses it: the faceplate is then drawn turned, for scripts/sim_shots.sh)
@@ -195,6 +219,7 @@ struct MainScreen: View {
         switch page {
         case .firmware: firmwarePage
         case .midi: midiPage
+        case .midiInput: midiInputPage
         case .settings: settingsPage
         case nil: mainSheet
         }
@@ -319,7 +344,8 @@ struct MainScreen: View {
     }
 
     private var midiPage: some View {
-        SheetPage("MIDI & audio", back: { page = nil }) {
+        let m = Binding(get: { player.midiSettings }, set: { player.midiSettings = $0 })
+        return SheetPage("MIDI & audio", scrollTo: options.sheetScroll, back: { page = nil }) {
             SheetSectionTitle("Audio", top: 12)
             SheetList {
                 SheetToggle("Sound", on: Binding(get: { player.audioOn }, set: { player.setAudio($0) }), divider: false)
@@ -329,10 +355,33 @@ struct MainScreen: View {
                       : "No sound: the firmware runs on a timer.")
             SheetSectionTitle("MIDI")
             SheetList {
+                SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { page = .midiInput }
+                SheetToggle("MIDI notes play keys", on: m.notesPlayKeys)
+                SheetToggle("...and reach the firmware's MIDI in", on: m.keyNotesToFirmware)
+                SheetStepper("Transpose", value: m.transpose, in: -2...2) { t in
+                    t == 0 ? "0" : "\(t > 0 ? "+" : "−")\(abs(t)) oct"
+                }
                 SheetRow("Bluetooth MIDI devices") { showBluetooth = true }
                 SheetRow("Look for the FM-1 again", divider: false, chevron: false) { controller.rescan() }
             }
+            SheetNote("A MIDI keyboard plays the keys (transposed by octaves); the other notes, and every note when "
+                      + "they don't play the keys, go to the firmware's MIDI in.")
             SheetNote("FM-1 link: \(controller.statusText)")
+            MidiMapSection(learn: startLearn).id("knobs")
+            SheetSectionTitle("OMX-27").id("omx")
+            OmxSection(link: midi.omx)
+        }
+    }
+
+    /// Learn: the sheet closes, the faceplate picks controls (a MIDI input on: All when it was None)
+    private func startLearn() {
+        if midi.input.selection == .none { midi.input.selection = .all }
+        withAnimation(.easeInOut(duration: 0.28)) { midi.learn.start(ui) }
+    }
+
+    private var midiInputPage: some View {
+        SheetPage("MIDI input", backTitle: "MIDI & audio", back: { page = .midi }) {
+            MidiInputList(input: midi.input).padding(.top, 12)
         }
     }
 

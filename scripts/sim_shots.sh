@@ -3,7 +3,8 @@
 # Copyright (C) 2026 RemoteFM1 contributors
 # Screenshots of the on-screen FM-1 for comparing with design/canvas, headless (simctl only: Simulator.app stays
 # closed): builds, then on an iPhone and an iPad simulator launches the app once per state with its launch arguments
-# (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps) and saves a PNG
+# (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps; M8: -demomap,
+# -learn, -learnpick, -sheetscroll) and saves a PNG
 # per state. The core runs (ChoralRoot by default) so the real framebuffer shows; "-source fm1" uses the fake unit
 # (the simulator's default backend), whose demo input presses keys by itself. A simulator this script booted is shut
 # down again; one that was booted stays booted.
@@ -12,6 +13,7 @@
 #   PHONE=udid PAD=udid                 the simulators (default: this project's RFM iPhone 17, RFM iPad Pro 11)
 #   NOBUILD=1                           reuse the last build; WAIT=s seconds before each shot (default 5)
 #   ONLY="phone"|"pad"                  one device
+#   MATCH=text                          only the shots whose name contains it (e.g. MATCH=midi)
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -47,6 +49,14 @@ PHONE_SHOTS=(
     "phone-theme-editor|-source phone -view full -themeeditor -orientation portrait"
     "phone-full-midnight|-source phone -view full -theme Midnight -orientation portrait"
     "phone-full-cream-landscape|-source phone -view full -theme Cream -orientation landscape"
+    "phone-sheet-midi|-source phone -view full -sheetpage midi -demomap -orientation portrait"
+    "phone-sheet-midi-knobs|-source phone -view full -sheetpage midi -sheetscroll knobs -demomap -orientation portrait"
+    "phone-sheet-midi-omx|-source phone -view full -sheetpage midi -sheetscroll omx -orientation portrait"
+    "phone-sheet-midiinput|-source phone -view full -sheetpage midiinput -orientation portrait"
+    "phone-midi-learn|-source phone -view full -demomap -learn -orientation portrait"
+    "phone-midi-learn-kn1|-source phone -view full -demomap -learnpick KN1 -orientation portrait"
+    "phone-midi-learn-kn3-controls|-source phone -view controls -knobs kn -learnpick KN3 -orientation portrait"
+    "phone-midi-learn-landscape|-source phone -view full -demomap -learnpick SEQ -orientation landscape"
 )
 PAD_SHOTS=(
     "pad-full-landscape|-source phone -view full -orientation landscape"
@@ -55,6 +65,9 @@ PAD_SHOTS=(
     "pad-screen-landscape|-source phone -view screen -orientation landscape"
     "pad-sheet-landscape|-source phone -view full -sheet -orientation landscape"
     "pad-theme-editor|-source phone -view full -themeeditor -orientation portrait"
+    "pad-sheet-midi|-source phone -view full -sheetpage midi -demomap -orientation portrait"
+    "pad-sheet-midi-knobs|-source phone -view full -sheetpage midi -sheetscroll knobs -demomap -orientation portrait"
+    "pad-midi-learn-kn1|-source phone -view full -demomap -learnpick KN1 -orientation landscape"
 )
 
 run_device() {
@@ -74,6 +87,7 @@ run_device() {
     xcrun simctl install "$udid" "$APP"
     for s in "${shots[@]}"; do
         local name=${s%%|*} args=${s#*|}
+        [[ -z ${MATCH:-} || $name == *"$MATCH"* ]] || continue
         xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
         # shellcheck disable=SC2086
         xcrun simctl launch "$udid" "$BUNDLE" $args >/dev/null
