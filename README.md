@@ -168,6 +168,19 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
     RFM1="felucca choralroot" scripts/sim_coretest.sh "" rfm1:felucca rfm1:choralroot
     RFM1=felucca WASMONLY=1 scripts/sim_aucoretest.sh
 
+## MIDI controllers, MIDI learn and the OMX-27
+
+- **A MIDI keyboard or controller** (USB or Bluetooth): Controls › MIDI & audio › MIDI input (All by default, None,
+  or one device). Its notes play the keys (Transpose: octaves); "...and reach the firmware's MIDI in" also sends them
+  to the firmware. In the AUv3, the host's MIDI does the same (route your controller to the instrument).
+- **MIDI learn**: Knobs from MIDI › Learn (in the app and the AUv3), then tap a knob, MASTER or a button on the panel,
+  then move a control on your device. Done ends it; Forget drops the tapped control's bindings. The list shows each
+  mapping (an encoder's mode can be changed; × removes it); Knob speed sets detents per CC step. One set of mappings
+  for the app and every AU instance.
+- **OMX-27** (the app): MIDI & audio › Connect my OMX-27, with the OMX-27 on USB and its firmware with REMOTE mode.
+  Its keys, encoder and pots play the FM-1; K1 picks the view, K2 the colours, K5 is MASTER. It connects by itself
+  next time. To leave remote mode, hold AUX and the encoder on the OMX-27.
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
@@ -184,12 +197,16 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
   - `-view full|controls|screen`, `-deck buttons|keys`, `-knobs main|kn`: the view, the Controls deck, the knob set.
   - `-source phone|fm1`: the sound source (phone: the emulator, the link stopped; fm1: the link, the fake unit on the
     simulator).
-  - `-sheet`, `-sheetpage firmware|midi|settings`: the pull-down sheet open (on a page); `-themeeditor`: the editor.
+  - `-sheet`, `-sheetpage firmware|midi|midiinput|settings`: the pull-down sheet open (on a page); `-sheetscroll
+    knobs|omx`: the MIDI page scrolled there; `-themeeditor`: the editor.
+  - `-learn`: MIDI learn on at launch; `-learnpick KN1` (any target: SELECT, MASTER, PLAY, OCT-...) with it picked;
+    `-demomap`: replaces the global mappings with a few examples (screenshots only).
   - `-theme Tangerine|Midnight|Mint|Lilac|Cream`: a theme for this launch (not stored).
   - `-orientation portrait|landscape`: asks the scene for it (`requestGeometryUpdate`).
   - `-steps`: the step numbers 1–16 on the lower keys.
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
-  Mac's MIDI devices). On a device CoreMIDI is the default.
+  Mac's MIDI devices); without it the MIDI input starts with no source connected. On a device CoreMIDI is the default.
+- `-autest -aupage midi|learn|learn:KN1`: the AU test, then that page of the AU's view (`AUPAGE=... scripts/sim_autest.sh`).
 
 ## Licence
 

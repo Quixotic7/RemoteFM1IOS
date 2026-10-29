@@ -157,6 +157,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship. The flag is built (`RFM_STORE_BUILD`); the store build carries FIZZ |
 | M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ. Part 1 done (2026-10-28): the core backend interface (`RFMCoreBackend.h`, native cores behind it) and the render-ahead core thread (section 9). Part 2 built (2026-10-28): the wasm3 backend, the firmware folder, the App Group mirror, imported firmware in the app and the AUv3 (section 9); on the simulator Felucca and ChoralRoot .rfm1 play in both. Device part waits for the iPhone |
+| M8 | MIDI controllers, MIDI learn and the OMX-27 (section 10): controller input in the app, learned knobs and buttons in the app and the AUv3, the OMX-27 in REMOTE mode in the app | a MIDI keyboard plays the keys, a learned knob turns KN1, an OMX-27 plays the FM-1 and shows its LEDs and screen, on the iPhone. Built (2026-10-29): the engine and Swift sides with their tests, the UI in the app and the AUv3; on the simulator the pages and learn mode are checked by screenshots. Everything with a real controller or OMX-27 waits for the device |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
@@ -307,3 +308,33 @@ idle / chord:
 the native cores, `frame()` off the audio thread, and a build target in FM1VST that makes .rfm1 files. .fwsc
 emulation stays a later option for light or closed firmware (stock V15 already runs at 1.4×), and on newer iPhones.
 App Review may still object to running imported code (guidelines 2.5.2, 4.7).
+
+## 10. MIDI controllers, MIDI learn and the OMX-27 (M8)
+
+The website's three additions, as the owner scoped them: controller input and MIDI learn in the app and the AUv3,
+the OMX-27 in the app only (the AU later). The website (js/midi-map.js, omx27.js, omx27-views.js, omx-link.js) is the
+reference for behaviour and wording; the stored map uses its ids, so a map reads the same in both.
+
+- **Controller input (app).** `ControllerInput` (RFMKit/MIDI) connects the CoreMIDI sources picked on MIDI & audio ›
+  MIDI input (All, None, one device), never the FM-1 and never the OMX-27 while it is in REMOTE mode. Channel messages
+  go to the engine (`rfme_midi_in`): learn, then the learned map, then notes 53.. play the keys (transposed, -2..+2
+  octaves), the rest to the firmware's MIDI in. "...and reach the firmware's MIDI in" also sends the key notes there.
+  The AU gets its host's MIDI the same way (its own AUSettings).
+- **MIDI learn (app and AU).** Knobs from MIDI › Learn closes the sheet: the learnable controls (7 encoders, MASTER, 14
+  buttons) are outlined, a tap picks one, the next CC or note binds to it (the mode guessed for an encoder's CC).
+  The map is global (`MidiMapStore`: `midi-map.json` in the App Group, a Darwin notification on save) and runs on the
+  core thread (`rfme_set_midi_map`), so it works with no window open. A learned MASTER pot picks MASTER up: a mark
+  shows where the pot is and a toast says where to turn it. Code: RFMKit/MIDI (the map, the store, learn),
+  Faceplate/LearnMode.swift and LearnViews.swift (the faceplate), MidiSheet.swift (the sheet's pieces), Toast.swift.
+- **The OMX-27 (app).** `OmxLink` (RFMKit/OMX27) puts it in REMOTE mode; its keys, encoder and pots play the panel
+  through `PanelOmxTarget` (its holds are its own: a touch letting go never lets go of the OMX's), the app lights its
+  27 keys and draws its 128 x 32 screen. `AppMidi` (App/) owns it for the app's life; it keeps playing in the
+  background with the sound on, and its LEDs and screen are cleared when the app terminates.
+- **Tested.** `swift test`: the map, learn and the engine's feed (MidiMapTests, MidiEngineTests), the OMX wire, views,
+  screen and link against a fake OMX-27 (OmxTests), the faceplate's sources, pickup mark and learn mode
+  (PanelMidiTests). Simulator screenshots: the MIDI page, the input list, learn mode (`-learn`, `-learnpick KN1`,
+  `-demomap`), the AU's Knobs from MIDI page and learn mode (`AUPAGE=midi scripts/sim_autest.sh`).
+- **Device only, not tested yet.** A real MIDI keyboard or controller (USB, Bluetooth), learning from it and the mode
+  guess on its knobs, a learned control in an AU host (AUM) routing MIDI to the instance, a real OMX-27 (its REMOTE
+  firmware, the handshake, LEDs and screen pacing over USB on iOS, auto-reconnect on plugging in), the OMX in the
+  background, `willClose()` on termination.
