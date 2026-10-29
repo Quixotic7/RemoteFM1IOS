@@ -206,9 +206,21 @@ public final class CorePlayer {
     public private(set) var footprintBefore: Int64 = -1
     public private(set) var footprintAfter: Int64 = -1
 
+    /// (M8) the app's MIDI settings (the AU's are its AUSettings): notes play keys, transpose, key notes also to the
+    /// firmware; for host MIDI from a controller (ControllerInput). Remembered in the app's defaults
+    public var midiSettings: AUSettings {
+        didSet {
+            guard midiSettings != oldValue else { return }
+            applyMidiSettings()
+            midiDefaults.set(midiSettings.dict, forKey: Self.midiSettingsKey)
+        }
+    }
+    nonisolated static let midiSettingsKey = "rfm1.midiSettings"
+
     public let flashDir: URL
     @ObservationIgnored nonisolated(unsafe) let e: OpaquePointer
     @ObservationIgnored private let mapFollower: MidiMapFollower   // (M8) the global learned map
+    @ObservationIgnored private let midiDefaults: UserDefaults
     @ObservationIgnored private let link: RemoteController?
     @ObservationIgnored private var engine: AVAudioEngine?
     @ObservationIgnored private var node: AVAudioSourceNode?
@@ -225,9 +237,12 @@ public final class CorePlayer {
     /// slotsDir: where the slot frameworks are (nil: the app's Frameworks). selected: the core to start with (a catalog
     /// key); nil, or one this build doesn't have: the first of `order` that it has. ref: a saved choice (CoreRef),
     /// resolved in the catalog (the same file, else the same firmware with a note), before `selected`
+    /// midiDefaults: where midiSettings is remembered
     public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil,
-                ref: CoreRef? = nil) {
+                ref: CoreRef? = nil, midiDefaults: UserDefaults = .standard) {
         self.link = link
+        self.midiDefaults = midiDefaults
+        midiSettings = AUSettings(midiDefaults.dictionary(forKey: Self.midiSettingsKey))
         self.selected = selected ?? ""
         // the flash files live in Application Support, out of the Files app's view (Documents shows the firmware folder)
         self.flashDir = flashDir ?? Self.defaultFlashDir()
@@ -235,6 +250,7 @@ public final class CorePlayer {
         if flashDir == nil { Self.migrateFlashFiles(to: self.flashDir) }
         e = rfme_new(link?.core)
         mapFollower = MidiMapFollower(engine: e)
+        applyMidiSettings()
         rfms_scan(slotsDir)
         rescan()
         if let ref, selected == nil, let r = ref.resolve(in: cores) {
@@ -321,6 +337,11 @@ public final class CorePlayer {
             rfme_attach(e, 0)
         }
         refresh()
+    }
+
+    private func applyMidiSettings() {
+        let m = midiSettings
+        rfme_set_midi(e, m.notesPlayKeys ? 1 : 0, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0)
     }
 
     public func setAudio(_ on: Bool) {
