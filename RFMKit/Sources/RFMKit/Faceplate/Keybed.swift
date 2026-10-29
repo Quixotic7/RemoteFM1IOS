@@ -201,6 +201,7 @@ final class KeyTouchView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard feed?.learn.active != true else { return }             // (MIDI learn: the keys play nothing)
         for t in touches {
             guard let k = key(for: t, sliding: false) else { continue }
             held[ObjectIdentifier(t)] = k
@@ -217,7 +218,7 @@ final class KeyTouchView: UIView {
                 held[id] = k
                 feed?.keyDown(k)                                          // (the new one first: a legato glissando)
                 feed?.keyUp(old)
-            } else {
+            } else if feed?.learn.active != true {
                 held[id] = k
                 feed?.keyDown(k)
             }
@@ -267,7 +268,7 @@ final class KeyTouchView: UIView {
         weak var view: KeyTouchView?
 
         override func accessibilityActivate() -> Bool {
-            guard let f = view?.feed else { return false }
+            guard let f = view?.feed, !f.learn.active else { return false }
             let k = key
             f.keyDown(k)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { MainActor.assumeIsolated { f.keyUp(k) } }

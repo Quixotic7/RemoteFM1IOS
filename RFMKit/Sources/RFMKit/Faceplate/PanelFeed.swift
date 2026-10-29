@@ -7,6 +7,10 @@
 //         snapshot (rfme_panel, rfme_preview) by poll(), which the faceplate calls 30-60 times a second
 // What changes is split into small observable objects, so an LED changing redraws the keybed or the buttons, not the
 // whole faceplate.
+// M8: touches have a source (this screen, the OMX-27): each holds keys and buttons of its own, and releaseAll(source)
+// lets go of that one's only. MIDI learn's state (LearnFeed, run by MidiLearnMode), the faceplate's toast
+// (ToastCenter) and MASTER's pickup mark (PickupFeed: a learned pot or the OMX's K5 away from MASTER) live here too,
+// so every part of the faceplate can read them.
 
 import CoreGraphics
 import Foundation
@@ -103,14 +107,30 @@ public final class PanelFeed {
         public static let kn: [Knob] = [.k1, .k2, .k3, .k4]
     }
 
+    /// who holds a key or a button: this screen's touches, or the OMX-27 (M8)
+    public enum Source: Sendable { case screen, omx }
+
     public let screen = ScreenFeed()
     public let lights = PanelLights()
     public let knobs = KnobFeed()
+    public let learn = LearnFeed()
+    public let toast = ToastCenter()
+    public let pickup = PickupFeed()
     public private(set) weak var host: (any PanelEngineHost)?
+    /// a knob turned (or MASTER moved) by a touch on this screen (the OMX-27's encoder then turns that knob)
+    public var onKnobTouched: ((Knob) -> Void)?
+    /// every poll (the faceplate's tick): MIDI learn takes its messages here
+    public var onTick: (() -> Void)?
     private var panelSeq: UInt32 = 0
     private var previewSeq: UInt32 = 0
     private var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
-    private var keyTouches = [Int](repeating: 0, count: 27)
+    private var keyTouches = [Int](repeating: 0, count: 27)   // this screen's fingers per key
+    private var omxKeys: UInt32 = 0                            // the OMX-27's
+    private var screenLabels: UInt32 = 0
+    private var omxLabels: UInt32 = 0
+    private var lastPanelPoll: TimeInterval = -1
+    private var masterPot: Int16 = -1                         // (rfme_panel's, as last seen)
+    private var pickupSeq: UInt16?
     private var localUntil = [TimeInterval](repeating: 0, count: 8)   // per knob: this screen's value wins until then
     static let localHold: TimeInterval = 0.25
     #if os(iOS)
@@ -124,6 +144,7 @@ public final class PanelFeed {
         self.host = host
         panelSeq = 0
         previewSeq = 0
+        pickupSeq = nil
     }
 
     // MARK: in (the same path as the FM-1's events)
@@ -133,34 +154,63 @@ public final class PanelFeed {
         host?.withPanelEngine { _ = rfme_event($0, UInt8(type), UInt8(index), value) }
     }
 
-    /// a finger down on note key k (several fingers on one key: one press)
-    public func keyDown(_ k: Int) {
+    /// a finger down on note key k (several fingers on one key: one press; the screen and the OMX-27 on one key: one)
+    public func keyDown(_ k: Int, source: Source = .screen) {
         guard (0..<27).contains(k) else { return }
-        keyTouches[k] += 1
-        guard keyTouches[k] == 1 else { return }
+        let was = keyHeld(k)
+        switch source {
+        case .screen: keyTouches[k] += 1
+        case .omx: omxKeys |= 1 << UInt32(k)
+        }
+        guard !was else { return }
         lights.touchedKeys |= 1 << UInt32(k)
         event(Int32(RFMC_EV_KEY), Int32(k), 1)
     }
 
-    public func keyUp(_ k: Int) {
-        guard (0..<27).contains(k), keyTouches[k] > 0 else { return }
-        keyTouches[k] -= 1
-        guard keyTouches[k] == 0 else { return }
+    public func keyUp(_ k: Int, source: Source = .screen) {
+        guard (0..<27).contains(k) else { return }
+        switch source {
+        case .screen:
+            guard keyTouches[k] > 0 else { return }
+            keyTouches[k] -= 1
+        case .omx:
+            guard omxKeys & (1 << UInt32(k)) != 0 else { return }
+            omxKeys &= ~(1 << UInt32(k))
+        }
+        guard !keyHeld(k) else { return }
         lights.touchedKeys &= ~(1 << UInt32(k))
         event(Int32(RFMC_EV_KEY), Int32(k), 0)
     }
 
-    /// a button by its label, through the panel's btn_id (the firmware's own map)
-    public func button(_ l: Label, down: Bool) {
+    private func keyHeld(_ k: Int) -> Bool { keyTouches[k] > 0 || omxKeys & (1 << UInt32(k)) != 0 }
+
+    /// held by this source (tests, the views)
+    public func holds(key k: Int, _ source: Source = .screen) -> Bool {
+        guard (0..<27).contains(k) else { return false }
+        return source == .screen ? keyTouches[k] > 0 : omxKeys & (1 << UInt32(k)) != 0
+    }
+
+    public func holds(_ l: Label, _ source: Source = .screen) -> Bool {
+        (source == .screen ? screenLabels : omxLabels) & (1 << UInt32(l.rawValue)) != 0
+    }
+
+    /// a button by its label, through the panel's btn_id (the firmware's own map); down while any source holds it
+    public func button(_ l: Label, down: Bool, source: Source = .screen) {
         let bit = UInt32(1) << UInt32(l.rawValue)
-        guard (lights.touchedLabels & bit != 0) != down else { return }
-        lights.touchedLabels = down ? lights.touchedLabels | bit : lights.touchedLabels & ~bit
+        let mine = source == .screen ? screenLabels : omxLabels
+        guard (mine & bit != 0) != down else { return }
+        let was = (screenLabels | omxLabels) & bit != 0
+        let now = down ? mine | bit : mine & ~bit
+        if source == .screen { screenLabels = now } else { omxLabels = now }
+        let held = (screenLabels | omxLabels) & bit != 0
+        guard held != was else { return }
+        lights.touchedLabels = held ? lights.touchedLabels | bit : lights.touchedLabels & ~bit
         let id = host?.withPanelEngine { rfme_matrix_button($0, Int32(l.rawValue)) } ?? -1
-        event(Int32(RFMC_EV_BUTTON), id, down ? 1 : 0)
+        event(Int32(RFMC_EV_BUTTON), id, held ? 1 : 0)
     }
 
     /// detents of an encoder (+ clockwise), by its knob role
-    public func turn(_ k: Knob, _ detents: Int) {
+    public func turn(_ k: Knob, _ detents: Int, source: Source = .screen) {
         guard k != .master, detents != 0 else { return }
         let id = host?.withPanelEngine { rfme_matrix_encoder($0, Int32(k.rawValue)) } ?? -1
         var left = detents
@@ -171,24 +221,38 @@ public final class PanelFeed {
         }
         knobs.turns[k.rawValue] &+= Int32(detents)             // (drawn at once; the snapshots confirm it)
         localUntil[k.rawValue] = ProcessInfo.processInfo.systemUptime + Self.localHold
+        if source == .screen { onKnobTouched?(k) }
     }
 
     /// the MASTER pot, absolute 0...1023
-    public func master(_ v: Int) {
+    public func master(_ v: Int, source: Source = .screen) {
         let c = Int16(max(0, min(1023, v)))
         knobs.master = Int32(c)
         knobs.masterKnown = true
         localUntil[Knob.master.rawValue] = ProcessInfo.processInfo.systemUptime + Self.localHold
         event(Int32(RFMC_EV_MASTER), 0, c)
+        if source == .screen { onKnobTouched?(.master) }
     }
 
-    /// everything this screen holds let go (the view went away)
-    public func releaseAll() {
-        for k in 0..<27 where keyTouches[k] > 0 {
-            keyTouches[k] = 1
-            keyUp(k)
+    /// everything this source holds let go (the screen: the view went away; the OMX-27: it left REMOTE mode)
+    public func releaseAll(_ source: Source = .screen) {
+        for k in 0..<27 where holds(key: k, source) {
+            if source == .screen { keyTouches[k] = 1 }
+            keyUp(k, source: source)
         }
-        for l in Label.allCases where lights.touchedLabels & (1 << UInt32(l.rawValue)) != 0 { button(l, down: false) }
+        for l in Label.allCases where holds(l, source) { button(l, down: false, source: source) }
+    }
+
+    /// one channel message straight to the firmware's MIDI in (not mapped, no keys: the OMX-27's Keyboard view)
+    public func midiToFirmware(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        host?.withPanelEngine { e in bytes.withUnsafeBufferPointer { _ = rfme_midi_in(e, $0.baseAddress, UInt32($0.count), 1) } }
+    }
+
+    /// MASTER's pickup mark: a pot (0..1023) waiting to reach MASTER; first: say so (the OMX-27's K5)
+    public func pickupAt(_ pot: Int, at: Int, first: Bool) {
+        pickup.show(pot, now: ProcessInfo.processInfo.systemUptime)
+        if first { toast.show(PickupFeed.text(at), seconds: 3) }
     }
 
     // MARK: out
@@ -196,14 +260,9 @@ public final class PanelFeed {
     /// reads the engine's newest panel state and screen (cheap when nothing changed)
     public func poll() {
         guard let host else { return }
-        var p = rfme_panel_t()
-        let seq = host.withPanelEngine { rfme_panel($0, &p) }
-        if seq != panelSeq {
-            panelSeq = seq
-            apply(p)
-        } else if lights.booted && p.booted == 0 {
-            apply(p)
-        }
+        pollPanel()
+        pickup.expire(now: ProcessInfo.processInfo.systemUptime)
+        onTick?()
         let s = rgba.withUnsafeMutableBufferPointer { b in host.withPanelEngine { rfme_preview($0, previewSeq, b.baseAddress) } }
         if s != previewSeq, s != 0 {
             previewSeq = s
@@ -212,7 +271,33 @@ public final class PanelFeed {
         }
     }
 
-    func apply(_ p: rfme_panel_t) {
+    /// the panel state alone (the LEDs, what is held, the knobs), without the screen
+    public func pollPanel() {
+        guard let host else { return }
+        lastPanelPoll = ProcessInfo.processInfo.systemUptime
+        var p = rfme_panel_t()
+        let seq = host.withPanelEngine { rfme_panel($0, &p) }
+        if seq != panelSeq {
+            panelSeq = seq
+            apply(p)
+        } else if lights.booted && p.booted == 0 {
+            apply(p)
+        }
+    }
+
+    /// pollPanel() unless it ran in the last `age` seconds (the OMX-27 reads the LEDs with no faceplate on screen)
+    public func pollPanel(ifOlderThan age: TimeInterval) {
+        if ProcessInfo.processInfo.systemUptime - lastPanelPoll >= age { pollPanel() }
+    }
+
+    func apply(_ p: rfme_panel_t, now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        // (M8) a learned MASTER pot waiting: its mark, and a word each time one starts waiting
+        if p.master_pot != masterPot {
+            masterPot = p.master_pot
+            if p.master_pot >= 0 { pickup.show(Int(p.master_pot), now: now) } else { pickup.hide() }
+        }
+        if let seq = pickupSeq, seq != p.pickup_seq, p.master_pot >= 0 { toast.show(PickupFeed.text(Int(p.master)), seconds: 3) }
+        pickupSeq = p.pickup_seq
         let booted = p.booted != 0
         if booted != lights.booted { lights.booted = booted }
         let keys = withUnsafeBytes(of: p.key_led) { Array($0) }

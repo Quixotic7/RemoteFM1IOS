@@ -148,6 +148,10 @@ public struct KnobView: View {
                 .frame(height: lf)
             KnobBody(knob: knob, size: size, theme: theme, knobs: feed.knobs)
                 .frame(width: size, height: size)
+                .overlay {
+                    if knob == .master { PotMark(size: size, theme: theme, pickup: feed.pickup) }
+                    LearnRing(target: MidiTarget.knob(knob).id, size: size, theme: theme, learn: feed.learn)
+                }
         }
         .frame(width: size + 28, height: lf + 6 + size + 6, alignment: .top)
         .frame(minWidth: 44, minHeight: 44)
@@ -157,6 +161,7 @@ public struct KnobView: View {
         .accessibilityLabel("\(knob.label) knob")
         .accessibilityValue(KnobBody.spokenValue(knob, feed.knobs))
         .accessibilityAdjustableAction { dir in
+            if feed.learn.active { return feed.learn.pick(MidiTarget.knob(knob)) }
             let d = dir == .increment ? 1 : -1
             if knob == .master { feed.master(Int(feed.knobs.master) + 32 * d) } else { feed.turn(knob, d) }
         }
@@ -229,6 +234,7 @@ struct KnobDrag {
         let t = self.t
         return DragGesture(minimumDistance: 0)
             .onChanged { v in
+                if feed.learn.active { return feed.learn.pick(MidiTarget.knob(knob)) }   // (MIDI learn: a tap picks it)
                 let dx = v.translation.width, dy = v.translation.height
                 if t.axis == 0 {
                     if !t.began { t.began = true; t.start = feed.knobs.master; t.haptic.prepare() }
@@ -297,9 +303,16 @@ struct PanelButton: View {
             }
             .offset(y: down ? 1 : 0)
         }
+        .overlay {
+            LearnOutline(target: MidiTarget.button(label).id, radius: radius, theme: theme, learn: feed.learn)
+                .padding(EdgeInsets(top: -2, leading: -2, bottom: -2 - drop, trailing: -2))
+        }
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { _ in if lights.touchedLabels & (1 << UInt32(label.rawValue)) == 0 { feed.button(label, down: true) } }
+            .onChanged { _ in
+                if feed.learn.active { return feed.learn.pick(MidiTarget.button(label)) }   // (MIDI learn: a tap picks it)
+                if !feed.holds(label) { feed.button(label, down: true) }
+            }
             .onEnded { _ in feed.button(label, down: false) })
         .accessibilityElement()
         .accessibilityLabel(label.spoken)
@@ -308,6 +321,7 @@ struct PanelButton: View {
     }
 
     private func tap() {
+        if feed.learn.active { return feed.learn.pick(MidiTarget.button(label)) }
         feed.button(label, down: true)
         let f = feed, l = label
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { MainActor.assumeIsolated { f.button(l, down: false) } }
