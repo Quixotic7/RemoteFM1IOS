@@ -9,7 +9,8 @@ SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In C
 firmware's flash is kept in `Documents/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
 and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MIDI in, the core's MIDI out, the flash
 in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
-FM-1"). Not yet tried on a real FM-1, iPhone or third-party host.
+FM-1"). M7: imported `.rfm1` firmware (WebAssembly, run by wasm3) next to the built-in cores, in the app and the
+AUv3 (below). Not yet tried on a real FM-1, iPhone or third-party host.
 
 The UI is the owner's design (`design/README.md`, `design/canvas`): the screen is an on-screen FM-1 (M5's "LCD mirror and
 touch keys"), the same in the app and the AUv3. Three views, swiped sideways: **Full** (the hardware's arrangement:
@@ -42,6 +43,7 @@ screen, the test pattern and the AU test).
 - `RFMKit/`: a Swift package.
   - `CRemoteFM1`: libremotefm1 (RemoteFM1 v0.2.2), its macOS glue `host.c` and FM1VST's CoreMIDI back end
     `RemoteMidi.c`, compiled in place from `vendor/` through the `RFMKit/vendor` symlink. Built with `RFM_NO_LIBUSB`.
+  - `CWasm3`: wasm3 v0.5.0 (MIT, unchanged; its README says from where), the interpreter for imported firmware.
   - `RFMCore`: a copy of FM1VST's `RemoteLink` (its header says what changed), fm1remote's test patterns, and a C API
     for Swift; the AU's render kernel (`RFMKernel`, an Objective-C++ render block over plain C++) and the probes' C
     parts (`RFMProbe`: CoreMIDI candidates, an mmap'd shared file, Darwin notifications, notify state, memory).
@@ -146,6 +148,26 @@ libremotefm1's own tests, built outside the source tree:
     cmake -S vendor/FM1VST/remote/RemoteFM1/host -B /tmp/rfm-host -DRFM_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
     cmake --build /tmp/rfm-host -j 8 && (cd /tmp/rfm-host && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure)
 
+## Imported firmware (.rfm1)
+
+Besides the built-in cores, the app plays `.rfm1` files: FM-1 firmware built as WebAssembly (docs/RFM1-FORMAT.md;
+FM1VST's `fm1_add_rfm1` makes them), run by wasm3 in the app and in the AUv3. To add one:
+
+- open the file on the iPhone (Files, Safari's downloads, AirDrop): RemoteFM1 opens, copies it in and plays it; or
+- Firmware › Add firmware… in the pull-down sheet; or
+- Files › On My iPhone › RemoteFM1 › Firmware: drop files there, then open the app.
+
+The Firmware page lists them under Imported (touch and hold to delete; About shows the authors, source link, credits
+and licence texts). A file that isn't a valid .rfm1 stays listed with its error. The AUv3 sees the files the app has
+seen (the app copies them into the App Group, `Firmware/<sha256>.rfm1` and `index.json`). Imported firmware works in
+store builds too. A firmware too heavy for the device shows a note instead of crackling silently.
+
+Tests: `WasmTests` and `ImportTests` (the loader, AMB-1 from `RFMKit/Tests/RFMKitTests/Fixtures`, Felucca and
+ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped without them). On the simulator:
+
+    RFM1="felucca choralroot" scripts/sim_coretest.sh "" rfm1:felucca rfm1:choralroot
+    RFM1=felucca WASMONLY=1 scripts/sim_aucoretest.sh
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
@@ -155,7 +177,9 @@ libremotefm1's own tests, built outside the source tree:
   simulator the extension uses the shared fake anyway unless that file says "device".
 - `-autest`: only the AU test, run at launch (the FM-1 link is never created). Its summary goes to `autest.json` in the
   app's Documents and the App Group container. On a device, the "AU test" button runs the same thing.
-- `-coretest`: the core test (above) on the normal screen; `-core <id>` picks the firmware (also without `-coretest`).
+- `-coretest`: the core test (above) on the normal screen; `-core <id>` picks the firmware (also without `-coretest`);
+  `-core rfm1:<id>` an imported one.
+- `-wasmonly` (with `-aucoretest`): only the imported-firmware part of the AU core test.
 - The UI (any combination; nothing is needed for normal use):
   - `-view full|controls|screen`, `-deck buttons|keys`, `-knobs main|kn`: the view, the Controls deck, the knob set.
   - `-source phone|fm1`: the sound source (phone: the emulator, the link stopped; fm1: the link, the fake unit on the

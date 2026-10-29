@@ -155,7 +155,7 @@ unit), and on the owner's device when it involves the FM-1.
 | M4 | AUv3 instrument: render kernel, host MIDI in/out, `fullState`, the lease, "Use this FM-1", headless instances | two instances in AUM: one tap moves the panel; suspend and project reload reconnect. Simulator part done (`scripts/sim_aucoretest.sh`, a shared fake unit); device part waits for the iPhone |
 | M5 | More cores (not gated), Tier 2 parameters as AU parameters, an on-screen LCD mirror and touch keys for use without an FM-1 | per core: its conformance test passes on iOS |
 | M6 | The App Store build (section 7): the core flag, the permitted cores, App Review | when there are cores to ship. The flag is built (`RFM_STORE_BUILD`); the store build carries FIZZ |
-| M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ. Part 1 done (2026-10-28): the core backend interface (`RFMCoreBackend.h`, native cores behind it) and the render-ahead core thread (section 9); next: the wasm3 backend, the firmware folder |
+| M7 | Imported firmware (section 9): the firmware folder, .rfm1 (Wasm) cores, `frame()` off the audio thread | a Felucca .rfm1 imported from Files plays on the iPhone next to the built-in FIZZ. Part 1 done (2026-10-28): the core backend interface (`RFMCoreBackend.h`, native cores behind it) and the render-ahead core thread (section 9). Part 2 built (2026-10-28): the wasm3 backend, the firmware folder, the App Group mirror, imported firmware in the app and the AUv3 (section 9); on the simulator Felucca and ChoralRoot .rfm1 play in both. Device part waits for the iPhone |
 
 Code is written by Opus subagents, one milestone at a time; Claude designs, reviews and tests.
 
@@ -265,6 +265,20 @@ Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, ch
   ("works, drops, works" before; clean after). Measured on the Mac first (`spikes/usb-audio`): the FM-1's USB audio
   out doesn't drop with screen traffic at any rate; a late render reproduces the dropouts.
 - Each Wasm instance has its own memory, so .rfm1 cores need no slots and have no 4-instance cap.
+- **As built (M7 part 2).** wasm3 v0.5.0 is the `CWasm3` target (unchanged, -O3 in every configuration).
+  `RFMWasmCore.cpp`: the loader checks a file as docs/RFM1-FORMAT.md says (the magic, the manifest, imports only from
+  the WASI list with their signatures, the exports and theirs, one fixed memory of at most 32 MiB, active data only,
+  then `rfm1_version`, `rfm1_layout`, manifest vs descriptor) and refuses with one line; `WasmCore` is the backend
+  (each instance its own wasm3 runtime, the module compiled whole up front; the file's bytes shared). Loading an
+  instance takes 13 ms (Felucca) / 17 ms (ChoralRoot) on the Mac. The folder is `Documents/Firmware` (Files app,
+  `com.quixotic7.rfm1` opens in the app, "Add firmware…"); the app mirrors valid files into the App Group as
+  `Firmware/<sha256>.rfm1` with `index.json` for the extension (`Firmware.swift`). Catalog key of an imported file:
+  `rfm1:<sha256>`, so it sits next to a built-in core of the same id. Saved choices (the app's, the AU's `fullState`)
+  keep kind, id, version, SHA-256; a restore finds the same file, else the same id and kind ("Felucca 1.6.2 instead
+  of 1.6.1"), else the same id of the other kind, else the first core. A Wasm core over ~90 % of the audio time, or
+  with repeated underruns, shows a note. Simulator (iPhone 17, 512-frame renders at 48 kHz, one instance): Felucca
+  .rfm1 570 µs average per render on the core thread (5 %), max 1.3 ms; ChoralRoot 768 µs (7 %), max 3.8 ms, frame()
+  max 2.7 ms; 0 underruns (native Felucca: 72 µs, 1 %).
 - Porting was small: Felucca built unchanged, ChoralRoot with one stand-in header (`<os/lock.h>`).
 - The format must fix: flat exported entry points (a host can't call wasm32 function-table pointers), wasm32 struct
   offsets (`fm1panel_t` matches; the descriptor doesn't), a fixed import list (a few WASI stubs), fixed memory, Wasm
