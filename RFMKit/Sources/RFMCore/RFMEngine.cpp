@@ -22,10 +22,10 @@
 #include <thread>
 #include <vector>
 
+#include "RFMCoreBackend.h"
+#include "RFMDevice.h"
 #include "RFMInternal.h"
-#include "RFMSlots.h"
 #include "RemoteLink.h"
-#include "device.h"
 
 static_assert(RFME_B_OCTUP == FM1P_B_OCTUP && RFME_B_SAVE == FM1P_B_SAVE && RFME_E_K4 == FM1P_E_K4, "labels");
 static_assert(RFMC_EV_KEY == RFM_EV_KEY && RFMC_EV_BUTTON == RFM_EV_BUTTON && RFMC_EV_ENC == RFM_EV_ENC &&
@@ -113,8 +113,11 @@ struct rfme {
     RemoteLink *link = nullptr;
 
     // the core (the control thread changes these only with the clock stopped)
-    rfm::SlotLoader::Slot *slot = nullptr;
-    std::unique_ptr<Device> dev;
+    rfm::CoreFactory factory;               // makes the backend (the load's; a power cycle makes a new one with it)
+    std::unique_ptr<rfm::CoreBackend> core; // the firmware (a native slot; later a Wasm module)
+    std::unique_ptr<rfm::CoreDevice> dev;   // its clock
+    uint32_t stallUs = 0;                   // (tests) rfme_test_frame_stall
+    uint8_t btnId[FM1P_NB] = {}, encId[FM1P_NE - 1] = {};   // the panel's label / role maps, as init left them
     bool booted = false;
     std::vector<uint8_t> flashCopy;     // the clock's copy, handed over by flashReady
 
@@ -457,14 +460,13 @@ struct rfme {
                 (void)midiOutQ.push(pkt);
         }
         if (!halted.load(std::memory_order_relaxed) && dev->halted()) {
-            haltCode.store((uint32_t)dev->core()->halted(), std::memory_order_relaxed);
+            haltCode.store((uint32_t)dev->core().halted(), std::memory_order_relaxed);
             halted.store(true, std::memory_order_release);
         }
         if (ms - lastStats >= kStatsEveryMs) {
             lastStats = ms;
-            if (dev->core()->stats) {
-                uint32_t s = 0, c = 0;
-                dev->core()->stats(&s, &c);
+            uint32_t s = 0, c = 0;
+            if (dev->core().stats(&s, &c)) {
                 shed.store(s, std::memory_order_relaxed);
                 cpuPct.store(c, std::memory_order_relaxed);
                 haveStats.store(1, std::memory_order_relaxed);
@@ -540,9 +542,19 @@ struct rfme {
         booted = false;
         halted.store(false);
         haltCode.store(0);
-        if (slot)
-            rfm::SlotLoader::shared().release(slot);   // (shutdown(), dlclose)
-        slot = nullptr;
+        core.reset();                                   // (shutdown(); a native slot: dlclose, given back)
+    }
+
+    // a new backend from the factory, and its device; false with a message
+    bool makeStopped(std::string *msg)
+    {
+        core = factory ? factory(msg) : nullptr;
+        if (!core)
+            return false;
+        if (stallUs)
+            core = rfm::stallingCore(std::move(core), stallUs);
+        dev = std::make_unique<rfm::CoreDevice>(*core);
+        return true;
     }
 
     void bootStopped(const uint8_t *bytes, uint32_t n)
@@ -555,7 +567,11 @@ struct rfme {
         lastPub = lastLinkPub = lastFlashCheck = lastStats = 0;
         lastPanel = 0;
         panelLast.booted = 0;                            // (differs from the first state: published again)
-        mapLeds(dev->core()->keymap);
+        const rfm::CoreDesc &d = core->info();
+        mapLeds(d.has_keymap ? d.keymap.data() : nullptr);
+        const fm1panel_t *h = dev->panel();
+        std::memcpy(btnId, h->btn_id, sizeof btnId);
+        std::memcpy(encId, h->enc_id, sizeof encId);
         flashCopy.assign(dev->flash_size(), 0);
         savedDirty = dev->flash_dirty();
         halted.store(false);
@@ -600,13 +616,13 @@ int rfme_load(rfme_t *e, const char *core_id, char *err, uint32_t n)
     const int prev = e->stop();
     e->unloadStopped();
     std::string msg;
-    e->slot = rfm::SlotLoader::shared().acquire(core_id ? core_id : "", &msg);
-    if (!e->slot) {
+    e->factory = rfm::nativeCoreFactory(core_id ? core_id : "");
+    if (!e->makeStopped(&msg)) {
+        e->factory = nullptr;
         putErr(err, n, msg);
         e->resume(prev);
         return 0;
     }
-    e->dev = std::make_unique<Device>(e->slot->core);
     e->resume(prev);
     return 1;
 }
@@ -630,7 +646,7 @@ void rfme_unload(rfme_t *e)
 
 int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
 {
-    if (!e->slot) {
+    if (!e->core || !e->factory) {
         putErr(err, n, "no core loaded");
         return 0;
     }
@@ -640,16 +656,13 @@ int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
         e->dev->flash_sync();
         image.assign(e->dev->flash(), e->dev->flash() + e->dev->flash_size());
     }
-    const std::string id = e->slot->id;
     e->unloadStopped();
     std::string msg;
-    e->slot = rfm::SlotLoader::shared().acquire(id, &msg);
-    if (!e->slot) {
+    if (!e->makeStopped(&msg)) {
         putErr(err, n, msg);
         e->resume(prev);
         return 0;
     }
-    e->dev = std::make_unique<Device>(e->slot->core);
     e->bootStopped(image.empty() ? nullptr : image.data(), (uint32_t)image.size());
     if (!image.empty() && image.size() == e->flashCopy.size()) {   // (offered for saving)
         std::memcpy(e->flashCopy.data(), image.data(), image.size());
@@ -774,26 +787,26 @@ int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value)
 
 int rfme_matrix_button(rfme_t *e, int label)
 {
-    return e->booted && label >= 0 && label < FM1P_NB ? e->dev->panel()->btn_id[label] : -1;
+    return e->booted && label >= 0 && label < FM1P_NB ? e->btnId[label] : -1;
 }
 
 int rfme_matrix_encoder(rfme_t *e, int role)
 {
-    return e->booted && role >= 0 && role < FM1P_NE - 1 ? e->dev->panel()->enc_id[role] : -1;
+    return e->booted && role >= 0 && role < FM1P_NE - 1 ? e->encId[role] : -1;
 }
 
 void rfme_status(rfme_t *e, rfme_status_t *st)
 {
     std::memset(st, 0, sizeof *st);
-    st->loaded = e->slot != nullptr;
+    st->loaded = e->core != nullptr;
     st->booted = e->booted;
     st->halted = e->halted.load();
     st->halt_code = e->haltCode.load();
     st->clock = e->clock.load();
     st->attached = e->attached.load();
-    st->slot = e->slot ? e->slot->n : 0;
-    if (e->slot)
-        putErr(st->core_id, sizeof st->core_id, e->slot->id);
+    st->slot = e->core ? e->core->slot() : 0;
+    if (e->core)
+        putErr(st->core_id, sizeof st->core_id, e->core->info().id);
     st->dev_ms = e->devMs.load();
     st->lcd_writes = e->lcdWrites.load();
     st->snapshots = e->snapshots.load();
@@ -892,34 +905,22 @@ int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n)
     return ok;
 }
 
-static const fm1param_t *param(rfme_t *e, const char *name)
+// the parameter named `name` of the booted core, -1 none
+static int param(rfme_t *e, const char *name)
 {
-    if (!e->booted || !name)
-        return nullptr;
-    const fm1core_t *c = e->dev->core();
-    for (uint32_t i = 0; i < c->nparams; i++)
-        if (c->params[i].name && std::strcmp(c->params[i].name, name) == 0)
-            return &c->params[i];
-    return nullptr;
+    return e->booted && name ? e->core->param_find(name) : -1;
 }
 
 int rfme_param_get(rfme_t *e, const char *name, int32_t *value)
 {
-    const fm1param_t *p = param(e, name);
-    if (!p || !p->get)
-        return 0;
-    if (value)
-        *value = p->get();
-    return 1;
+    const int i = param(e, name);
+    return i >= 0 && e->core->param_get((uint32_t)i, value) ? 1 : 0;
 }
 
 int rfme_param_set(rfme_t *e, const char *name, int32_t value)
 {
-    const fm1param_t *p = param(e, name);
-    if (!p || !p->set)
-        return 0;
-    p->set(value);
-    return 1;
+    const int i = param(e, name);
+    return i >= 0 && e->core->param_set((uint32_t)i, value) ? 1 : 0;
 }
 
 int rfme_param_read(rfme_t *e, const char *name, int32_t *value)
@@ -934,21 +935,23 @@ int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t 
 {
     if (!e->booted)
         return 0;
-    const fm1core_t *c = e->dev->core();
-    for (uint32_t i = 0; i < c->nparams; i++) {
-        const fm1param_t &p = c->params[i];
-        if ((p.flags & FM1P_PERSIST) && !(p.flags & FM1P_META) && p.get && p.set && p.name) {
-            putErr(name, n, p.name);
+    rfm::CoreBackend &c = *e->core;
+    for (uint32_t i = 0; i < c.param_count(); i++) {
+        const rfm::CoreParam *p = c.param(i);
+        if (p && (p->flags & FM1P_PERSIST) && !(p->flags & FM1P_META) && p->readable && p->writable && !p->name.empty()) {
+            putErr(name, n, p->name);
             if (min)
-                *min = p.min;
+                *min = p->min;
             if (max)
-                *max = p.max;
+                *max = p->max;
             if (value)
-                *value = p.get();
+                c.param_get(i, value);
             return 1;
         }
     }
     return 0;
 }
+
+void rfme_test_frame_stall(rfme_t *e, uint32_t us) { e->stallUs = us; }
 
 } // extern "C"

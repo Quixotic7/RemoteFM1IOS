@@ -170,6 +170,11 @@ int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t 
 // (control thread, any clock: the clock stopped for the read; diagnostics and tests) 1: found
 int rfme_param_read(rfme_t *e, const char *name, int32_t *value);
 
+// ---- tests
+// from the next rfme_load / rfme_power_cycle on, every frame() of the core takes `us` microseconds longer (a busy
+// wait on the clock's thread: a stand-in for an interpreted firmware's screen redraw); 0: off
+void rfme_test_frame_stall(rfme_t *e, uint32_t us);
+
 #ifdef __cplusplus
 }
 #endif
