@@ -68,7 +68,8 @@ struct rfmk {
     // the core into L and R (R non-NULL) with the queued MIDI; 1: the core played. The queue is emptied.
     int process(float *L, float *R, uint32_t n);
     // the core's MIDI out, decoded into whole messages for emit (FM1VST's decodePacket)
-    using Emit = void (*)(void *ctx, const uint8_t *msg, uint32_t len);
+    // (offset: the message's frame in this render; the core's MIDI out has the same latency as its audio)
+    using Emit = void (*)(void *ctx, const uint8_t *msg, uint32_t len, uint32_t offset);
     void drainMidiOut(Emit emit, void *ctx);
 };
 

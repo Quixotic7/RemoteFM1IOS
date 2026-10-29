@@ -111,15 +111,16 @@ void rfmk::drainMidiOut(Emit emit, void *ctx)
                 sysex[sysexLen++] = s[i];
         }
     };
+    uint32_t at = 0;
     auto sxEnd = [&]() {
         if (!sysexOverflow && sysexLen >= 2 && sysex[0] == 0xF0 && sysex[sysexLen - 1] == 0xF7) {
-            emit(ctx, sysex, sysexLen);
+            emit(ctx, sysex, sysexLen, at);
             midiOutMsgs.fetch_add(1, std::memory_order_relaxed);
         }
         sysexLen = 0;
         sysexOverflow = false;
     };
-    for (uint32_t p; rfme_midi_out_take(engine, &p);) {
+    for (uint32_t p; rfme_midi_out_take_at(engine, &p, &at);) {
         const uint32_t cin = p & 15u;
         const uint8_t b[3] = {(uint8_t)(p >> 8), (uint8_t)(p >> 16), (uint8_t)(p >> 24)};
         switch (cin) {
@@ -133,7 +134,7 @@ void rfmk::drainMidiOut(Emit emit, void *ctx)
                 sx(b, 1);
                 sxEnd();
             } else if (b[0] >= 0xF0) {
-                emit(ctx, b, 1);
+                emit(ctx, b, 1, at);
                 midiOutMsgs.fetch_add(1, std::memory_order_relaxed);
             }
             continue;
@@ -155,7 +156,7 @@ void rfmk::drainMidiOut(Emit emit, void *ctx)
             continue;
         if (cin >= 0x8 && ((len > 1 && (b[1] & 0x80)) || (len > 2 && (b[2] & 0x80))))
             continue;
-        emit(ctx, b, len);
+        emit(ctx, b, len, at);
         midiOutMsgs.fetch_add(1, std::memory_order_relaxed);
     }
 }

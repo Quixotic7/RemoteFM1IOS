@@ -27,6 +27,7 @@ final class AUCoreTests: XCTestCase {
         c.slotsDir = CoreTests.coresDir
         let au = try RFMAudioUnit(componentDescription: RFMShared.component, options: [], config: c)
         au.maximumFramesToRender = 512
+        au.isRenderingOffline = true            // (the tests render faster than real time: a bounce)
         try au.allocateRenderResources()
         addTeardownBlock { au.deallocateRenderResources() }
         return au

@@ -7,17 +7,20 @@
 // the unit's keys; remoteLeds: each LED in the plane of its fm1p_led_class, PLAY green); slots instead of
 // CoreLoader's copies; the clock owned by one of audio / timer / caller at a time (rfme_set_clock); the preview
 // for the app; flash on request; the core's stats() and the render's own time. M4: host MIDI in (FM1VST's handleMidi,
-// pushKeys, forwardMidi and toUsbPackets) and the core's MIDI out kept for the AU's MIDI output.
+// pushKeys, forwardMidi and toUsbPackets) and the core's MIDI out kept for the AU's MIDI output. M7: the core behind
+// a backend (RFMCoreBackend.h), and one core thread per engine that renders ahead of the audio callback (the ring,
+// below) and also runs the timer clock.
 #include "RFMEngine.h"
 
+#include <AudioToolbox/AudioToolbox.h>
 #include <mach/mach_time.h>
+#include <os/object.h>
+#include <pthread.h>
 
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,6 +28,7 @@
 #include "RFMCoreBackend.h"
 #include "RFMDevice.h"
 #include "RFMInternal.h"
+#include "RFMRealtime.h"
 #include "RemoteLink.h"
 
 static_assert(RFME_B_OCTUP == FM1P_B_OCTUP && RFME_B_SAVE == FM1P_B_SAVE && RFME_E_K4 == FM1P_E_K4, "labels");
@@ -44,6 +48,26 @@ constexpr uint32_t kStatsEveryMs = 500;
 constexpr int kRemoteVel = 100;                          // RemoteFM1 sends no velocity (Processor.cpp kRemoteVel)
 constexpr int kNoteBase = 53;                            // the MIDI note of key 0 (F3), Processor.h kNoteBase
 constexpr uint32_t kInRing = 512;                        // host MIDI packets waiting for the core's midi_in
+// render ahead (RFME_CLOCK_AUDIO)
+constexpr uint32_t kRingFrames = 16384;                  // the audio ring: stereo frames, a power of two
+constexpr uint32_t kChunk = 64;                          // the core thread renders at most this many frames at once
+constexpr uint32_t kDefaultHeadroomUs = 6000;            // the ring's target beyond one host buffer: a 5 ms redraw
+constexpr uint32_t kOfflineWaitUs = 2000000;             // offline: how long a render waits for the core at most
+static_assert((kRingFrames & (kRingFrames - 1)) == 0, "the ring's size is a power of two");
+
+// a host MIDI message on its way to the core thread: `at` is its ring position (the frame it applies before)
+struct HostEvent {
+    uint64_t at;
+    uint8_t len;
+    uint8_t data[3];
+};
+// a USB-MIDI packet of the core's, with the ring position it was made at
+struct OutPacket {
+    uint64_t at;
+    uint32_t pkt;
+};
+
+std::atomic<int> gCoreThreads{0};                        // core threads alive in this process (tests)
 
 // one MIDI message -> USB-MIDI event packets (cable 0): FM1VST's toUsbPackets (plugin/EditorPort.h), channel and system
 // messages only (the host's SysEx is not passed in)
@@ -137,7 +161,7 @@ struct rfme {
     uint32_t inR = 0, inW = 0;
     std::atomic<int> notesPlayKeys{1}, transpose{0}, keyNotesToFw{0};
     std::atomic<bool> midiOutOn{false};
-    rfm::Spsc<uint32_t, 2048> midiOutQ;                  // the clock -> the render thread (the AU's MIDI output)
+    rfm::Spsc<OutPacket, 2048> midiOutQ;                 // the core thread -> the render thread (the AU's MIDI output)
     std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
     int32_t masterV = -1;
     uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
@@ -163,12 +187,54 @@ struct rfme {
     std::atomic<double> rate{0};
     double usPerTick = ticksToUs();
 
-    // the timer clock
-    std::thread timer;
-    std::mutex tmu;
-    std::condition_variable tcv;
-    bool timerQuit = false;
-    std::atomic<bool> timerRebase{true};
+    // ---- THE CORE THREAD. It owns every call into the core while a clock runs (RFME_CLOCK_AUDIO: rendering ahead
+    // into the ring; RFME_CLOCK_TIMER: the wall clock, the sound dropped). The control thread calls into the core
+    // only with the clock stopped (stop / resume); RFME_CLOCK_CALLER is the caller's thread. Its waits are all
+    // bounded (the semaphore with a timeout), so stop and rfme_free never wait for more than one chunk.
+    std::thread thread;
+    std::atomic<bool> quit{false};
+    rfm::Semaphore wake;                    // the audio callback (and resume) -> the core thread
+    rfm::Semaphore produced;                // the core thread -> an offline render waiting for frames
+    std::atomic<bool> offlineWaiting{false};
+    rfm::WorkgroupSlot workgroup;           // the host's audio workgroup, joined by the core thread
+    std::atomic<uint32_t> periodUs{0};      // the host buffer's duration: the core thread's real-time period
+    std::atomic<int> rtOk{0};
+    bool timerRebase = true;                // (the core thread's)
+    bool producing = false;                 // (the core thread's) inside produce(): the MIDI out is kept
+    uint64_t outAt = 0;                     // (the core thread's) the ring position being rendered
+
+    // ---- THE RING (RFME_CLOCK_AUDIO). One producer (the core thread: posW), one consumer (the audio callback:
+    // posR); positions count frames since the engine was made and never wrap. The producer keeps it filled to
+    // `target` frames (a host buffer plus the headroom) in chunks of at most kChunk; a host event made at
+    // callback position p + offset is applied at ring position p + offset + latency (latency = target + kChunk:
+    // always at or beyond the end of whatever chunk the core thread is rendering), so it sounds `latency` frames
+    // after it was due, exactly, and the MIDI out keeps its position the same way.
+    std::unique_ptr<float[]> bufL{new float[kRingFrames]()}, bufR{new float[kRingFrames]()};
+    std::atomic<uint64_t> posW{0}, posR{0};
+    rfm::Spsc<HostEvent, 1024> hostQ;       // the audio callback -> the core thread
+    // a stream starts with each epoch: the control thread bumps it when the core or the clock changes; the
+    // producer answers with where its audio for that epoch starts; the consumer skips to there and waits until the
+    // ring holds `target` frames (primed) before it plays
+    std::atomic<uint32_t> epoch{0}, prodEpoch{~0u};
+    std::atomic<uint64_t> epochStart{0};
+    std::atomic<bool> audioLive{false};     // the clock is the audio callback's and a core is booted
+    std::atomic<uint32_t> target{0}, latency{0};
+    std::atomic<double> hostRate{0};
+    std::atomic<uint32_t> headroomUs{kDefaultHeadroomUs}, minBuffer{0};
+    std::atomic<bool> offline{false}, retargetReq{false};
+    uint32_t pEpoch = ~0u;                  // (the producer's) the epoch it renders
+    // (the consumer's)
+    uint32_t cEpoch = ~0u, cMaxN = 0;
+    double cRate = 0;
+    bool primed = false;
+    uint64_t outBase = 0, outEnd = 0;       // the ring span the last render played (for rfme_midi_out_take_at)
+    uint32_t outN = 0;
+    // stats: the consumer's
+    std::atomic<uint32_t> underruns{0}, underrunFrames{0}, fillMin{~0u};
+    std::atomic<bool> fillReset{false};
+    // the producer's (per wake: about one host buffer)
+    std::atomic<uint64_t> coreTicks{0}, coreWakes{0}, coreFrames{0}, coreMaxTicks{0}, frameMaxTicks{0};
+    std::atomic<bool> coreReset{false};
 
     // the main thread's view of the preview
     uint32_t viewSeq = 0;
@@ -185,23 +251,28 @@ struct rfme {
         ~Scope() { e->inClock.fetch_sub(1, std::memory_order_seq_cst); }
     };
 
-    // the control thread: the clock stopped (the old owner out of it); returns the old owner
+    // the control thread: the clock stopped (the old owner out of it: at most one chunk); returns the old owner
     int stop()
     {
+        audioLive.store(false, std::memory_order_seq_cst);
         const int prev = clock.exchange(RFME_CLOCK_NONE, std::memory_order_seq_cst);
         while (inClock.load(std::memory_order_seq_cst) != 0)
             std::this_thread::yield();
         return prev;
     }
-    void resume(int who)
+    // fresh: the core or the clock changed, so the audio stream starts again (a new epoch)
+    void resume(int who, bool fresh)
     {
-        if (who == RFME_CLOCK_TIMER) {
-            timerRebase.store(true);
-            startTimer();
-        }
-        clock.store(who, std::memory_order_seq_cst);
+        if (who == RFME_CLOCK_TIMER || who == RFME_CLOCK_AUDIO)
+            startThread();
+        if (fresh)
+            epoch.fetch_add(1, std::memory_order_seq_cst);
         if (who == RFME_CLOCK_TIMER)
-            tcv.notify_all();
+            timerRebase = true;                          // (the core thread is out of the clock: stop() saw to it)
+        clock.store(who, std::memory_order_seq_cst);
+        audioLive.store(who == RFME_CLOCK_AUDIO && dev && booted, std::memory_order_seq_cst);
+        if (who == RFME_CLOCK_TIMER || who == RFME_CLOCK_AUDIO)
+            wake.signal();
     }
 
     rfme()
@@ -261,8 +332,7 @@ struct rfme {
     void hostMidi(const uint8_t *d, uint32_t n)
     {
         if (n == 0 || !(d[0] & 0x80))
-            return;
-        midiInCount.fetch_add(1, std::memory_order_relaxed);
+            return;                                     // (counted when it came in: consume)
         bool keyNote = false;
         if (notesPlayKeys.load(std::memory_order_relaxed) && d[0] < 0xF0) {
             const uint8_t st = d[0] & 0xF0, ch = d[0] & 0x0F;
@@ -453,11 +523,11 @@ struct rfme {
         while (in.pop(ev))
             apply(ev);
         devMs.store(ms, std::memory_order_relaxed);
-        const bool keep = midiOutOn.load(std::memory_order_relaxed);
+        const bool keep = producing && midiOutOn.load(std::memory_order_relaxed);
         for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
             midiOut.fetch_add(1, std::memory_order_relaxed);
             if (keep)
-                (void)midiOutQ.push(pkt);
+                (void)midiOutQ.push(OutPacket{outAt, pkt});
         }
         if (!halted.load(std::memory_order_relaxed) && dev->halted()) {
             haltCode.store((uint32_t)dev->core().halted(), std::memory_order_relaxed);
@@ -497,42 +567,286 @@ struct rfme {
         flashReady.store(true, std::memory_order_release);
     }
 
-    // ---- the timer clock (no audio: the device runs by the wall clock, its sound dropped)
-    void startTimer()
+    // ---- the core thread
+    void startThread()
     {
-        if (timer.joinable())
+        if (thread.joinable())
             return;
-        timer = std::thread([this] {
-            using clk = std::chrono::steady_clock;
-            clk::time_point t0 = clk::now();
-            uint32_t ms0 = 0;
-            for (;;) {
-                {
-                    std::unique_lock<std::mutex> l(tmu);
-                    if (timerQuit)
-                        return;
-                    if (clock.load() != RFME_CLOCK_TIMER)
-                        tcv.wait_for(l, std::chrono::milliseconds(50));
-                }
-                {
-                    Scope cs(this, RFME_CLOCK_TIMER);
-                    if (cs.ok) {
-                        if (timerRebase.exchange(false)) {
-                            t0 = clk::now();
-                            ms0 = dev->ms();
-                        }
-                        const uint32_t target =
-                            ms0 + (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
-                        for (int k = 0; k < 200 && (int32_t)(target - dev->ms()) > 0; k++)
-                            dev->run_ms();
-                        if ((int32_t)(target - dev->ms()) > 200)    // (far behind: start counting again from here)
-                            timerRebase.store(true);
-                        dev->discard();
-                    }
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        thread = std::thread([this] { coreLoop(); });
+    }
+
+    void coreLoop()
+    {
+        gCoreThreads.fetch_add(1);
+        pthread_setname_np("RFM core");
+        uint32_t period = ~0u;
+        for (;;) {
+            if (quit.load(std::memory_order_acquire))
+                break;
+            const uint32_t want = periodUs.load(std::memory_order_relaxed);
+            if (want != period) {                       // (real time, its period the host buffer's: when it changes)
+                period = want;
+                rtOk.store(rfm::setRealtime(want ? want * 1e-6 : 0) ? 1 : 0, std::memory_order_relaxed);
             }
-        });
+            workgroup.adopt();
+            const int c = clock.load(std::memory_order_seq_cst);
+            if (c == RFME_CLOCK_AUDIO) {
+                produce();
+                wake.wait_us(20000);
+            } else if (c == RFME_CLOCK_TIMER) {
+                timerStep();
+                wake.wait_us(2000);
+            } else {
+                wake.wait_us(50000);
+            }
+        }
+        workgroup.leave();
+        gCoreThreads.fetch_sub(1);
+    }
+
+    // the timer clock (no audio: the device runs by the wall clock, its sound dropped)
+    std::chrono::steady_clock::time_point t0;
+    uint32_t ms0 = 0;
+    void timerStep()
+    {
+        using clk = std::chrono::steady_clock;
+        Scope cs(this, RFME_CLOCK_TIMER);
+        if (!cs.ok)
+            return;
+        if (timerRebase) {
+            timerRebase = false;
+            t0 = clk::now();
+            ms0 = dev->ms();
+        }
+        const uint32_t target =
+            ms0 + (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count();
+        for (int k = 0; k < 200 && (int32_t)(target - dev->ms()) > 0; k++)
+            dev->run_ms();
+        if ((int32_t)(target - dev->ms()) > 200)        // (far behind: start counting again from here)
+            timerRebase = true;
+        dev->discard();
+        noteFrameStats();
+    }
+
+    // the longest frame() so far, for rfme_status (the clock's thread)
+    void noteFrameStats()
+    {
+        if (coreReset.exchange(false, std::memory_order_relaxed)) {
+            dev->reset_frame_stats();
+            coreTicks.store(0, std::memory_order_relaxed);
+            coreWakes.store(0, std::memory_order_relaxed);
+            coreFrames.store(0, std::memory_order_relaxed);
+            coreMaxTicks.store(0, std::memory_order_relaxed);
+        }
+        frameMaxTicks.store(dev->frame_ticks_max(), std::memory_order_relaxed);
+    }
+
+    // RFME_CLOCK_AUDIO: the ring filled up to its target, host events applied at their positions
+    void produce()
+    {
+        Scope cs(this, RFME_CLOCK_AUDIO);
+        if (!cs.ok)
+            return;
+        const uint32_t ep = epoch.load(std::memory_order_acquire);
+        if (ep != pEpoch) {                             // a new stream: from here; what the old one queued goes
+            pEpoch = ep;
+            for (HostEvent he; hostQ.pop(he);) {
+            }
+            epochStart.store(posW.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            prodEpoch.store(ep, std::memory_order_release);
+        }
+        const double rate = hostRate.load(std::memory_order_relaxed);
+        if (!(rate > 0))
+            return;                                     // (no render yet: its rate is unknown)
+        producing = true;
+        const uint64_t t0 = mach_absolute_time();
+        uint64_t made = 0;
+        while (clock.load(std::memory_order_relaxed) == RFME_CLOCK_AUDIO) {
+            const uint64_t w = posW.load(std::memory_order_relaxed);
+            const uint64_t fill = w - posR.load(std::memory_order_acquire);
+            const uint32_t tgt = target.load(std::memory_order_relaxed);
+            if (fill >= tgt || fill + kChunk > kRingFrames)
+                break;
+            renderChunk(w, kChunk, rate);
+            posW.store(w + kChunk, std::memory_order_release);
+            made += kChunk;
+            if (offlineWaiting.load(std::memory_order_acquire))
+                produced.signal();
+        }
+        producing = false;
+        if (made) {
+            const uint64_t dt = mach_absolute_time() - t0;
+            coreTicks.fetch_add(dt, std::memory_order_relaxed);
+            coreWakes.fetch_add(1, std::memory_order_relaxed);
+            coreFrames.fetch_add(made, std::memory_order_relaxed);
+            if (dt > coreMaxTicks.load(std::memory_order_relaxed))
+                coreMaxTicks.store(dt, std::memory_order_relaxed);
+        }
+        noteFrameStats();
+    }
+
+    // n frames at ring position w (the device's render split at each host event due inside)
+    void renderChunk(uint64_t w, uint32_t n, double rate)
+    {
+        uint64_t pos = w;
+        const uint64_t end = w + n;
+        HostEvent he;
+        while (pos < end) {
+            while (hostQ.peek(he) && he.at <= pos) {
+                hostQ.pop(he);
+                hostMidi(he.data, he.len);
+            }
+            const uint64_t next = hostQ.peek(he) && he.at < end ? he.at : end;
+            outAt = pos;
+            const uint32_t k = (uint32_t)(next - pos);
+            const uint32_t i = (uint32_t)(pos & (kRingFrames - 1));
+            const uint32_t first = k < kRingFrames - i ? k : kRingFrames - i;
+            dev->render(bufL.get() + i, bufR.get() + i, first, rate);
+            if (k > first)
+                dev->render(bufL.get(), bufR.get(), k - first, rate);
+            pos = next;
+        }
+        flushMidiIn();
+    }
+
+    // ---- the audio callback (RFME_CLOCK_AUDIO): the ring into L and R, host events queued. Real-time safe:
+    // atomics, a copy, one semaphore signal (offline: bounded waits for the core thread)
+    void retarget()
+    {
+        const uint32_t buf = cMaxN > minBuffer.load(std::memory_order_relaxed) ? cMaxN : minBuffer.load(std::memory_order_relaxed);
+        const uint32_t head = (uint32_t)std::ceil((double)headroomUs.load(std::memory_order_relaxed) * cRate * 1e-6);
+        uint32_t t = buf + head;
+        if (t > kRingFrames - 2 * kChunk)
+            t = kRingFrames - 2 * kChunk;
+        t = (t + kChunk - 1) / kChunk * kChunk;         // (whole chunks)
+        target.store(t, std::memory_order_relaxed);
+        latency.store(t + kChunk, std::memory_order_relaxed);
+        periodUs.store(cRate > 0 ? (uint32_t)((double)cMaxN * 1e6 / cRate) : 0, std::memory_order_relaxed);
+    }
+
+    // offline: waits (bounded) until cond() holds or the stream stops
+    template <typename Cond> void waitFor(Cond &&cond)
+    {
+        offlineWaiting.store(true, std::memory_order_seq_cst);
+        uint32_t waited = 0;
+        while (!cond() && audioLive.load(std::memory_order_acquire) && waited < kOfflineWaitUs) {
+            wake.signal();
+            produced.wait_us(1000);
+            waited += 1000;
+        }
+        offlineWaiting.store(false, std::memory_order_relaxed);
+    }
+
+    int consume(float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev)
+    {
+        const bool off = offline.load(std::memory_order_relaxed);
+        bool changed = false;
+        const uint32_t ep = epoch.load(std::memory_order_acquire);
+        if (ep != cEpoch) {                             // (a new stream: primed again, its buffer size learnt again)
+            cEpoch = ep;
+            primed = false;
+            cMaxN = 0;
+            changed = true;
+        }
+        if (rate != cRate) {                            // (a new rate: what was rendered at the old one goes)
+            cRate = rate;
+            hostRate.store(rate, std::memory_order_relaxed);
+            posR.store(posW.load(std::memory_order_acquire), std::memory_order_release);
+            primed = false;
+            changed = true;
+        }
+        if (n > cMaxN) {
+            cMaxN = n;
+            changed = true;
+        }
+        if (retargetReq.exchange(false, std::memory_order_relaxed))
+            changed = true;
+        if (changed)
+            retarget();
+        if (fillReset.exchange(false, std::memory_order_relaxed))
+            fillMin.store(~0u, std::memory_order_relaxed);
+        const bool live = audioLive.load(std::memory_order_acquire);
+        uint64_t r = posR.load(std::memory_order_relaxed);
+        outBase = outEnd = r;
+        outN = n;
+        if (!primed && live && prodEpoch.load(std::memory_order_acquire) == ep) {
+            const uint64_t from = epochStart.load(std::memory_order_relaxed);
+            if (r < from) {                             // (the old stream's tail: skipped)
+                r = from;
+                posR.store(r, std::memory_order_release);
+                outBase = outEnd = r;
+            }
+        }
+        if (live) {                                     // host MIDI, stamped with its ring position
+            const uint64_t lat = latency.load(std::memory_order_relaxed);
+            for (uint32_t i = 0; i < nev; i++) {
+                if (ev[i].len == 0 || !(ev[i].data[0] & 0x80))
+                    continue;
+                HostEvent he{r + (ev[i].offset < n ? ev[i].offset : (n ? n - 1 : 0)) + lat,
+                             (uint8_t)(ev[i].len > 3 ? 3 : ev[i].len), {ev[i].data[0], ev[i].data[1], ev[i].data[2]}};
+                if (hostQ.push(he))
+                    midiInCount.fetch_add(1, std::memory_order_relaxed);
+                else
+                    midiInDropped.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        const uint32_t tgt = target.load(std::memory_order_relaxed);
+        auto filled = [&] { return posW.load(std::memory_order_acquire) - r >= tgt && prodEpoch.load(std::memory_order_acquire) == ep; };
+        if (!primed && live) {
+            if (off)
+                waitFor(filled);
+            primed = filled();
+        }
+        if (!primed) {
+            if (live)
+                wake.signal();
+            std::memset(L, 0, n * sizeof *L);
+            if (R && R != L)
+                std::memset(R, 0, n * sizeof *R);
+            return 0;
+        }
+        if (off && live)
+            waitFor([&] { return posW.load(std::memory_order_acquire) - r >= n; });
+        const uint64_t avail = posW.load(std::memory_order_acquire) - r;
+        if (avail < fillMin.load(std::memory_order_relaxed))
+            fillMin.store((uint32_t)avail, std::memory_order_relaxed);
+        const uint32_t k = avail < n ? (uint32_t)avail : n;
+        const uint32_t i = (uint32_t)(r & (kRingFrames - 1));
+        const uint32_t first = k < kRingFrames - i ? k : kRingFrames - i;
+        std::memcpy(L, bufL.get() + i, first * sizeof *L);
+        std::memcpy(L + first, bufL.get(), (k - first) * sizeof *L);
+        if (R) {
+            std::memcpy(R, bufR.get() + i, first * sizeof *R);
+            std::memcpy(R + first, bufR.get(), (k - first) * sizeof *R);
+        }
+        if (k < n) {                                    // an underrun: silence for what the core hasn't made yet
+            std::memset(L + k, 0, (n - k) * sizeof *L);
+            if (R)
+                std::memset(R + k, 0, (n - k) * sizeof *R);
+            if (live) {
+                underruns.fetch_add(1, std::memory_order_relaxed);
+                underrunFrames.fetch_add(n - k, std::memory_order_relaxed);
+            }
+        }
+        posR.store(r + k, std::memory_order_release);
+        outEnd = r + k;
+        if (!live && k == 0)
+            primed = false;                             // (stopped and drained)
+        wake.signal();
+        return k > 0;
+    }
+
+    // the MIDI out the last render played up to: one packet and its frame in that render
+    bool midiOutTake(uint32_t *pkt, uint32_t *offset)
+    {
+        OutPacket o;
+        if (!midiOutQ.peek(o) || o.at >= outEnd)
+            return false;
+        midiOutQ.pop(o);
+        *pkt = o.pkt;
+        if (offset)
+            *offset = o.at > outBase ? (uint32_t)(o.at - outBase) < outN ? (uint32_t)(o.at - outBase) : (outN ? outN - 1 : 0) : 0;
+        return true;
     }
 
     // ---- the control thread, the clock stopped
@@ -600,13 +914,10 @@ void rfme_free(rfme_t *e)
     e->stop();
     if (e->attached.exchange(false) && e->owner)
         rfmc_set_external(e->owner, 0);
-    {
-        std::lock_guard<std::mutex> l(e->tmu);
-        e->timerQuit = true;
-    }
-    e->tcv.notify_all();
-    if (e->timer.joinable())
-        e->timer.join();
+    e->quit.store(true, std::memory_order_release);
+    e->wake.signal();
+    if (e->thread.joinable())
+        e->thread.join();                               // (its waits are bounded: at most ~50 ms)
     e->unloadStopped();
     delete e;
 }
@@ -620,10 +931,10 @@ int rfme_load(rfme_t *e, const char *core_id, char *err, uint32_t n)
     if (!e->makeStopped(&msg)) {
         e->factory = nullptr;
         putErr(err, n, msg);
-        e->resume(prev);
+        e->resume(prev, true);
         return 0;
     }
-    e->resume(prev);
+    e->resume(prev, true);
     return 1;
 }
 
@@ -633,7 +944,7 @@ int rfme_boot(rfme_t *e, const uint8_t *flash, uint32_t n)
         return 0;
     const int prev = e->stop();
     e->bootStopped(flash, n);
-    e->resume(prev);
+    e->resume(prev, true);
     return 1;
 }
 
@@ -641,7 +952,7 @@ void rfme_unload(rfme_t *e)
 {
     const int prev = e->stop();
     e->unloadStopped();
-    e->resume(prev);
+    e->resume(prev, true);
 }
 
 int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
@@ -660,7 +971,7 @@ int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
     std::string msg;
     if (!e->makeStopped(&msg)) {
         putErr(err, n, msg);
-        e->resume(prev);
+        e->resume(prev, true);
         return 0;
     }
     e->bootStopped(image.empty() ? nullptr : image.data(), (uint32_t)image.size());
@@ -668,7 +979,7 @@ int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
         std::memcpy(e->flashCopy.data(), image.data(), image.size());
         e->flashReady.store(true, std::memory_order_release);
     }
-    e->resume(prev);
+    e->resume(prev, true);
     return 1;
 }
 
@@ -684,13 +995,13 @@ void rfme_attach(rfme_t *e, int on)
         e->linkValid = false;
         rfmc_set_external(e->owner, on);
     }
-    e->resume(prev);
+    e->resume(prev, false);
 }
 
 void rfme_set_clock(rfme_t *e, int owner)
 {
-    e->stop();
-    e->resume(owner);
+    const int prev = e->stop();
+    e->resume(owner, prev != owner);
 }
 
 int rfme_clock(rfme_t *e) { return e->clock.load(); }
@@ -700,29 +1011,7 @@ void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate) { rfme_
 int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev)
 {
     const uint64_t t0 = mach_absolute_time();
-    int ok;
-    {
-        rfme::Scope cs(e, RFME_CLOCK_AUDIO);
-        ok = cs.ok;
-        if (cs.ok) {
-            uint32_t pos = 0;                           // (FM1VST renderBlock: the device runs up to each event)
-            for (uint32_t i = 0; i < nev; i++) {
-                const uint32_t at = ev[i].offset < n ? ev[i].offset : n;
-                if (at > pos) {
-                    e->dev->render(L + pos, R ? R + pos : nullptr, at - pos, rate);
-                    pos = at;
-                }
-                e->hostMidi(ev[i].data, ev[i].len > 3 ? 3u : ev[i].len);
-            }
-            if (pos < n)
-                e->dev->render(L + pos, R ? R + pos : nullptr, n - pos, rate);
-            e->flushMidiIn();
-        } else {
-            std::memset(L, 0, n * sizeof *L);
-            if (R && R != L)
-                std::memset(R, 0, n * sizeof *R);
-        }
-    }
+    const int ok = e->consume(L, R, n, rate, ev, nev);
     const uint64_t dt = mach_absolute_time() - t0;
     const uint32_t us = (uint32_t)((double)dt * e->usPerTick);
     e->renders.fetch_add(1, std::memory_order_relaxed);
@@ -736,6 +1025,25 @@ int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, con
     return ok;
 }
 
+void rfme_set_latency(rfme_t *e, uint32_t headroom_us, uint32_t min_buffer_frames)
+{
+    e->headroomUs.store(headroom_us);
+    e->minBuffer.store(min_buffer_frames);
+    e->retargetReq.store(true);                         // (the next render sets the target)
+}
+
+uint32_t rfme_latency(rfme_t *e, double rate, uint32_t buffer)
+{
+    if (const uint32_t l = e->latency.load())
+        return l;
+    const uint32_t mb = e->minBuffer.load();
+    uint32_t t = (buffer > mb ? buffer : mb) + (uint32_t)std::ceil((double)e->headroomUs.load() * rate * 1e-6);
+    t = (t + kChunk - 1) / kChunk * kChunk;
+    return t + kChunk;
+}
+
+void rfme_set_offline(rfme_t *e, int on) { e->offline.store(on != 0); }
+
 void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware)
 {
     e->notesPlayKeys.store(notes_play_keys != 0);
@@ -745,7 +1053,9 @@ void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_
 
 void rfme_midi_out_enable(rfme_t *e, int on) { e->midiOutOn.store(on != 0); }
 
-int rfme_midi_out_take(rfme_t *e, uint32_t *pkt) { return e->midiOutQ.pop(*pkt) ? 1 : 0; }
+int rfme_midi_out_take(rfme_t *e, uint32_t *pkt) { return e->midiOutTake(pkt, nullptr) ? 1 : 0; }
+
+int rfme_midi_out_take_at(rfme_t *e, uint32_t *pkt, uint32_t *offset) { return e->midiOutTake(pkt, offset) ? 1 : 0; }
 
 void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
 {
@@ -830,6 +1140,22 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->flash_size = e->dev ? e->dev->flash_size() : 0;
     st->flash_dirty = e->flashDirty.load();
     st->flash_copies = e->flashCopies.load();
+    st->latency_frames = e->latency.load();
+    st->ring_target = e->target.load();
+    st->ring_fill_min = e->fillMin.load();
+    st->underruns = e->underruns.load();
+    st->underrun_frames = e->underrunFrames.load();
+    st->core_wakes = e->coreWakes.load();
+    st->core_frames = e->coreFrames.load();
+    const double ticks = (double)e->coreTicks.load();
+    st->core_avg_us = st->core_wakes ? (uint32_t)(ticks * e->usPerTick / (double)st->core_wakes) : 0;
+    st->core_max_us = (uint32_t)((double)e->coreMaxTicks.load() * e->usPerTick);
+    st->core_load_pct = st->core_frames && st->rate > 0
+        ? (uint32_t)(ticks * e->usPerTick / ((double)st->core_frames * 1e6 / st->rate) * 100.0 + 0.5) : 0;
+    st->frame_max_us = (uint32_t)((double)e->frameMaxTicks.load() * e->usPerTick);
+    st->realtime = e->rtOk.load();
+    st->workgroup = e->workgroup.joined() ? 1 : 0;
+    st->workgroup_joins = e->workgroup.joins();
 }
 
 void rfme_reset_render_stats(rfme_t *e)
@@ -838,7 +1164,41 @@ void rfme_reset_render_stats(rfme_t *e)
     e->renderFrames.store(0);
     e->renderTicks.store(0);
     e->renderMaxUs.store(0);
+    e->underruns.store(0);
+    e->underrunFrames.store(0);
+    e->fillReset.store(true);
+    e->coreReset.store(true);                           // (the clock's thread zeroes its own)
+    e->coreTicks.store(0);
+    e->coreWakes.store(0);
+    e->coreFrames.store(0);
+    e->coreMaxTicks.store(0);
+    e->frameMaxTicks.store(0);
 }
+
+void rfme_set_workgroup(rfme_t *e, void *wg)
+{
+    e->workgroup.offer(static_cast<os_workgroup_t>(wg));
+    e->wake.signal();
+}
+
+int rfme_use_output_workgroup(rfme_t *e, void *audio_unit)
+{
+    os_workgroup_t wg = nullptr;
+    UInt32 size = sizeof wg;
+    if (!audio_unit || AudioUnitGetProperty(static_cast<AudioUnit>(audio_unit), kAudioOutputUnitProperty_OSWorkgroup,
+                                            kAudioUnitScope_Global, 0, &wg, &size) != noErr) {
+        rfme_set_workgroup(e, nullptr);
+        return 0;
+    }
+    rfme_set_workgroup(e, wg);
+    if (wg)
+        os_release(wg);                                 // (AudioUnitGetProperty's +1; the engine keeps its own)
+    return wg != nullptr;
+}
+
+int rfme_test_core_threads(void) { return gCoreThreads.load(); }
+
+int rfme_test_realtime(double period_s) { return rfm::setRealtime(period_s) ? 1 : 0; }
 
 uint32_t rfme_preview(rfme_t *e, uint32_t have, uint8_t *rgba)
 {
@@ -901,7 +1261,7 @@ int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n)
         e->savedDirty = e->dev->flash_dirty();
         ok = 1;
     }
-    e->resume(prev);
+    e->resume(prev, false);
     return ok;
 }
 
@@ -927,7 +1287,7 @@ int rfme_param_read(rfme_t *e, const char *name, int32_t *value)
 {
     const int prev = e->stop();
     const int ok = rfme_param_get(e, name, value);
-    e->resume(prev);
+    e->resume(prev, false);
     return ok;
 }
 

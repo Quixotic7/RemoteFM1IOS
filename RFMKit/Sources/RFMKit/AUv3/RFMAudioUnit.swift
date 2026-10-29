@@ -66,6 +66,7 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
     private var pvSeq: UInt32 = 0
     private var pvRGBA = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
     private var timer: DispatchSourceTimer?
+    private var lastLatency: UInt32 = 0
     private let log = RFMShared.log("au")
     private var channel: DiagnosticsChannel?
 
@@ -207,11 +208,25 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FormatNotSupported))
         }
         rfmk_set_midi_out(kernel, midiOutputEventBlock)
-        rfme_set_clock(e, Int32(RFME_CLOCK_AUDIO))     // (the host's render callback runs the core from now)
+        rfme_set_clock(e, Int32(RFME_CLOCK_AUDIO))     // (the core thread renders ahead of the host's callback)
+    }
+
+    /// A host's offline render (a bounce, faster than real time): each render waits for the core thread instead of
+    /// playing silence where its frames aren't made yet
+    public override var isRenderingOffline: Bool {
+        didSet { rfme_set_offline(e, isRenderingOffline ? 1 : 0) }
+    }
+
+    /// The core thread renders ahead of the host (RFMEngine.h, render ahead): this much later than the host's time,
+    /// host MIDI included. Before the first render: as it will be with buffers of up to 512 frames
+    public override var latency: TimeInterval {
+        let rate = outBus.format.sampleRate
+        guard rate > 0 else { return 0 }
+        return Double(rfme_latency(e, rate, UInt32(min(maximumFramesToRender, 512)))) / rate
     }
 
     public override func deallocateRenderResources() {
-        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))     // (waits until the render thread has left the core)
+        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))     // (the core thread runs by the wall clock again)
         rfmk_set_midi_out(kernel, nil)
         rfmk_deallocate(kernel)
         super.deallocateRenderResources()
@@ -495,6 +510,11 @@ public final class RFMAudioUnit: AUAudioUnit, @unchecked Sendable {
             if r.halted != 0 && r.halt_code == 0x100 {
                 self.log.info("the firmware rebooted (exit 0): powered on again from its flash")
                 self.restartCore()
+            }
+            if r.latency_frames != self.lastLatency {   // (hosts observe `latency`)
+                self.willChangeValue(forKey: "latency")
+                self.lastLatency = r.latency_frames
+                self.didChangeValue(forKey: "latency")
             }
             self.updateName()
         }

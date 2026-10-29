@@ -8,9 +8,10 @@
 // thread). A slot whose image did not leave memory on unload is retired for the rest of the process (its globals are
 // the old instance's).
 //
-// THE ENGINE (rfme_*): one loaded core run by FM1VST's Device on ONE clock thread at a time (core-api/fm1core.h's
-// threading contract): the audio callback (RFME_CLOCK_AUDIO), the engine's own timer thread when there is no audio
-// (RFME_CLOCK_TIMER, the sound dropped), or the caller (RFME_CLOCK_CALLER, tests). fm1remote's design
+// THE ENGINE (rfme_*): one loaded core (a backend: RFMCoreBackend.h) run by FM1VST's device clock on ONE thread at a
+// time (core-api/fm1core.h's threading contract): the engine's core thread, which renders ahead of the audio callback
+// (RFME_CLOCK_AUDIO) or runs by the wall clock when there is no audio (RFME_CLOCK_TIMER, the sound dropped), or the
+// caller (RFME_CLOCK_CALLER, tests). fm1remote's design
 // (RemoteFM1 host/tools/fm1remote/engine.h) with FM1VST's panel mapping (plugin/Processor.cpp):
 //   panel -> core   the FM-1's events (RemoteLink's queue) and rfme_event's, applied in Device's between hook, in order
 //   core -> FM-1    the LCD, the LEDs (as RemoteFM1's planes) and PLAY green, into RemoteLink's triple buffer and the
@@ -23,6 +24,15 @@
 //   core -> host    (M4) the core's midi_out_take packets, to the AU's MIDI output (rfme_midi_out_take)
 // Load, boot, unload and power cycle run on one control thread (the main thread) with the clock stopped
 // (rfme_set_clock(NONE) waits until the clock is out). Nothing in rfme_render allocates or locks.
+//
+// RENDER AHEAD (M7): with RFME_CLOCK_AUDIO the audio callback never runs the core. The core thread renders into a
+// lock-free ring, kept `target` frames ahead (the largest host buffer seen + a headroom, 6 ms by default: a slow
+// screen redraw in frame() is absorbed there); rfme_render copies from the ring, queues the host's MIDI stamped with
+// its frame, and wakes the core thread. So the sound is `latency` frames later than the callback's own time
+// (rfme_latency, rfme_status.latency_frames), host MIDI too, exactly (at its frame + latency), and the core's MIDI out
+// keeps its place in the stream (rfme_midi_out_take_at). What the core hasn't made in time is silence, counted
+// (underruns). The core thread is a Mach real-time thread and joins the host's audio workgroup when it is given one
+// (rfme_set_workgroup, rfme_use_output_workgroup).
 #ifndef RFMENGINE_H
 #define RFMENGINE_H
 #include <stdint.h>
@@ -89,16 +99,34 @@ typedef struct {
     uint8_t len;                // 1..3 (a channel or system message; SysEx is not passed here)
     uint8_t data[3];
 } rfme_midi_t;
-// RFME_CLOCK_AUDIO: rfme_render with host MIDI applied at each event's frame. Returns 1 when the core rendered,
-// 0 silence (not booted, or not the clock's owner). Real-time safe.
+// RFME_CLOCK_AUDIO: rfme_render with host MIDI applied at each event's frame (+ the latency). Returns 1 when the
+// core's audio played (some frames of it), 0 silence (not booted, not the clock's owner, the ring still filling).
+// Real-time safe: no locks, no allocation, no waits (offline: bounded waits for the core thread).
 int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev);
+// (any thread) the ring's target: the largest host buffer seen (at least min_buffer_frames) + headroom_us (default
+// 6000, 0 frames); applies from the next render on
+void rfme_set_latency(rfme_t *e, uint32_t headroom_us, uint32_t min_buffer_frames);
+// the latency now, in frames at the render's rate (a host event to its sound; the core's audio behind the callback's
+// time); before the first render, what it will be at `rate` with `buffer`-frame renders
+uint32_t rfme_latency(rfme_t *e, double rate, uint32_t buffer);
+// (any thread) offline rendering (a host's bounce): a render waits (bounded) for the core thread instead of playing
+// silence where frames are missing. Default off
+void rfme_set_offline(rfme_t *e, int on);
+// (any thread, real-time safe) the audio workgroup the render callback runs in (an os_workgroup_t; NULL: none): the
+// core thread leaves the one it is in and joins it. The AU's render context observer calls this
+void rfme_set_workgroup(rfme_t *e, void *os_workgroup);
+// (control thread) the output unit's workgroup (kAudioOutputUnitProperty_OSWorkgroup of an AudioUnit, e.g.
+// AVAudioEngine's outputNode.audioUnit) to rfme_set_workgroup; 1: it had one
+int rfme_use_output_workgroup(rfme_t *e, void *audio_unit);
 // (any thread) FM1VST's settings: MIDI notes play the keys (default 1), transpose -2..2 octaves (0), key notes also
 // to the firmware (0)
 void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware);
 // the core's MIDI out kept for rfme_midi_out_take (on: the AU has a MIDI output; off: counted and dropped)
 void rfme_midi_out_enable(rfme_t *e, int on);
-// the render thread, after rfme_render_midi: one USB-MIDI packet of the core's; 0: none
+// the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
+// played; 0: none. _at also gives its frame in that render (the same latency as the audio)
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);
+int rfme_midi_out_take_at(rfme_t *e, uint32_t *pkt, uint32_t *offset);
 
 // RFME_CLOCK_CALLER (tests): `ms` device milliseconds on this thread; the sound measured, then dropped
 typedef struct {
@@ -143,6 +171,18 @@ typedef struct {
     uint32_t render_last_us, render_avg_us, render_max_us, render_last_frames;   // rfme_render's own time
     double rate;                // the last render's rate
     uint32_t flash_size, flash_dirty, flash_copies;
+    // (M7) render ahead
+    uint32_t latency_frames;    // the latency now (rfme_latency; 0: no render yet)
+    uint32_t ring_target;       // frames the core thread keeps in the ring
+    uint32_t ring_fill_min;     // the fewest frames the ring held at a render since the reset (~0: none yet)
+    uint32_t underruns, underrun_frames;   // renders the ring ran short in; frames played as silence for it
+    uint64_t core_wakes, core_frames;      // the core thread's renders (about one per host buffer) and frames made
+    uint32_t core_avg_us, core_max_us;     // the core thread's time per render
+    uint32_t core_load_pct;     // the core thread's time over the audio's duration
+    uint32_t frame_max_us;      // the longest frame() (the firmware's screen redraw)
+    int32_t realtime;           // the core thread got the time-constraint policy
+    int32_t workgroup;          // the core thread is in the host's audio workgroup
+    uint32_t workgroup_joins;
 } rfme_status_t;
 void rfme_status(rfme_t *e, rfme_status_t *st);
 void rfme_reset_render_stats(rfme_t *e);
@@ -174,6 +214,10 @@ int rfme_param_read(rfme_t *e, const char *name, int32_t *value);
 // from the next rfme_load / rfme_power_cycle on, every frame() of the core takes `us` microseconds longer (a busy
 // wait on the clock's thread: a stand-in for an interpreted firmware's screen redraw); 0: off
 void rfme_test_frame_stall(rfme_t *e, uint32_t us);
+// core threads alive in this process (each engine with a clock run has one until rfme_free)
+int rfme_test_core_threads(void);
+// the calling thread as a real-time thread with this period (a test's stand-in for an audio callback); 1: done
+int rfme_test_realtime(double period_s);
 
 #ifdef __cplusplus
 }

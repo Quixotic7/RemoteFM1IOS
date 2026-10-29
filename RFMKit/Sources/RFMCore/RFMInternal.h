@@ -38,6 +38,15 @@ public:
         r_.store(r + 1, std::memory_order_release);
         return true;
     }
+    // (the consumer) the oldest entry without taking it
+    bool peek(T &e) const
+    {
+        const uint32_t r = r_.load(std::memory_order_relaxed);
+        if (r == w_.load(std::memory_order_acquire))
+            return false;
+        e = buf_[r % N];
+        return true;
+    }
 
 private:
     std::array<T, N> buf_{};

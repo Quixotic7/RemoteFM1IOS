@@ -63,7 +63,7 @@ struct OutCtx {
 };
 }
 
-static void emitOut(void *ctx, const uint8_t *msg, uint32_t len)
+static void emitOut(void *ctx, const uint8_t *msg, uint32_t len, uint32_t offset)
 {
     OutCtx *o = static_cast<OutCtx *>(ctx);
 #if __has_feature(objc_arc)
@@ -72,7 +72,7 @@ static void emitOut(void *ctx, const uint8_t *msg, uint32_t len)
     AUMIDIOutputEventBlock b = (AUMIDIOutputEventBlock)o->k->midiOut;
 #endif
     if (b)
-        b(o->t, 0, (NSInteger)len, msg);
+        b(o->t + (AUEventSampleTime)offset, 0, (NSInteger)len, msg);
 }
 
 AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
