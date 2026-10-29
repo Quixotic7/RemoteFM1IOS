@@ -249,6 +249,9 @@ public final class CorePlayer {
         do {
             let s = AVAudioSession.sharedInstance()
             try s.setCategory(.playback)
+            // ~10 ms buffers: the USB route (the FM-1 as a sound card) otherwise gets very short ones, and a firmware's
+            // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
+            try? s.setPreferredIOBufferDuration(0.010)
             try s.setActive(true)
         } catch {
             message = "audio session: \(error.localizedDescription)"
@@ -272,7 +275,8 @@ public final class CorePlayer {
         audioRunning = true
         #if os(iOS)
         let s = AVAudioSession.sharedInstance()
-        audioText = String(format: "%.0f Hz, io buffer %.1f ms", rate, s.ioBufferDuration * 1000)
+        let route = s.currentRoute.outputs.map(\.portName).joined(separator: ", ")
+        audioText = String(format: "%.0f Hz, io buffer %.1f ms, %@", rate, s.ioBufferDuration * 1000, route)
         #else
         audioText = String(format: "%.0f Hz", rate)
         #endif
