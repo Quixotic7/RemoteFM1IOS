@@ -9,6 +9,9 @@
 #
 #   scripts/sim_aucoretest.sh [UDID]    (default: RFM iPhone 17, CEB2B846-...)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-aucoretest); NOBUILD=1 reuses the last build
+#   RFM1="felucca"   (M7) each <id>-*.rfm1 of $RFM1_DIR (default FM1VST's rfm1 worktree's build-rfm1/rfm1) into the
+#             app's Documents/Firmware: the test then also plays the first one in the extension (E) and restores it by
+#             its SHA-256 (F). WASMONLY=1: only that part
 #
 # Only fake units: the test tells the extension to use its shared fake (au-backend.txt in the App Group) before it
 # instantiates anything, and the app's own link is its in-process fake.
@@ -52,10 +55,22 @@ GDIR=$(xcrun simctl get_app_container "$UDID" "$BUNDLE" "$GROUP" 2>/dev/null || 
 echo "data: $DATA"
 echo "group: ${GDIR:-none}"
 if [ -n "$GDIR" ]; then rm -f "$GDIR"/aucoretest*.json "$GDIR"/lease.bin "$GDIR"/au-backend.txt; fi
+RFM1_DIR=${RFM1_DIR:-/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/rfm1/build-rfm1/rfm1}
+if [ -n "${RFM1:-}" ]; then
+    mkdir -p "$DATA/Documents/Firmware"
+    for i in $RFM1; do
+        f=$(ls "$RFM1_DIR"/"$i"-*.rfm1 2>/dev/null | head -1)
+        [ -n "$f" ] || { echo "no $i-*.rfm1 in $RFM1_DIR"; exit 1; }
+        cp "$f" "$DATA/Documents/Firmware/"
+        echo "firmware: $(basename "$f") -> Documents/Firmware"
+    done
+fi
+ARGS=(-aucoretest)
+[ -n "${WASMONLY:-}" ] && ARGS+=(-wasmonly)
 
-say "launch -aucoretest"
+say "launch ${ARGS[*]}"
 T0=$(date +%s)
-xcrun simctl launch "$UDID" "$BUNDLE" -aucoretest
+xcrun simctl launch "$UDID" "$BUNDLE" "${ARGS[@]}"
 shot=1
 for _ in $(seq 1 180); do
     if [ -f "$DATA/Documents/aucoretest-shot-$shot.json" ]; then

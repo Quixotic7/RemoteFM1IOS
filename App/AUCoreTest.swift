@@ -13,6 +13,9 @@
 //      duplicate: a new UUID, no claim);
 //   4. the cross-process case at the lease level: the app's own link (its own fake unit) claims against C, then C
 //      claims back.
+//   5. (M7) when Documents/Firmware has a valid .rfm1 (scripts/sim_aucoretest.sh RFM1=...): E plays the first imported
+//      firmware (a Wasm core in the extension, from the App Group mirror) with host notes; F is made from E's
+//      fullState and must find the same file by its SHA-256 and boot from the saved flash. -wasmonly runs only this.
 // The summary goes to aucoretest.json (Documents); scripts/sim_aucoretest.sh takes screenshots when the marker files
 // aucoretest-shot-<n>.json appear (the test then waits 3 s).
 
@@ -47,6 +50,7 @@ struct AUCoreTestSummary: Codable, Sendable {
     var reports: [String: AUReport] = [:]       // by moment: "A at start", ...
     var fake: [String: String] = [:]            // the shared fake's record (JSON) by moment
     var tempo: Int?                             // ChoralRoot's tempo after the panel's change (A)
+    var wasm: [Audio] = []                      // (M7) the imported firmware's instances
 }
 
 @MainActor
@@ -97,14 +101,99 @@ final class AUCoreTestHost {
             step("audio session", false, AUTestHost.describe(error))
         }
 
+        // the imported firmware, mirrored into the App Group for the extension (the app's own launch does this; this
+        // test mode skips the app's setup)
+        let library = FirmwareLibrary()
+        let files = library.sync()
+        step("firmware folder", nil, "\(files.count) file(s) in Documents/Firmware, \(files.filter { $0.error == nil }.count) valid: "
+             + files.map { $0.error == nil ? "\($0.name) \($0.version)" : "\($0.file) (\($0.error ?? ""))" }.joined(separator: ", "))
+        if ProcessInfo.processInfo.arguments.contains("-wasmonly") {
+            await phaseWasm(library)                    // (it starts the engine once E is attached)
+            engine.stop()
+            return finish()
+        }
+
         // 1-3: A and B (A is released when phaseAB returns: only `units` and the views held it)
         guard let saved = await phaseAB(), let b = units["B"] else { return finish() }
         let savedID = InstanceState(saved)?.instance.uuidString ?? ""
         let goneA = await waitFor(6) { (self.status(b)?.ownerPid ?? -1) == 0 }
         step("A destroyed", goneA, "the lease's owner pid \(status(b)?.ownerPid ?? -1) (0: the owner instance is gone, its UUID kept)")
         await cdAndApp(saved: saved, savedID: savedID)
+        await phaseWasm(library)
         engine.stop()
         finish()
+    }
+
+    /// 5: an imported firmware in the extension: E plays it, F restores E's state by the file's SHA-256
+    private func phaseWasm(_ library: FirmwareLibrary) async {
+        guard let f = library.files.first(where: { $0.error == nil }) else {
+            step("imported firmware", nil, "none in Documents/Firmware: skipped")
+            return
+        }
+        guard let e = await make("E", core: f.key, context: "Track E") else { return }
+        let meter = TapMeter()
+        engine.attach(e)
+        engine.connect(e, to: engine.mainMixerNode, format: nil)
+        e.installTap(onBus: 0, bufferSize: 2048, format: nil, block: CoreTest.tap(meter))
+        if !engine.isRunning {
+            do { try engine.start() } catch { step("engine", false, AUTestHost.describe(error)) }
+        }
+        try? await Task.sleep(for: .seconds(2))                 // (the core boots and settles)
+        _ = call(e, "resetLevel")
+        meter.reset()
+        let t0 = Date()
+        var on: [UInt8] = [0x90, 62, 100]
+        e.auAudioUnit.scheduleMIDIEventBlock?(AUEventSampleTimeImmediate, 0, 3, &on)
+        try? await Task.sleep(for: .seconds(3))
+        var off: [UInt8] = [0x80, 62, 0]
+        e.auAudioUnit.scheduleMIDIEventBlock?(AUEventSampleTimeImmediate, 0, 3, &off)
+        let m = meter.result
+        let r = status(e)
+        summary.reports["E (imported)"] = r
+        var au = AUCoreTestSummary.Audio(label: "E", core: r?.core ?? "?", rms: m.rms, peak: m.peak, frames: m.frames)
+        if let r {
+            au.renderAvgUs = r.renderAvgUs
+            au.renderMaxUs = r.renderMaxUs
+            au.renderFrames = r.renderFrames
+            au.rate = r.rate
+            au.renderLoadPct = r.renderLoadPct
+            au.midiNotes = r.midiNotes
+            au.midiIn = r.midiIn
+            au.latencyFrames = r.latencyFrames
+            au.underruns = r.underruns
+            au.coreAvgUs = r.coreAvgUs
+            au.coreMaxUs = r.coreMaxUs
+            au.frameMaxUs = r.frameMaxUs
+            au.ringFillMin = r.ringFillMin
+            au.realtime = r.realtime
+            au.workgroup = r.workgroup
+        }
+        summary.wasm.append(au)
+        step("E plays \(f.name) \(f.version) (imported)", r?.kind == "wasm" && r?.coreKey == f.key && m.rms > 1e-4,
+             String(format: "kind %@, %.1f s: rms %.4f peak %.3f; host notes %d; core thread %d us avg, %d max per render "
+                    + "(%d%% load), frame() max %d us, %d underruns; %d-frame renders at %.0f Hz",
+                    r?.kind ?? "?", Date().timeIntervalSince(t0), m.rms, m.peak, au.midiNotes, au.coreAvgUs, au.coreMaxUs,
+                    r?.coreLoadPct ?? -1, au.frameMaxUs, au.underruns, au.renderFrames, au.rate))
+        await screenshot("E plays the imported \(f.name)")
+        let saved = e.auAudioUnit.fullState ?? [:]
+        let cs = CoreState(saved)
+        step("E's fullState", cs?.kind == "wasm" && cs?.sha256 == f.sha256 && cs?.core == f.coreID && cs?.flash != nil,
+             "kind \(cs?.kind ?? "?"), id \(cs?.core ?? "?") \(cs?.version ?? ""), sha256 \(cs?.sha256.prefix(12) ?? "?"), "
+             + "flash \(cs?.flash?.count ?? 0) bytes")
+        e.removeTap(onBus: 0)
+        engine.detach(e)
+        units["E"] = nil
+        if let g = await make("F", core: nil, context: "Track E") {
+            g.auAudioUnit.fullState = saved
+            try? await Task.sleep(for: .seconds(1))
+            let rf = status(g)
+            summary.reports["F from E's state"] = rf
+            step("F restores E's firmware by its SHA-256", rf?.coreKey == f.key && rf?.kind == "wasm"
+                    && rf?.bootedFrom == "the saved flash" && rf?.coreNote == "" && rf?.booted == true,
+                 "\(rf?.coreName ?? "?") \(rf?.coreVersion ?? "") (\(rf?.kind ?? "?"), \(rf?.coreKey.prefix(17) ?? "?")) from "
+                 + "\(rf?.bootedFrom ?? "?"); note \"\(rf?.coreNote ?? "")\"")
+            units["F"] = nil
+        }
     }
 
     /// A and B: the sound, the takeovers, A's flash and fullState; A destroyed at the end

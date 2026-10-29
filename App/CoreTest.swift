@@ -3,7 +3,9 @@
 // The core test (M3, -coretest): the app's real path with the fake unit. It waits for the fake's session, boots the
 // firmware (-core <id>, default the app's) in Core mode with the sound on, lets the fake's demo input play (FIZZ,
 // LOOM-8: PLAY on the fake unit first, its keys being steps), taps the main mixer for 3 s, saves the flash, powers the
-// firmware off and on again, and writes coretest.json to Documents (scripts/sim_coretest.sh reads it). The screen stays as the user would see it, for the screenshot.
+// firmware off and on again, and writes coretest.json to Documents (scripts/sim_coretest.sh reads it). M7: the
+// same for an imported .rfm1 (-core rfm1:<id>: the file put into Documents/Firmware by the script), its kind and
+// SHA-256 and the catalog in the summary. The screen stays as the user would see it, for the screenshot.
 
 import AVFoundation
 import Foundation
@@ -21,6 +23,7 @@ struct CoreTestSummary: Codable, Sendable {
     var device = "", system = ""
     var simulator = false
     var core = "", name = "", version = "", license = ""
+    var kind = "", sha256 = "", catalog: [String] = []
     var slot = 0, slots = 0
     var steps: [Step] = []
     var sampleRate = 0.0, ioBufferMs = 0.0
@@ -119,6 +122,13 @@ final class CoreTest {
         s.name = info?.name ?? ""
         s.version = info?.version ?? ""
         s.license = info?.license ?? ""
+        s.kind = info?.kind ?? ""
+        s.sha256 = info?.sha256 ?? ""
+        s.catalog = player.cores.map(\.title)
+        if info?.imported == true {
+            step("imported firmware", player.status.kind == "wasm", "\(info?.fileName ?? "") (\(s.sha256.prefix(12))), "
+                 + "\(player.cores.filter(\.imported).count) imported of \(player.cores.count) in the catalog")
+        }
         s.slots = info?.slots ?? 0
         s.slot = player.status.slot
         s.footprintBefore = player.footprintBefore
@@ -131,7 +141,7 @@ final class CoreTest {
         s.ioBufferMs = session.ioBufferDuration * 1000
 
         // (FIZZ: the fake's keys are steps, silent; PLAY on the fake unit starts its demo pattern)
-        if let label = Self.startButton[player.selected] {
+        if let label = Self.startButton[info?.firmwareID ?? player.selected] {
             let id = player.withPanelEngine { rfme_matrix_button($0, label) }
             controller.fakeButton(Int(id), down: true)
             try? await Task.sleep(for: .milliseconds(80))
@@ -210,7 +220,7 @@ final class CoreTest {
         s.flashFile = "Documents/cores/" + url.lastPathComponent
         s.flashBytes = size ?? 0
         s.flashSaves = player.saves
-        step("flash file written", saved && s.flashBytes == Int(info?.flashSize ?? 0),
+        step("flash file written", saved && s.flashBytes == Int(player.status.flashSize),
              "\(s.flashFile), \(s.flashBytes) bytes, \(player.saves) saves")
 
         // 5: a power cycle (as after the firmware's own reboot): the slot reloaded, booted from the flash
