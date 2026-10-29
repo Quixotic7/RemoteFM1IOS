@@ -22,6 +22,8 @@
 //                   53.. play the keys, with the host's velocity, transposed by octaves; everything else, and the key
 //                   notes too if asked, to the core's midi_in as USB-MIDI packets)
 //   core -> host    (M4) the core's midi_out_take packets, to the AU's MIDI output (rfme_midi_out_take)
+//   controller      (M8) a MIDI controller's messages (rfme_midi_in) take host MIDI's path on the core thread; learn
+//                   and the learned map (rfme_set_midi_map) come first there, for host MIDI too
 // Load, boot, unload and power cycle run on one control thread (the main thread) with the clock stopped
 // (rfme_set_clock(NONE) waits until the clock is out). Nothing in rfme_render allocates or locks.
 //
@@ -128,6 +130,42 @@ void rfme_midi_out_enable(rfme_t *e, int on);
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);
 int rfme_midi_out_take_at(rfme_t *e, uint32_t *pkt, uint32_t *offset);
 
+// ---- (M8) MIDI from a controller, and the learned map (the website's js/midi-map.js)
+// (any thread but the audio thread; serialised inside) one channel message (1..3 bytes) from a controller, for the
+// core thread: as host MIDI (learn, the learned map, then notes play keys, the rest to the core's midi_in), or with
+// to_firmware straight to the core's midi_in (not learnt, not mapped, no keys: the OMX-27's Keyboard view). Applied
+// before the next chunk the core thread renders (TIMER: its next tick; CALLER: the next rfme_run_ms). 0: dropped
+// (the queue is full, or not a channel message)
+int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware);
+
+enum { RFME_SRC_CC = 0, RFME_SRC_NOTE = 1 };
+// targets: 0..6 the knob roles (RFME_E_* order), RFME_T_MASTER, RFME_T_BUTTON + label (RFME_B_*: 8..21)
+enum { RFME_T_MASTER = 7, RFME_T_BUTTON = 8 };
+// a CC on an encoder: abs a pot (the change since its last value), rel64 binary offset (65 = +1), rel2c two's
+// complement (127 = -1), relsign sign bit (65 = -1)
+enum { RFME_MAP_ABS = 0, RFME_MAP_REL64 = 1, RFME_MAP_REL2C = 2, RFME_MAP_RELSIGN = 3 };
+typedef struct {
+    uint8_t src;                // RFME_SRC_*
+    uint8_t channel;            // 0..15
+    uint8_t number;             // the CC or note number, 0..127
+    uint8_t target;             // RFME_T_* or a knob role
+    uint8_t mode;               // RFME_MAP_* (an encoder's CC; otherwise ignored)
+} rfme_map_entry_t;
+// (control thread, one writer) the learned map, whole (n <= 512; a note on a knob or MASTER is ignored), and the
+// knob speed (0.5, 1 or 2; else 1). A source whose target is new starts again; whatever the old map held is let go.
+// Kept across loads and power cycles (an engine setting). As midi-map.js: a mapped message is consumed (it plays no
+// key, never reaches midi_in); encoders turn by whole detents (fractions carry), buttons press on note-on / CC >= 64
+// and are down while any of their sources is; a MASTER pot waits until it reaches MASTER (rfme_panel_t.master_pot)
+void rfme_set_midi_map(rfme_t *e, const rfme_map_entry_t *map, uint32_t n, float speed);
+// (any thread) learn armed: every CC and note-on from the host or rfme_midi_in (and the note-off of a note it took)
+// goes to the learn queue instead of anywhere else
+void rfme_learn(rfme_t *e, int armed);
+// (one reader, not the audio thread) the next message in the learn queue: 1 and its 3 bytes; 0 none
+int rfme_learn_take(rfme_t *e, uint8_t msg[3]);
+// RemoteMidi.c's rule (fm1_remote_midi_candidate): 1 when a MIDI endpoint may be an FM-1 (USB 1209:0001; without the
+// USB property, "FM-1" in the device's or the endpoint's name; never an updater port). has_usb 0 for Bluetooth MIDI
+int rfme_fm1_candidate(int has_usb, int32_t usb_id, const char *device_name, const char *endpoint_name);
+
 // RFME_CLOCK_CALLER (tests): `ms` device milliseconds on this thread; the sound measured, then dropped
 typedef struct {
     uint64_t frames;
@@ -156,6 +194,9 @@ typedef struct {
     uint8_t btn_led[14];        // each button's LED level, by label (RFME_B_*)
     uint8_t play_green;         // PLAY's green LED level
     uint8_t booted;             // 1: a core is running (the values above are its)
+    // (M8) a learned MASTER pot waiting to pick MASTER up: where the pot is, 0..1023; -1 none (MASTER set by a pot)
+    int16_t master_pot;
+    uint16_t pickup_seq;        // moves each time a pot starts waiting (the UI: "turn the pot to <master>%")
 } rfme_panel_t;
 // the newest panel state (one reader thread, any but the clock's); returns its seq (0: none yet; out zeroed)
 uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out);
@@ -185,6 +226,8 @@ typedef struct {
     int32_t workgroup;          // the core thread is in the host's audio workgroup
     uint32_t workgroup_joins;
     char kind[8];               // (M7) the backend: "native" (a slot), "wasm" (an .rfm1 in wasm3), "" none
+    // (M8) MIDI messages the learned map took; learn took; passed on to the core's midi_in (host and controller)
+    uint32_t midi_mapped, midi_learned, midi_to_core;
 } rfme_status_t;
 void rfme_status(rfme_t *e, rfme_status_t *st);
 void rfme_reset_render_stats(rfme_t *e);

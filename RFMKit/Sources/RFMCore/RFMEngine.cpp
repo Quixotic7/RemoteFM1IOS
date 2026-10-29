@@ -9,7 +9,8 @@
 // for the app; flash on request; the core's stats() and the render's own time. M4: host MIDI in (FM1VST's handleMidi,
 // pushKeys, forwardMidi and toUsbPackets) and the core's MIDI out kept for the AU's MIDI output. M7: the core behind
 // a backend (RFMCoreBackend.h), and one core thread per engine that renders ahead of the audio callback (the ring,
-// below) and also runs the timer clock.
+// below) and also runs the timer clock. M8: a controller's MIDI (rfme_midi_in) on host MIDI's path, MIDI learn and the
+// learned map (RFMMidiMap.h) ahead of it, on the core thread.
 #include "RFMEngine.h"
 
 #include <AudioToolbox/AudioToolbox.h>
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +30,7 @@
 #include "RFMCoreBackend.h"
 #include "RFMDevice.h"
 #include "RFMInternal.h"
+#include "RFMMidiMap.h"
 #include "RFMRealtime.h"
 #include "RemoteLink.h"
 
@@ -61,6 +64,16 @@ struct HostEvent {
     uint8_t len;
     uint8_t data[3];
 };
+// (M8) a controller's message on its way to the core thread (rfme_midi_in)
+struct CtlEvent {
+    uint8_t toFirmware;
+    uint8_t len;
+    uint8_t data[3];
+};
+// a message learn took (rfme_learn_take)
+struct LearnMsg {
+    uint8_t data[3];
+};
 // a USB-MIDI packet of the core's, with the ring position it was made at
 struct OutPacket {
     uint64_t at;
@@ -89,6 +102,15 @@ template <typename Put> void toUsbPackets(const uint8_t *d, uint32_t n, Put &&pu
     } else if (st >= 0x80) {
         put(pkt(st >> 4, st, n > 1 ? d[1] : 0u, n > 2 ? d[2] : 0u));
     }
+}
+
+rfm_event_t panelEvent(uint8_t type, uint8_t index, int value)
+{
+    rfm_event_t e{};
+    e.type = type;
+    e.index = index;
+    e.value = (int16_t)value;
+    return e;
 }
 
 struct Preview {
@@ -163,6 +185,18 @@ struct rfme {
     std::atomic<bool> midiOutOn{false};
     rfm::Spsc<OutPacket, 2048> midiOutQ;                 // the core thread -> the render thread (the AU's MIDI output)
     std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
+    // (M8) a controller's MIDI, learn and the learned map. The queues' producers: rfme_midi_in's callers (serialised
+    // by ctlLock, never the audio thread) and the core thread (learnQ); the map comes over in a Triple
+    rfm::Spsc<CtlEvent, 1024> ctlQ;
+    std::mutex ctlLock;
+    rfm::Spsc<LearnMsg, 256> learnQ;
+    std::atomic<bool> learnArmed{false};
+    rfm::Triple<rfm::MapTable> mapIn;
+    std::unique_ptr<rfm::MidiMapper> mapper{new rfm::MidiMapper()};   // (the core thread's)
+    uint32_t learnNotes[16][4] = {};        // (the core thread's) the notes learn took, held: their note-offs too
+    int16_t masterPot = -1;                 // (the core thread's) rfme_panel_t.master_pot, pickup_seq
+    uint16_t pickupSeq = 0;
+    std::atomic<uint32_t> midiMapped{0}, midiLearned{0}, midiToCore{0};
     int32_t masterV = -1;
     uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
     uint32_t lastLinkPub = 0, lastLinkWrites = 0;
@@ -329,11 +363,115 @@ struct rfme {
             inR++;                                       // (0: no room in the core: retried after the next render)
     }
 
-    // one host MIDI message (Processor.cpp handleMidi + forwardMidi)
+    // one message to the core's midi_in, as USB-MIDI packets
+    void toFirmware(const uint8_t *d, uint32_t n)
+    {
+        midiToCore.fetch_add(1, std::memory_order_relaxed);
+        toUsbPackets(d, n, [this](uint32_t p) {
+            if (inW - inR < kInRing)
+                inRing[inW++ % kInRing] = p;
+            else
+                midiInDropped.fetch_add(1, std::memory_order_relaxed);
+        });
+        flushMidiIn();
+    }
+
+    // ---- (M8) learn and the learned map (the clock's thread)
+    // the newest map, if rfme_set_midi_map gave one since: whatever the old one held is let go
+    void syncMap()
+    {
+        const rfm::MapTable *t = mapIn.take();
+        if (!t)
+            return;
+        uint32_t held = 0;
+        mapper->adopt(*t, &held);
+        for (int l = 0; l < FM1P_NB; l++)
+            if ((held >> l) & 1u)
+                mapButton(l, false);
+    }
+
+    // learn armed: a CC, a note-on, or the note-off of a note it took, to the learn queue (true: taken)
+    bool learnTake(const uint8_t *d, uint32_t n)
+    {
+        if (n < 3 || d[0] >= 0xF0)
+            return false;
+        const uint8_t st = d[0] & 0xF0, ch = d[0] & 0x0F, num = d[1] & 0x7F, v = d[2] & 0x7F;
+        const bool on = st == 0x90 && v > 0, off = st == 0x80 || (st == 0x90 && v == 0);
+        uint32_t &w = learnNotes[ch][num >> 5];
+        const uint32_t bit = 1u << (num & 31);
+        if (!learnArmed.load(std::memory_order_relaxed)) {
+            if (off)
+                w &= ~bit;
+            return false;
+        }
+        if (st == 0xB0)
+            mapper->seed(ch, num, v);                   // (an absolute pot turns from here once mapped)
+        else if (on)
+            w |= bit;
+        else if (off && (w & bit))
+            w &= ~bit;
+        else
+            return false;
+        (void)learnQ.push(LearnMsg{{d[0], num, v}});
+        midiLearned.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    // the map's action, as the panel's events (the matrix ids: the FM-1 mirror and the stats see it like a touch)
+    void mapButton(int label, bool down)
+    {
+        const uint8_t id = dev->panel()->btn_id[label];
+        if (id < FM1P_NBTN)
+            apply(panelEvent(RFM_EV_BUTTON, id, down ? 1 : 0));
+    }
+    void mapAct(const rfm::MidiMapper::Act &a)
+    {
+        switch (a.kind) {
+        case rfm::MidiMapper::Act::Turn: {
+            const uint8_t id = dev->panel()->enc_id[a.index];
+            if (id < FM1P_NENC)
+                apply(panelEvent(RFM_EV_ENC, id, (int16_t)(a.value < -32767 ? -32767 : a.value > 32767 ? 32767 : a.value)));
+            break;
+        }
+        case rfm::MidiMapper::Act::Button: mapButton(a.index, a.value != 0); break;
+        case rfm::MidiMapper::Act::Master:
+            masterPot = -1;
+            apply(panelEvent(RFM_EV_MASTER, 0, (int16_t)a.value));
+            break;
+        case rfm::MidiMapper::Act::Pickup:
+            masterPot = (int16_t)a.value;
+            if (a.first)
+                pickupSeq++;
+            break;
+        default: break;
+        }
+    }
+
+    // the controller's messages (rfme_midi_in), before the next chunk
+    void controllerMidi()
+    {
+        for (CtlEvent c; ctlQ.pop(c);) {
+            if (c.toFirmware)
+                toFirmware(c.data, c.len);
+            else
+                hostMidi(c.data, c.len);
+        }
+    }
+
+    // one host MIDI message (Processor.cpp handleMidi + forwardMidi); M8: learn, then the learned map, first
     void hostMidi(const uint8_t *d, uint32_t n)
     {
         if (n == 0 || !(d[0] & 0x80))
             return;                                     // (counted when it came in: consume)
+        syncMap();
+        if (learnTake(d, n))
+            return;
+        rfm::MidiMapper::Act act;
+        if (mapper->feed(d, n, masterV, act)) {         // (a mapped source is always consumed)
+            midiMapped.fetch_add(1, std::memory_order_relaxed);
+            mapAct(act);
+            return;
+        }
         bool keyNote = false;
         if (notesPlayKeys.load(std::memory_order_relaxed) && d[0] < 0xF0) {
             const uint8_t st = d[0] & 0xF0, ch = d[0] & 0x0F;
@@ -368,15 +506,8 @@ struct rfme {
             }
             pushKeys();
         }
-        if (!keyNote || keyNotesToFw.load(std::memory_order_relaxed)) {
-            toUsbPackets(d, n, [this](uint32_t p) {
-                if (inW - inR < kInRing)
-                    inRing[inW++ % kInRing] = p;
-                else
-                    midiInDropped.fetch_add(1, std::memory_order_relaxed);
-            });
-            flushMidiIn();
-        }
+        if (!keyNote || keyNotesToFw.load(std::memory_order_relaxed))
+            toFirmware(d, n);
     }
 
     // ---- the between hook (the clock thread)
@@ -506,6 +637,8 @@ struct rfme {
         for (int b = 0; b < FM1P_NB; b++)
             p.btn_led[b] = level(h->btn_id[b]);
         p.play_green = h->led_play_green;
+        p.master_pot = masterPot;
+        p.pickup_seq = pickupSeq;
         p.seq = panelLast.seq;
         if (panelLast.seq != 0 && std::memcmp(&p, &panelLast, sizeof p) == 0)
             return;
@@ -523,6 +656,7 @@ struct rfme {
                 apply(ev);
         while (in.pop(ev))
             apply(ev);
+        syncMap();                                       // (M8: a new map lets go of what the old one held)
         devMs.store(ms, std::memory_order_relaxed);
         const bool keep = producing && midiOutOn.load(std::memory_order_relaxed);
         for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
@@ -632,6 +766,7 @@ struct rfme {
         Scope cs(this, RFME_CLOCK_TIMER);
         if (!cs.ok)
             return;
+        controllerMidi();
         if (timerRebase) {
             timerRebase = false;
             t0 = clk::now();
@@ -710,6 +845,7 @@ struct rfme {
         uint64_t pos = w;
         const uint64_t end = w + n;
         HostEvent he;
+        controllerMidi();                               // (M8: a controller's MIDI, at the chunk's start)
         while (pos < end) {
             while (hostQ.peek(he) && he.at <= pos) {
                 hostQ.pop(he);
@@ -895,6 +1031,11 @@ struct rfme {
         dev->boot_from(bytes && n ? bytes : nullptr, bytes ? n : 0);
         noteKeys = labels = matrixButtons = 0;
         resetMidi();
+        for (CtlEvent c; ctlQ.pop(c);) {                // (the clock stopped: this thread is the consumer now)
+        }
+        std::memset(learnNotes, 0, sizeof learnNotes);
+        mapper->release();                              // (the map kept; nothing it held is held now)
+        masterPot = -1;
         masterV = -1;
         pubValid = linkValid = false;
         lastPub = lastLinkPub = lastFlashCheck = lastStats = 0;
@@ -1078,6 +1219,43 @@ void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_
 
 void rfme_midi_out_enable(rfme_t *e, int on) { e->midiOutOn.store(on != 0); }
 
+int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
+{
+    if (!data || len == 0 || len > 3 || !(data[0] & 0x80) || data[0] == 0xF0 || data[0] == 0xF7)
+        return 0;
+    const CtlEvent c{(uint8_t)(to_firmware ? 1 : 0), (uint8_t)len,
+                     {data[0], len > 1 ? data[1] : (uint8_t)0, len > 2 ? data[2] : (uint8_t)0}};
+    bool ok;
+    {
+        std::lock_guard<std::mutex> g(e->ctlLock);
+        ok = e->ctlQ.push(c);
+    }
+    (ok ? e->midiInCount : e->midiInDropped).fetch_add(1, std::memory_order_relaxed);
+    return ok ? 1 : 0;
+}
+
+void rfme_set_midi_map(rfme_t *e, const rfme_map_entry_t *map, uint32_t n, float speed)
+{
+    rfm::MapTable &t = e->mapIn.back();
+    t.n = map ? (n < rfm::kMapMax ? n : rfm::kMapMax) : 0;
+    if (t.n)
+        std::memcpy(t.e, map, t.n * sizeof *map);
+    t.speed = speed;
+    e->mapIn.publish();
+}
+
+void rfme_learn(rfme_t *e, int armed) { e->learnArmed.store(armed != 0); }
+
+int rfme_learn_take(rfme_t *e, uint8_t msg[3])
+{
+    LearnMsg m;
+    if (!e->learnQ.pop(m))
+        return 0;
+    if (msg)
+        std::memcpy(msg, m.data, 3);
+    return 1;
+}
+
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt) { return e->midiOutTake(pkt, nullptr) ? 1 : 0; }
 
 int rfme_midi_out_take_at(rfme_t *e, uint32_t *pkt, uint32_t *offset) { return e->midiOutTake(pkt, offset) ? 1 : 0; }
@@ -1089,6 +1267,7 @@ void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
     double sum = 0;
     rfme::Scope cs(e, RFME_CLOCK_CALLER);
     if (cs.ok) {
+        e->controllerMidi();
         int16_t buf[2 * 256];
         for (uint32_t i = 0; i < ms; i++) {
             e->dev->run_ms();
@@ -1185,6 +1364,9 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->realtime = e->rtOk.load();
     st->workgroup = e->workgroup.joined() ? 1 : 0;
     st->workgroup_joins = e->workgroup.joins();
+    st->midi_mapped = e->midiMapped.load();
+    st->midi_learned = e->midiLearned.load();
+    st->midi_to_core = e->midiToCore.load();
 }
 
 void rfme_reset_render_stats(rfme_t *e)
@@ -1246,8 +1428,10 @@ uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out)
     if (out) {
         if (e->panelSeen)
             *out = *e->panelOut.front();
-        else
+        else {
             std::memset(out, 0, sizeof *out);
+            out->master_pot = -1;
+        }
         if (!e->booted)                                 // (unloaded since: nothing is lit)
             out->booted = 0;
     }

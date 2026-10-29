@@ -69,6 +69,7 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("../CWasm3/source"),
                 .headerSearchPath("\(vendorFM1)/engine"),
+                .headerSearchPath("\(vendorFM1)/plugin"),        // RemoteCandidates.h (RFMMidiMap.cpp)
                 .headerSearchPath("\(vendorFM1)/core-api"),
                 .headerSearchPath("\(vendorRFM)/host/include"),
                 .headerSearchPath("\(vendorRFM)/proto"),
