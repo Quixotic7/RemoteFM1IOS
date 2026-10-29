@@ -97,7 +97,7 @@ public final class RemoteController {
         if let session {
             session.finish()                    // (frees the link, then the lease, in the background)
         } else if let core {
-            let ref = CoreRef(p: core)
+            let ref = LinkRef(p: core)
             DispatchQueue.global(qos: .utility).async { rfmc_free(ref.p) }   // (a stop waits up to ~600 ms)
         }
     }
@@ -345,7 +345,7 @@ public final class RemoteController {
     }
 }
 
-private struct CoreRef: @unchecked Sendable { let p: OpaquePointer }
+private struct LinkRef: @unchecked Sendable { let p: OpaquePointer }
 
 #if canImport(CoreMIDI)
 /// A CoreMIDI client on the main thread that only listens: its setup notifications (a Bluetooth MIDI device

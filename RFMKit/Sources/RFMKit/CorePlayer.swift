@@ -5,7 +5,11 @@
 // the engine's timer thread (audio off: the FM-1 still plays the screen, no sound). Pattern mode stops the clock and
 // gives the link back to M1's test pattern.
 //
-// The flash: Documents/cores/<id>.bin. A boot reads it (none: a fresh flash); the clock copies the image every 30
+// M7: the catalog also lists imported .rfm1 firmware (Firmware.swift: FirmwareCatalog), keyed "rfm1:<sha256>"; such a
+// core runs in wasm3 (rfme_load_wasm) instead of a slot. `selected` is a catalog key; the app saves it as a CoreRef
+// (kind, id, version, SHA-256). A Wasm core that can't keep up gets a note (perfNote) rather than crackling silently.
+//
+// The flash: Documents/cores/<id>.bin (an imported firmware: rfm1-<id>.bin, shared by its versions). A boot reads it (none: a fresh flash); the clock copies the image every 30
 // device seconds when it changed, and this class writes the copy on a background queue. flash_sync and a save also
 // come with a core switch, Pattern mode, the app going to the background, and stop(). A firmware that reboots
 // itself (halted, exit code 0) is powered on again from its flash, as FM1VST does.
@@ -16,11 +20,126 @@ import Foundation
 import Observation
 import RFMCore
 
+/// one entry of the firmware catalog: a built-in core (kind "native", in slots) or an imported .rfm1 (kind "wasm")
 public struct CoreInfo: Sendable, Equatable, Identifiable {
+    /// the catalog key: a built-in core's id ("felucca"); an imported file's "rfm1:<sha256>" (FirmwareCatalog), so
+    /// an imported Felucca and the built-in one are separate entries
     public var id: String
     public var name = "", version = "", family = "", license = "", sourceURL = "", credits = "", gated = ""
     public var abi: UInt32 = 0, flashSize: UInt32 = 0
     public var slots = 0, inUse = 0, retired = 0
+    // M7
+    public var kind = "native"                  // "native" | "wasm"
+    public var coreID = ""                      // the firmware's own id ("" = id: a built-in core)
+    public var sha256 = "", path = "", fileName = ""   // an imported file: its hash, its mirrored path, its name
+    public var fileSize = 0
+
+    public var imported: Bool { kind == "wasm" }
+    /// the firmware's own id (a saved state's, the flash file's)
+    public var firmwareID: String { coreID.isEmpty ? id : coreID }
+    /// "Felucca 1.6.1", "Felucca 1.6.1 (imported)"
+    public var title: String { "\(name) \(version)" + (imported ? " (imported)" : "") }
+}
+
+/// (M7) whether a Wasm core keeps up: its core thread's time over the audio's in windows of ~2 s (from the status's
+/// totals); the note when it is over ~90 %, or 3 or more underruns in a window. Native cores: never a note
+public struct PerfGuard: Sendable {
+    private var window: (at: Date, ticks: Double, frames: UInt64, underruns: UInt32)?
+    public private(set) var load = 0.0          // the last window's (0..1+)
+    public private(set) var note = ""
+    public init() {}
+
+    public mutating func update(_ s: CoreStatus, name: String, now: Date = Date()) -> String {
+        guard s.kind == "wasm", s.booted, s.coreWakes > 0, s.rate > 0 else {
+            window = nil
+            note = ""
+            return note
+        }
+        let ticks = Double(s.coreAvgUs) * Double(s.coreWakes)
+        guard let w = window, s.coreFrames >= w.frames, ticks >= w.ticks else {
+            window = (now, ticks, s.coreFrames, s.underruns)      // (the first, or the stats were reset)
+            return note
+        }
+        guard now.timeIntervalSince(w.at) >= 2 else { return note }
+        let audioUs = Double(s.coreFrames - w.frames) / s.rate * 1e6
+        load = audioUs > 0 ? (ticks - w.ticks) / audioUs : 0
+        let under = s.underruns >= w.underruns ? s.underruns - w.underruns : 0
+        window = (now, ticks, s.coreFrames, s.underruns)
+        note = Self.note(load: load, underruns: under, name: name)
+        return note
+    }
+
+    /// the note for a Wasm core's load (0..1+) and its underruns in the last window; "" when it keeps up
+    public static func note(load: Double, underruns: UInt32, name: String) -> String {
+        guard load > 0.9 || underruns >= 3 else { return "" }
+        return String(format: "%@ is too heavy for this device (%.0f%% of the audio time%@): expect crackles. A "
+                      + "built-in core, or fewer instances, plays cleanly.", name, load * 100,
+                      underruns > 0 ? ", \(underruns) dropouts" : "")
+    }
+}
+
+/// A saved choice of firmware (the app's selection, an AU state: RFM1-FORMAT.md section 7 step 5): its kind, id,
+/// version and, for an imported file, its SHA-256. resolve finds it in a catalog: the same file; else the same id
+/// and kind (another version or build, with a note); else the same id of the other kind (a note); else the first
+/// core (a note; the saved flash is not for it)
+public struct CoreRef: Codable, Equatable, Sendable {
+    public var kind: String
+    public var id: String
+    public var version: String
+    public var sha256: String
+
+    public init(kind: String = "native", id: String, version: String = "", sha256: String = "") {
+        self.kind = kind.isEmpty ? "native" : kind
+        self.id = id
+        self.version = version
+        self.sha256 = sha256
+    }
+
+    public init(_ c: CoreInfo) { self.init(kind: c.kind, id: c.firmwareID, version: c.version, sha256: c.sha256) }
+
+    public struct Resolved: Equatable, Sendable {
+        public var key: String
+        public var note: String                 // "" when it is the same firmware file / core
+        public var keepFlash: Bool              // the saved flash is this firmware's (its id)
+    }
+
+    public func resolve(in cores: [CoreInfo]) -> Resolved? {
+        let name = { (c: CoreInfo) in c.name.isEmpty ? c.firmwareID : c.name }
+        if kind == "wasm" {
+            if let c = cores.first(where: { $0.imported && $0.sha256 == sha256 }) { return Resolved(key: c.id, note: "", keepFlash: true) }
+            let same = cores.filter { $0.imported && $0.firmwareID == id }
+            if let c = same.first(where: { $0.version == version }) ?? same.max(by: { Self.older($0.version, $1.version) }) {
+                let note = c.version == version ? "\(name(c)) \(version): another build of the file (\(c.sha256.prefix(8)))"
+                    : "\(name(c)) \(c.version) instead of \(version)"
+                return Resolved(key: c.id, note: note, keepFlash: true)
+            }
+            if let c = cores.first(where: { !$0.imported && $0.firmwareID == id }) {
+                return Resolved(key: c.id, note: "\(name(c)) \(version) (imported) is not here: the built-in \(name(c)) \(c.version) instead",
+                                keepFlash: true)
+            }
+        } else {
+            if let c = cores.first(where: { !$0.imported && $0.id == id }) { return Resolved(key: c.id, note: "", keepFlash: true) }
+            let same = cores.filter { $0.imported && $0.firmwareID == id }
+            if let c = same.first(where: { $0.version == version }) ?? same.max(by: { Self.older($0.version, $1.version) }) {
+                return Resolved(key: c.id, note: "\(id) is not in this build: \(name(c)) \(c.version) (imported) instead",
+                                keepFlash: true)
+            }
+        }
+        guard let first = CorePlayer.pick(nil, in: cores) else { return nil }
+        return Resolved(key: first, note: CorePlayer.missingNote(kind == "wasm" ? "\(id) \(version) (imported)" : id, first, cores),
+                        keepFlash: false)
+    }
+
+    /// version a before b ("1.6.1" < "1.6.10")
+    static func older(_ a: String, _ b: String) -> Bool { a.compare(b, options: .numeric) == .orderedAscending }
+
+    // ---- UserDefaults / plist form
+    public var dict: [String: String] { ["kind": kind, "id": id, "version": version, "sha256": sha256] }
+    public init?(_ d: [String: Any]?) {
+        guard let d, let id = d["id"] as? String, !id.isEmpty else { return nil }
+        self.init(kind: d["kind"] as? String ?? "native", id: id, version: d["version"] as? String ?? "",
+                  sha256: d["sha256"] as? String ?? "")
+    }
 }
 
 public struct CoreStatus: Sendable, Equatable {
@@ -43,6 +162,8 @@ public struct CoreStatus: Sendable, Equatable {
     public var coreWakes: UInt64 = 0, coreAvgUs: UInt32 = 0, coreMaxUs: UInt32 = 0, coreLoadPct: UInt32 = 0
     public var frameMaxUs: UInt32 = 0
     public var realtime = false, workgroup = false
+    public var kind = ""                // "native", "wasm" (M7)
+    public var coreFrames: UInt64 = 0
 
     /// the render-ahead latency in ms (0: no render yet)
     public var latencyMs: Double { rate > 0 ? Double(latencyFrames) / rate * 1000 : 0 }
@@ -100,9 +221,11 @@ public final class CorePlayer {
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
 
-    /// slotsDir: where the slot frameworks are (nil: the app's Frameworks). selected: the core to start with (a saved
-    /// choice); nil, or one this build doesn't have: the first of `order` that it has
-    public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil) {
+    /// slotsDir: where the slot frameworks are (nil: the app's Frameworks). selected: the core to start with (a catalog
+    /// key); nil, or one this build doesn't have: the first of `order` that it has. ref: a saved choice (CoreRef),
+    /// resolved in the catalog (the same file, else the same firmware with a note), before `selected`
+    public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil,
+                ref: CoreRef? = nil) {
         self.link = link
         self.selected = selected ?? ""
         self.flashDir = flashDir ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -111,7 +234,11 @@ public final class CorePlayer {
         e = rfme_new(link?.core)
         rfms_scan(slotsDir)
         rescan()
-        if let pick = Self.pick(selected, in: cores) {
+        if let ref, selected == nil, let r = ref.resolve(in: cores) {
+            self.selected = r.key
+            fallbackNote = r.note
+            message = r.note
+        } else if let pick = Self.pick(selected, in: cores) {
             self.selected = pick
             if let selected, pick != selected { fallbackNote = Self.missingNote(selected, pick, cores) }
             message = fallbackNote
@@ -123,10 +250,11 @@ public final class CorePlayer {
     /// the cores' order in the picker and for a default: the first of these this build has
     public nonisolated static let order = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk", "loom"]
 
-    /// `preferred` if `cores` has it, else the first of `cores` (sorted by `order`); nil when there are none
+    /// `preferred` if `cores` has it, else the first of `cores` (sorted by `order`; built-in cores first); nil when
+    /// there are none
     public nonisolated static func pick(_ preferred: String?, in cores: [CoreInfo]) -> String? {
         if let preferred, cores.contains(where: { $0.id == preferred }) { return preferred }
-        return cores.first?.id
+        return (cores.first { !$0.imported } ?? cores.first)?.id
     }
 
     /// the status line for a core this build doesn't have
@@ -141,6 +269,23 @@ public final class CorePlayer {
     }
 
     public var current: CoreInfo? { cores.first { $0.id == selected } }
+
+    /// the selection as saved (kind, id, version, SHA-256)
+    public var selectedRef: CoreRef? { current.map(CoreRef.init) }
+
+    /// the catalog read again (the app's firmware folder changed: an import, a delete). A selection that went away
+    /// while nothing runs falls back to the first core
+    public func catalogChanged() {
+        rescan()
+        if !cores.contains(where: { $0.id == selected }), bootedID == nil, let p = Self.pick(nil, in: cores) {
+            selected = p
+        }
+    }
+
+    /// (M7) the Wasm core can't keep up: its core thread over ~90 % of the audio time, or underruns piling up; ""
+    /// otherwise
+    public private(set) var perfNote = ""
+    @ObservationIgnored private var perf = PerfGuard()
 
     // MARK: control
 
@@ -230,8 +375,10 @@ public final class CorePlayer {
     private func bootSelected() -> Bool {
         if bootedID == selected { return true }
         footprintBefore = rfmp_footprint()
-        var err = [CChar](repeating: 0, count: 256)
-        guard rfme_load(e, selected, &err, 256) != 0 else {
+        var err = [CChar](repeating: 0, count: 512)
+        let info = current
+        let loaded = info?.imported == true ? rfme_load_wasm(e, info!.path, &err, 512) : rfme_load(e, selected, &err, 512)
+        guard loaded != 0 else {
             message = Self.string(err)
             log.error("load \(self.selected, privacy: .public): \(self.message, privacy: .public)")
             return false
@@ -359,7 +506,13 @@ public final class CorePlayer {
         await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in io.async { k.resume() } }
     }
 
-    public func flashURL(_ id: String) -> URL { flashDir.appendingPathComponent("\(id).bin") }
+    /// the flash file of a catalog key: <id>.bin, an imported firmware's rfm1-<its id>.bin
+    public func flashURL(_ key: String) -> URL {
+        if let c = cores.first(where: { $0.id == key }), c.imported {
+            return flashDir.appendingPathComponent("rfm1-\(c.firmwareID).bin")
+        }
+        return flashDir.appendingPathComponent("\(key).bin")
+    }
 
     private func startPolling() {
         poller = Task { [weak self] in
@@ -373,6 +526,7 @@ public final class CorePlayer {
     public func refresh() {
         let s = Self.status(e)
         if s != status { status = s }
+        updatePerf(s)
         let seq = rgba.withUnsafeMutableBufferPointer { rfme_preview(e, previewSeq, $0.baseAddress) }
         if seq != previewSeq, seq != 0 {
             previewSeq = seq
@@ -387,13 +541,20 @@ public final class CorePlayer {
         if list != cores { cores = list }
     }
 
-    /// the cores the slot loader found (rfms_scan), in `order`
+    /// the Wasm core's load over the last ~2 s (perfNote)
+    private func updatePerf(_ s: CoreStatus) {
+        let note = perf.update(s, name: current?.name ?? s.coreID)
+        if note != perfNote { perfNote = note }
+    }
+
+    /// the cores the slot loader found (rfms_scan), in `order`, then the imported firmware (FirmwareCatalog)
     nonisolated static func catalog() -> [CoreInfo] {
         var list: [CoreInfo] = []
         for i in 0..<rfms_count() {
             var r = rfms_info_t()
             guard rfms_info(i, &r) != 0 else { continue }
             var c = CoreInfo(id: Self.string(r.id))
+            c.coreID = c.id
             c.name = Self.string(r.name)
             c.version = Self.string(r.version)
             c.family = Self.string(r.family)
@@ -410,7 +571,7 @@ public final class CorePlayer {
         }
         let order = Self.order
         list.sort { (order.firstIndex(of: $0.id) ?? 99, $0.id) < (order.firstIndex(of: $1.id) ?? 99, $1.id) }
-        return list
+        return list + FirmwareCatalog.shared.cores()
     }
 
     // MARK: conversions
@@ -458,6 +619,8 @@ public final class CorePlayer {
         s.frameMaxUs = r.frame_max_us
         s.realtime = r.realtime != 0
         s.workgroup = r.workgroup != 0
+        s.kind = string(r.kind)
+        s.coreFrames = r.core_frames
         return s
     }
 

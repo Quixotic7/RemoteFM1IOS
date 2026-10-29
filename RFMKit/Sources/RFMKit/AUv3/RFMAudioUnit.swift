@@ -16,6 +16,9 @@
 //   the panel    a RemoteLink of its own (CoreMIDI, or on the simulator the process-wide shared fake unit) run only
 //                while this instance holds the lease (PanelSession)
 //   halted       exit code 0 (0x100): powered on again from its flash; otherwise it stays halted (restartCore())
+//   M7           imported .rfm1 firmware too (the app's mirror in the App Group: FirmwareCatalog), run in wasm3; the
+//                catalog keys (CoreInfo.id) pick a core; fullState keeps its kind and SHA-256 and a restore resolves
+//                them (CoreRef.resolve: the same file, else the same firmware with a note, else as before)
 //
 // It lives in RFMKit, not in the extension, so the Mac tests can create and render it directly.
 
@@ -55,7 +58,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     private let ctl = NSLock()                  // the core: load, boot, power cycle, flash, settings
     let pvLock = NSLock()                       // the preview (rfme_preview has one reader at a time)
     private var instanceState = InstanceState()
-    private var coreID: String?
+    private var coreID: String?                 // the catalog key of the core asked for (CoreInfo.id)
+    private var coreInfo: CoreInfo?             // its entry when it was loaded
     private var coreError = ""
     private var coreNote = ""                   // a core asked for that this build doesn't have
     private var unrestored: CoreState?          // a restored state whose core is missing here: saved back as it was
@@ -250,15 +254,22 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
                 ctl.withLock {
                     settings_ = c.settings
                     applySettingsLocked()
-                    var info = rfms_info_t()
-                    let have = rfms_find(c.core, &info) != 0
-                    let ver = RemoteController.string(info.version)
-                    if have && !c.version.isEmpty && ver != c.version {
-                        log.info("restore: \(c.core, privacy: .public) \(c.version, privacy: .public) saved, \(ver, privacy: .public) here: booting from the saved flash anyway")
+                    let cores = CorePlayer.catalog()
+                    guard let r = c.ref.resolve(in: cores) else {
+                        coreError = "no firmware in this build"
+                        unrestored = c
+                        return
                     }
-                    _ = loadLocked(c.core, flash: c.flash, from: c.flash == nil ? "a fresh flash (none saved)" : "the saved flash")
-                    unrestored = have ? nil : c
-                    if !have && !coreNote.isEmpty { coreNote += " (the saved state is kept)" }
+                    if let i = cores.first(where: { $0.id == r.key }), r.keepFlash, !c.version.isEmpty, i.version != c.version {
+                        log.info("restore: \(c.core, privacy: .public) \(c.version, privacy: .public) saved, \(i.version, privacy: .public) here: booting from the saved flash anyway")
+                    }
+                    let flash = r.keepFlash ? c.flash : nil
+                    _ = loadLocked(r.key, flash: flash, from: !r.keepFlash ? "a fresh flash"
+                                   : flash == nil ? "a fresh flash (none saved)" : "the saved flash")
+                    coreNote = r.note
+                    unrestored = r.keepFlash ? nil : c
+                    if !r.keepFlash && !coreNote.isEmpty { coreNote += " (the saved state is kept)" }
+                    log.info("restore: \(c.kind, privacy: .public) \(c.core, privacy: .public) \(c.version, privacy: .public) \(c.sha256.prefix(12), privacy: .public) -> \(r.key, privacy: .public)\(r.note.isEmpty ? "" : ": " + r.note, privacy: .public)")
                 }
             }
             let id = session?.restore(restored.instance) ?? restored.instance
@@ -283,11 +294,11 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     /// the cores this instance can pick
     public var cores: [CoreInfo] { CorePlayer.catalog() }
 
-    /// loads `id` with a fresh flash (the old core's flash is not kept: the host's project holds an instance's flash)
+    /// loads the catalog key `id` with a fresh flash (the old core's flash is not kept: the host's project holds an
+    /// instance's flash)
     public func selectCore(_ id: String) {
         ctl.withLock {
-            var info = rfms_info_t()
-            guard rfms_find(id, &info) != 0 else {
+            guard CorePlayer.catalog().contains(where: { $0.id == id }) else {
                 coreNote = "\(id) is not in this build"
                 return
             }
@@ -326,20 +337,21 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     /// (ctl held) the core loaded into a free slot and booted; the clock given back to its owner
     private func loadLocked(_ wanted: String, flash wantedFlash: Data?, from wantedFrom: String) -> Bool {
         var id = wanted, flash = wantedFlash, from = wantedFrom
-        var info = rfms_info_t()
         coreNote = ""
-        if rfms_find(wanted, &info) == 0 {
-            let cores = CorePlayer.catalog()
-            if let use = CorePlayer.pick(nil, in: cores) {     // (another core's flash means nothing to this one)
-                coreNote = CorePlayer.missingNote(wanted, use, cores)
-                log.error("load \(wanted, privacy: .public): not in this build, \(use, privacy: .public) instead")
-                id = use
-                flash = nil
-                from = "a fresh flash"
-            }
+        let cores = CorePlayer.catalog()
+        var info = cores.first { $0.id == wanted }
+        if info == nil, let use = CorePlayer.pick(nil, in: cores) {     // (another core's flash means nothing to this one)
+            coreNote = CorePlayer.missingNote(wanted, use, cores)
+            log.error("load \(wanted, privacy: .public): not in this build, \(use, privacy: .public) instead")
+            id = use
+            info = cores.first { $0.id == use }
+            flash = nil
+            from = "a fresh flash"
         }
-        var err = [CChar](repeating: 0, count: 256)
-        guard rfme_load(e, id, &err, 256) != 0 else {
+        coreInfo = info
+        var err = [CChar](repeating: 0, count: 512)
+        let loaded = info?.imported == true ? rfme_load_wasm(e, info!.path, &err, 512) : rfme_load(e, id, &err, 512)
+        guard loaded != 0 else {
             coreError = CorePlayer.string(err)
             coreID = id
             log.error("load \(id, privacy: .public): \(self.coreError, privacy: .public)")
@@ -369,8 +381,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             }
             let s = CorePlayer.status(e)
             guard let id = coreID, s.booted else { return nil }
-            var info = rfms_info_t()
-            _ = rfms_find(id, &info)
+            let info = coreInfo ?? CoreInfo(id: id)
             var buf = [UInt8](repeating: 0, count: Int(rfme_flash_size(e)))
             var got = false
             let clock = rfme_clock(e)
@@ -385,8 +396,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             if !got && !buf.isEmpty {
                 got = buf.withUnsafeMutableBufferPointer { rfme_final_flash(e, $0.baseAddress, UInt32($0.count)) } != 0
             }
-            return CoreState(core: id, version: RemoteController.string(info.version), flash: got ? Data(buf) : nil,
-                             settings: settings_)
+            return CoreState(core: info.firmwareID, version: info.version, flash: got ? Data(buf) : nil,
+                             settings: settings_, kind: info.kind, sha256: info.sha256)
         }
     }
 
@@ -395,6 +406,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     public struct Status: Sendable {
         public var instance = ""
         public var coreID = "", coreName = "", coreVersion = "", coreError = "", coreNote = "", bootedFrom = ""
+        public var coreKey = "", coreKind = ""  // (M7) the catalog key; "native" | "wasm"
+        public var coreInfo: CoreInfo?
         public var core = CoreStatus()
         public var panel: PanelStatus?
         public var settings = AUSettings()
@@ -409,7 +422,12 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         var s = Status()
         s.instance = state.short
         ctl.withLock {
-            s.coreID = coreID ?? ""
+            s.coreKey = coreID ?? ""
+            s.coreID = coreInfo?.firmwareID ?? coreID ?? ""
+            s.coreInfo = coreInfo
+            s.coreKind = coreInfo?.kind ?? ""
+            s.coreName = coreInfo?.name ?? ""
+            s.coreVersion = coreInfo?.version ?? ""
             s.coreError = coreError
             s.coreNote = coreNote
             s.bootedFrom = bootedFrom
@@ -417,11 +435,6 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             s.powerCycles = powerCycles
         }
         s.core = CorePlayer.status(e)
-        var info = rfms_info_t()
-        if !s.coreID.isEmpty, rfms_find(s.coreID, &info) != 0 {
-            s.coreName = RemoteController.string(info.name)
-            s.coreVersion = RemoteController.string(info.version)
-        }
         s.panel = session?.status()
         var k = rfmk_stats_t()
         rfmk_stats(kernel, &k)
@@ -491,9 +504,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     private func updateName() {
         guard let session else { return }
         let ctx = (contextName?.isEmpty == false ? contextName : nil) ?? ProcessInfo.processInfo.processName
-        let id = ctl.withLock { coreID }
-        var info = rfms_info_t()
-        let core = id.flatMap { rfms_find($0, &info) != 0 ? RemoteController.string(info.name) : $0 } ?? "no core"
+        let core = ctl.withLock { coreInfo?.name ?? coreID } ?? "no core"
         let name = "\(ctx) / \(core)"
         guard name != lastName else { return }
         lastName = name
@@ -649,6 +660,7 @@ public struct AUReport: Codable, Sendable {
     public var instance = "", fakeLabel = "", backend = ""
     public var pid = Int(getpid())
     public var core = "", coreName = "", coreVersion = "", coreError = "", coreNote = "", bootedFrom = ""
+    public var coreKey = "", kind = "", coreLoadPct = 0
     public var slot = 0, booted = false, halted = false, clock = 0, powerCycles = 0
     public var renders: UInt64 = 0, sounding: UInt64 = 0, renderAvgUs = 0, renderMaxUs = 0, renderFrames = 0
     public var rate = 0.0, renderLoadPct = 0.0, levelRMS = 0.0
@@ -676,6 +688,9 @@ public struct AUReport: Codable, Sendable {
         coreError = s.coreError
         coreNote = s.coreNote
         bootedFrom = s.bootedFrom
+        coreKey = s.coreKey
+        kind = s.coreKind
+        coreLoadPct = Int(s.core.coreLoadPct)
         slot = s.core.slot
         booted = s.core.booted
         halted = s.core.halted

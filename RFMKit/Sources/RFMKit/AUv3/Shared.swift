@@ -123,7 +123,9 @@ public struct AUSettings: Equatable, Sendable {
 
 /// The core part of the AU's fullState (M4): which firmware, its version, its flash image (LZFSE-compressed; taken
 /// after flash_sync) and the instance's settings. Restoring boots the core from this flash, also when the version
-/// changed (as FM1VST does). No flash: a fresh one.
+/// changed (as FM1VST does). No flash: a fresh one. M7: also its kind ("native", or "wasm": an imported .rfm1) and the
+/// file's SHA-256 (RFM1-FORMAT.md section 7 step 5); `core` stays the firmware's own id. A state from before M7 has
+/// neither: a built-in core.
 public struct CoreState: Equatable, Sendable {
     public static let coreKey = "rfm1.core"
     public static let versionKey = "rfm1.coreVersion"
@@ -131,18 +133,28 @@ public struct CoreState: Equatable, Sendable {
     public static let flashSizeKey = "rfm1.flashSize"
     public static let flashCodecKey = "rfm1.flashCodec"
     public static let settingsKey = "rfm1.settings"
+    public static let kindKey = "rfm1.coreKind"
+    public static let sha256Key = "rfm1.coreSHA256"
 
     public var core: String
     public var version: String
     public var flash: Data?                     // the image, uncompressed
     public var settings: AUSettings
+    public var kind: String                     // "native" | "wasm"
+    public var sha256: String                   // an imported file's ("" for a built-in core)
 
-    public init(core: String, version: String, flash: Data?, settings: AUSettings = AUSettings()) {
+    public init(core: String, version: String, flash: Data?, settings: AUSettings = AUSettings(), kind: String = "native",
+                sha256: String = "") {
         self.core = core
         self.version = version
         self.flash = flash
         self.settings = settings
+        self.kind = kind
+        self.sha256 = sha256
     }
+
+    /// the firmware this state names, for CoreRef.resolve
+    public var ref: CoreRef { CoreRef(kind: kind, id: core, version: version, sha256: sha256) }
 
     /// nil: no core in the dictionary (a state from M2, or a new instance)
     public init?(_ dict: [String: Any]?) {
@@ -150,6 +162,8 @@ public struct CoreState: Equatable, Sendable {
         core = c
         version = d[Self.versionKey] as? String ?? ""
         settings = AUSettings(d[Self.settingsKey] as? [String: Any])
+        kind = d[Self.kindKey] as? String ?? "native"
+        sha256 = d[Self.sha256Key] as? String ?? ""
         flash = nil
         if let z = d[Self.flashKey] as? Data {
             let n = (d[Self.flashSizeKey] as? NSNumber)?.intValue ?? 0
@@ -165,6 +179,8 @@ public struct CoreState: Equatable, Sendable {
         d[Self.coreKey] = core
         d[Self.versionKey] = version
         d[Self.settingsKey] = settings.dict
+        d[Self.kindKey] = kind
+        if !sha256.isEmpty { d[Self.sha256Key] = sha256 }
         if let flash {
             if let z = try? (flash as NSData).compressed(using: .lzfse) as Data {
                 d[Self.flashKey] = z
