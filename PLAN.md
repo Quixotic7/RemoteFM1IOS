@@ -1,6 +1,7 @@
 # RemoteFM1 for iOS (plan)
 
-Status (2026-10-27): M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
+Status (2026-10-28): on the owner's iPhone: M1 passed (Bluetooth, FM-1 7938); the store build (FIZZ, Saadet, Boardwalk,
+LOOM-8) on TestFlight (build 4); USB audio through the FM-1 clean with render ahead (section 9). Earlier: M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
 On the simulator, with the fake unit: the app sends the test pattern and shows panel events; ChoralRoot, Felucca
 and Melodee run in the standalone app and in the AUv3, and make sound; AU instances keep their core and flash in
 `fullState`, and share one FM-1 through the lease (section 4: takeover both ways, reconnect after a reload, between
@@ -260,6 +261,9 @@ Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, ch
   48 kHz, 512-frame renders): the callback went from 71–962 µs average (FIZZ; max 3.2 ms) to 3–4 µs (max 12 µs),
   0 underruns; on the Mac, a frame() made 3 ms slower every 15 ms gives 0 underruns in 10 s of 128-frame callbacks,
   12 ms slower gives counted underruns. A host's offline render (`renderingOffline`) waits for the core thread.
+  On the owner's iPhone 13 Pro Max (2026-10-28) it ended the dropouts heard through the FM-1 as a USB sound card
+  ("works, drops, works" before; clean after). Measured on the Mac first (`spikes/usb-audio`): the FM-1's USB audio
+  out doesn't drop with screen traffic at any rate; a late render reproduces the dropouts.
 - Each Wasm instance has its own memory, so .rfm1 cores need no slots and have no 4-instance cap.
 - Porting was small: Felucca built unchanged, ChoralRoot with one stand-in header (`<os/lock.h>`).
 - The format must fix: flat exported entry points (a host can't call wasm32 function-table pointers), wasm32 struct
