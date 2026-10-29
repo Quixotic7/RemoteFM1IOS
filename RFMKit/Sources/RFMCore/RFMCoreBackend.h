@@ -33,6 +33,8 @@
 
 #include "fm1core.h"
 
+struct rfme;                                // the engine (include/RFMEngine.h's rfme_t)
+
 namespace rfm {
 
 class SlotLoader;
@@ -105,6 +107,10 @@ using CoreFactory = std::function<std::unique_ptr<CoreBackend>(std::string *err)
 
 // a native core in a slot of `id` (the slot loader's first free one)
 CoreFactory nativeCoreFactory(const std::string &id);
+
+// rfme_load with any backend (the control thread): the clock stopped, the old core unloaded, `factory` kept for power
+// cycles, the clock given back (rfme_boot next). false: the factory failed (err)
+bool engineLoad(::rfme *e, CoreFactory factory, std::string *err);
 
 // (tests) a backend that forwards to `inner` and makes every frame() take at least `stall_us` longer: a busy wait,
 // as an interpreted firmware's screen redraw costs the core thread CPU time

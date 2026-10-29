@@ -191,7 +191,8 @@ struct rfme {
     // into the ring; RFME_CLOCK_TIMER: the wall clock, the sound dropped). The control thread calls into the core
     // only with the clock stopped (stop / resume); RFME_CLOCK_CALLER is the caller's thread. Its waits are all
     // bounded (the semaphore with a timeout), so stop and rfme_free never wait for more than one chunk.
-    std::thread thread;
+    pthread_t thread{};
+    bool threadStarted = false;             // (the control thread's)
     std::atomic<bool> quit{false};
     rfm::Semaphore wake;                    // the audio callback (and resume) -> the core thread
     rfm::Semaphore produced;                // the core thread -> an offline render waiting for frames
@@ -568,11 +569,29 @@ struct rfme {
     }
 
     // ---- the core thread
+    // (a pthread for its stack size: an interpreted core recurses on the native stack, and std::thread's is 512 KiB)
+    static constexpr size_t kStack = 4u << 20;
     void startThread()
     {
-        if (thread.joinable())
+        if (threadStarted)
             return;
-        thread = std::thread([this] { coreLoop(); });
+        pthread_attr_t a;
+        pthread_attr_init(&a);
+        pthread_attr_setstacksize(&a, kStack);
+        threadStarted = pthread_create(&thread, &a, [](void *p) -> void * {
+            static_cast<rfme *>(p)->coreLoop();
+            return nullptr;
+        }, this) == 0;
+        pthread_attr_destroy(&a);
+    }
+    void joinThread()
+    {
+        if (!threadStarted)
+            return;
+        quit.store(true, std::memory_order_release);
+        wake.signal();
+        pthread_join(thread, nullptr);                  // (its waits are bounded: at most ~50 ms)
+        threadStarted = false;
     }
 
     void coreLoop()
@@ -808,7 +827,7 @@ struct rfme {
         if (off && live)
             waitFor([&] { return posW.load(std::memory_order_acquire) - r >= n; });
         const uint64_t avail = posW.load(std::memory_order_acquire) - r;
-        if (avail < fillMin.load(std::memory_order_relaxed))
+        if (live && avail < fillMin.load(std::memory_order_relaxed))   // (a stopped clock drains it: not counted)
             fillMin.store((uint32_t)avail, std::memory_order_relaxed);
         const uint32_t k = avail < n ? (uint32_t)avail : n;
         const uint32_t i = (uint32_t)(r & (kRingFrames - 1));
@@ -897,6 +916,22 @@ struct rfme {
     }
 };
 
+namespace rfm {
+
+bool engineLoad(rfme_t *e, CoreFactory factory, std::string *err)
+{
+    const int prev = e->stop();
+    e->unloadStopped();
+    e->factory = std::move(factory);
+    const bool ok = e->makeStopped(err);
+    if (!ok)
+        e->factory = nullptr;
+    e->resume(prev, true);
+    return ok;
+}
+
+} // namespace rfm
+
 extern "C" {
 
 rfme_t *rfme_new(rfmc_t *link)
@@ -914,28 +949,18 @@ void rfme_free(rfme_t *e)
     e->stop();
     if (e->attached.exchange(false) && e->owner)
         rfmc_set_external(e->owner, 0);
-    e->quit.store(true, std::memory_order_release);
-    e->wake.signal();
-    if (e->thread.joinable())
-        e->thread.join();                               // (its waits are bounded: at most ~50 ms)
+    e->joinThread();
     e->unloadStopped();
     delete e;
 }
 
 int rfme_load(rfme_t *e, const char *core_id, char *err, uint32_t n)
 {
-    const int prev = e->stop();
-    e->unloadStopped();
     std::string msg;
-    e->factory = rfm::nativeCoreFactory(core_id ? core_id : "");
-    if (!e->makeStopped(&msg)) {
-        e->factory = nullptr;
-        putErr(err, n, msg);
-        e->resume(prev, true);
-        return 0;
-    }
-    e->resume(prev, true);
-    return 1;
+    if (rfm::engineLoad(e, rfm::nativeCoreFactory(core_id ? core_id : ""), &msg))
+        return 1;
+    putErr(err, n, msg);
+    return 0;
 }
 
 int rfme_boot(rfme_t *e, const uint8_t *flash, uint32_t n)
