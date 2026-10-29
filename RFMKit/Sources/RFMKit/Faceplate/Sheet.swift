@@ -4,6 +4,8 @@
 // that comes down from the top over a dimmed faceplate, its header, section titles, the Sound source cards, the
 // View tiles, the theme swatches, the list rows and a sub-page with a back button. The app and the AUv3 put their
 // own items in it. It is drawn in the view itself (no SwiftUI .sheet: that crashed inside the extension, M2).
+// M8: a segmented row (Knob speed), a stepper row (Transpose, MIDI octave), a status line with a dot (the OMX-27), a
+// back title for pages under pages (MIDI input), and a first scroll position (screenshots).
 
 #if os(iOS)
 import SwiftUI
@@ -374,14 +376,164 @@ public struct SheetToggle: View {
     }
 }
 
+/// (M8) 0..1, 1.2 times a second (panel.js's pulse: MIDI learn, a busy status); 1 with Reduce Motion
+struct Pulse<Content: View>: View {
+    let on: Bool
+    @ViewBuilder let content: (Double) -> Content
+    @Environment(\.accessibilityReduceMotion) private var still
+
+    var body: some View {
+        if on && !still {
+            TimelineView(.animation(minimumInterval: 1 / 30)) { ctx in
+                content(0.5 + 0.5 * sin(ctx.date.timeIntervalSinceReferenceDate * 2 * .pi * 1.2))
+            }
+        } else {
+            content(1)
+        }
+    }
+}
+
+/// (M8) a row with a segmented choice on its right (Knob speed: ½× 1× 2×)
+public struct SheetSegmented: View {
+    let title: String
+    let options: [String]
+    let selected: Int
+    var divider = true
+    let pick: (Int) -> Void
+
+    public init(_ title: String, options: [String], selected: Int, divider: Bool = true, pick: @escaping (Int) -> Void) {
+        self.title = title
+        self.options = options
+        self.selected = selected
+        self.divider = divider
+        self.pick = pick
+    }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 0) {
+                ForEach(Array(options.enumerated()), id: \.offset) { i, o in
+                    let on = i == selected
+                    Button { pick(i) } label: {
+                        Text(o).font(RFMFonts.ui(13, on ? 700 : 600))
+                            .foregroundStyle(on ? Palette.sheetBackground : Palette.sheetText)
+                            .frame(minWidth: 44).frame(height: 30)
+                            .background(Capsule().fill(on ? Palette.sheetAccent : .clear))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(title) \(o)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(3)
+            .background(Capsule().fill(Palette.sheetRaised))
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
+    }
+}
+
+/// (M8) a row with a − value + stepper (Transpose, MIDI octave)
+public struct SheetStepper: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let text: (Int) -> String
+    var divider = true
+
+    public init(_ title: String, value: Binding<Int>, in range: ClosedRange<Int>, divider: Bool = true,
+                text: @escaping (Int) -> String = { "\($0 > 0 ? "+" : "")\($0)" }) {
+        self.title = title
+        _value = value
+        self.range = range
+        self.text = text
+        self.divider = divider
+    }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(text(value)).font(RFMFonts.ui(15, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(1)
+                .monospacedDigit()
+            HStack(spacing: 0) {
+                step("minus", -1)
+                Palette.sheetLine.frame(width: 1, height: 18)
+                step("plus", 1)
+            }
+            .background(Capsule().fill(Palette.sheetRaised))
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(text(value))
+        .accessibilityAdjustableAction { d in move(d == .increment ? 1 : -1) }
+    }
+
+    private func move(_ d: Int) { value = max(range.lowerBound, min(range.upperBound, value + d)) }
+
+    private func step(_ icon: String, _ d: Int) -> some View {
+        let can = range.contains(value + d)
+        return Button { move(d) } label: {
+            Image(systemName: icon).font(.system(size: 13, weight: .bold))
+                .foregroundStyle(can ? Palette.sheetText : Palette.sheetDim)
+                .frame(width: 44, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!can)
+    }
+}
+
+/// (M8) a status line: a coloured dot and its text (the OMX-27's)
+public struct SheetStatus: View {
+    let text: String
+    let dot: Color
+    var pulsing = false
+    var color = Palette.sheetMuted
+
+    public init(_ text: String, dot: Color, pulsing: Bool = false, color: Color = Palette.sheetMuted) {
+        self.text = text
+        self.dot = dot
+        self.pulsing = pulsing
+        self.color = color
+    }
+
+    public var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Pulse(on: pulsing) { p in
+                Circle().fill(dot).frame(width: 8, height: 8).opacity(pulsing ? 0.35 + 0.65 * p : 1)
+            }
+            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+            Text(text).font(RFMFonts.ui(12, 500)).foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 10)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// a sub-page of the sheet: "‹ back" and a title, then its content (scrolls)
 public struct SheetPage<Content: View>: View {
     let title: String
+    let backTitle: String
     let back: () -> Void
+    let scrollTo: String?
     let content: Content
 
-    public init(_ title: String, back: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+    /// scrollTo: an id in the content shown at the top at first (screenshots)
+    public init(_ title: String, backTitle: String = "Controls", scrollTo: String? = nil, back: @escaping () -> Void,
+                @ViewBuilder content: () -> Content) {
         self.title = title
+        self.backTitle = backTitle
+        self.scrollTo = scrollTo
         self.back = back
         self.content = content()
     }
@@ -392,7 +544,7 @@ public struct SheetPage<Content: View>: View {
                 Button(action: back) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left").font(.system(size: 15, weight: .bold))
-                        Text("Controls").font(RFMFonts.ui(15, 600))
+                        Text(backTitle).font(RFMFonts.ui(15, 600))
                     }
                     .foregroundStyle(Palette.sheetMuted2)
                     .frame(height: 44)
@@ -404,11 +556,17 @@ public struct SheetPage<Content: View>: View {
             Text(title).font(RFMFonts.title(20)).tracking(-0.4).foregroundStyle(Palette.sheetText)
                 .padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) { content }
-                    .padding(.bottom, 12)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) { content }
+                        .padding(.bottom, 12)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .onAppear {
+                    guard let scrollTo else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(scrollTo, anchor: .top) }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
     }
 }
