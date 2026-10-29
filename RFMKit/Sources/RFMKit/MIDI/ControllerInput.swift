@@ -67,7 +67,9 @@ public final class ControllerInput {
         selection = Selection(stored: defaults.string(forKey: Self.selectionKey))
         sink.set(host)
         #if canImport(CoreMIDI)
-        let st = MIDIClientCreateWithBlock("RemoteFM1 controllers" as CFString, &client) { [weak self] n in
+        // (both blocks are @Sendable: CoreMIDI calls them on its own threads, and a block made here without it would be
+        // main-actor isolated, which Swift 6 checks at run time: the app stopped at the first message)
+        let st = MIDIClientCreateWithBlock("RemoteFM1 controllers" as CFString, &client) { @Sendable [weak self] n in
             let id = n.pointee.messageID
             guard id == .msgSetupChanged || id == .msgObjectAdded || id == .msgObjectRemoved else { return }
             Task { @MainActor in self?.reconnect() }
@@ -75,7 +77,7 @@ public final class ControllerInput {
         if st != noErr { client = 0 }
         if client != 0 {
             let s = sink
-            let ps = MIDIInputPortCreateWithProtocol(client, "RemoteFM1 controllers in" as CFString, ._1_0, &port) { list, _ in
+            let ps = MIDIInputPortCreateWithProtocol(client, "RemoteFM1 controllers in" as CFString, ._1_0, &port) { @Sendable list, _ in
                 for p in list.unsafeSequence() { Self.decode(p.words()) { s.send($0, $1) } }
             }
             if ps != noErr { port = 0 }
