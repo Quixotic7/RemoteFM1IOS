@@ -217,7 +217,7 @@ final class CoreTest {
         let saved = await player.saveNow()
         let url = player.flashURL(player.selected)
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
-        s.flashFile = "Documents/cores/" + url.lastPathComponent
+        s.flashFile = "Library/Application Support/cores/" + url.lastPathComponent
         s.flashBytes = size ?? 0
         s.flashSaves = player.saves
         step("flash file written", saved && s.flashBytes == Int(player.status.flashSize),

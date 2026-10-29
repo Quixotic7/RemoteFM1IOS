@@ -1,7 +1,8 @@
 # RemoteFM1 for iOS (plan)
 
 Status (2026-10-28): on the owner's iPhone: M1 passed (Bluetooth, FM-1 7938); the store build (FIZZ, Saadet, Boardwalk,
-LOOM-8) on TestFlight (build 4); USB audio through the FM-1 clean with render ahead (section 9). Earlier: M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
+LOOM-8) on TestFlight (build 4); USB audio through the FM-1 clean with render ahead (section 9); M7's imported .rfm1 firmware works (15 files; ChoralRoot
+.rfm1 at about 36 % of the core thread's time). Earlier: M0 done; M1 built; M2's and M3's simulator parts done (README.md says how to build and test).
 On the simulator, with the fake unit: the app sends the test pattern and shows panel events; ChoralRoot, Felucca
 and Melodee run in the standalone app and in the AUv3, and make sound; AU instances keep their core and flash in
 `fullState`, and share one FM-1 through the lease (section 4: takeover both ways, reconnect after a reload, between

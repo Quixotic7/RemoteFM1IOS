@@ -310,7 +310,7 @@ struct CoreCard: View {
                 ("audio", player.audioRunning ? player.audioText : "off"),
                 ("ahead", player.audioRunning ? s.aheadText : "–"),
                 ("flash", "\(player.saves) saves" + (player.lastSave.map { ", last " + Self.time($0) } ?? "")
-                    + ", Documents/cores/\(player.flashURL(player.selected).lastPathComponent)"),
+                    + ", Application Support/cores/\(player.flashURL(player.selected).lastPathComponent)"),
             ])
         }
     }

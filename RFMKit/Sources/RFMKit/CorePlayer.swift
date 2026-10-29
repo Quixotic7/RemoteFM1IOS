@@ -228,9 +228,10 @@ public final class CorePlayer {
                 ref: CoreRef? = nil) {
         self.link = link
         self.selected = selected ?? ""
-        self.flashDir = flashDir ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("cores")
+        // the flash files live in Application Support, out of the Files app's view (Documents shows the firmware folder)
+        self.flashDir = flashDir ?? Self.defaultFlashDir()
         try? FileManager.default.createDirectory(at: self.flashDir, withIntermediateDirectories: true)
+        if flashDir == nil { Self.migrateFlashFiles(to: self.flashDir) }
         e = rfme_new(link?.core)
         rfms_scan(slotsDir)
         rescan()
@@ -507,6 +508,22 @@ public final class CorePlayer {
     }
 
     /// the flash file of a catalog key: <id>.bin, an imported firmware's rfm1-<its id>.bin
+    /// Application Support/cores: each firmware's flash image
+    public nonisolated static func defaultFlashDir() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("cores")
+    }
+
+    /// moves flash files an older build kept in Documents/cores (visible in Files) to `dir`, once
+    nonisolated static func migrateFlashFiles(to dir: URL) {
+        let fm = FileManager.default
+        let old = fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("cores")
+        guard let names = try? fm.contentsOfDirectory(atPath: old.path) else { return }
+        for n in names where !fm.fileExists(atPath: dir.appendingPathComponent(n).path) {
+            try? fm.moveItem(at: old.appendingPathComponent(n), to: dir.appendingPathComponent(n))
+        }
+        if (try? fm.contentsOfDirectory(atPath: old.path))?.isEmpty ?? false { try? fm.removeItem(at: old) }
+    }
+
     public func flashURL(_ key: String) -> URL {
         if let c = cores.first(where: { $0.id == key }), c.imported {
             return flashDir.appendingPathComponent("rfm1-\(c.firmwareID).bin")

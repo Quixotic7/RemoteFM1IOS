@@ -6,7 +6,7 @@ panel. See [PLAN.md](PLAN.md) for the design and the milestones.
 Status: M1, and M2, M3 and M4 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
 SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In Core mode it runs a real firmware
 (ChoralRoot 0.26.1, Felucca 1.6.1, Melodee 1.4.5, FIZZ 0.12.0-beta.12, Saadet 0.1.1, Boardwalk 0.9 or LOOM-8 0.9.3) with the FM-1 as its panel and the sound on the iOS device; the
-firmware's flash is kept in `Documents/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
+firmware's flash is kept in `Library/Application Support/cores/<id>.bin`. M2 adds the AUv3 instrument as a skeleton (renders silence)
 and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MIDI in, the core's MIDI out, the flash
 in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
 FM-1"). M7: imported `.rfm1` firmware (WebAssembly, run by wasm3) next to the built-in cores, in the app and the
