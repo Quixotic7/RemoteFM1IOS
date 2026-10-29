@@ -5,7 +5,8 @@
 // the landscape layout, tall -> the Controls view, very small -> the Screen view (until the user picks a view). The
 // grabber sits inside the view's top edge; its sheet holds the AU's own items: the FM-1 (Use this FM-1, Bluetooth),
 // the view, the theme (shared with the app through the App Group), the firmware (About, Restart), the MIDI octave,
-// and Diagnostics (the instance's numbers and M2's probes).
+// and Diagnostics (the instance's numbers and M2's probes). M7: the firmware page lists the imported .rfm1 files too
+// (the app's mirror in the App Group); a Wasm core that can't keep up shows a note over the faceplate.
 
 import RFMKit
 import SwiftUI
@@ -19,6 +20,9 @@ struct AUView: View {
             ZStack {
                 FaceplateView(feed: model.feed, ui: model.ui, theme: store.current, chip: model.chip)
                     .equatable()
+                if !model.ui.sheetOpen {
+                    VStack { Spacer(); PerfBanner(model.perfNote).padding(.bottom, 8) }
+                }
                 PullDownSheet(open: Binding(get: { model.ui.sheetOpen }, set: { model.ui.sheetOpen = $0 })) {
                     AUSheet(model: model)
                 }
@@ -113,22 +117,42 @@ struct AUSheet: View {
     }
 
     private var firmwarePage: some View {
-        SheetPage("Firmware", back: { model.page = nil }) {
-            SheetSectionTitle("Core", top: 12)
+        let builtIn = model.cores.filter { !$0.imported }, imported = model.cores.filter(\.imported)
+        return SheetPage("Firmware", back: { model.page = nil }) {
+            SheetSectionTitle("Built in", top: 12)
             SheetList {
-                ForEach(Array(model.cores.enumerated()), id: \.element.id) { i, c in
-                    SheetRow(c.name, value: c.version, divider: i < model.cores.count - 1, chevron: false,
-                             check: c.id == model.status.coreID) { model.select(c.id) }
+                ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
+                    SheetRow(c.name, value: c.version, divider: i < builtIn.count - 1, chevron: false,
+                             check: c.id == model.status.coreKey) { model.select(c.id) }
                 }
             }
+            SheetSectionTitle("Imported")
+            if !imported.isEmpty {
+                SheetList {
+                    ForEach(Array(imported.enumerated()), id: \.element.id) { i, c in
+                        SheetRow(c.name, value: c.version, divider: i < imported.count - 1, chevron: false,
+                                 check: c.id == model.status.coreKey) { model.select(c.id) }
+                    }
+                }
+            }
+            SheetNote("Add .rfm1 firmware in the RemoteFM1 app (Firmware › Add firmware…, or Files › RemoteFM1 › Firmware); "
+                      + "open the app once after adding files so the instrument sees them.")
             SheetList {
                 SheetRow("About this firmware") { model.onAbout?(model.current) }
                 SheetRow("Restart the firmware", divider: false, chevron: false) { model.restart() }
             }
             .padding(.top, 16)
             let s = model.status.core
-            if s.halted { SheetNote(String(format: "Firmware halted (exit %u)", s.haltCode & 0xFF), color: .orange) }
-            SheetNote(s.booted ? "\(model.status.coreName), slot \(s.slot) · instance \(model.instance)"
+            if s.halted {
+                SheetNote(s.haltCode == 0x200 ? "Firmware stopped: the WebAssembly module trapped"
+                          : String(format: "Firmware halted (exit %u)", s.haltCode & 0xFF), color: .orange)
+            }
+            if s.booted && s.kind == "wasm" {
+                SheetNote(String(format: "WebAssembly: %u%% of the audio time on the core thread, %u underruns.",
+                                 s.coreLoadPct, s.underruns))
+            }
+            if !model.perfNote.isEmpty { SheetNote(model.perfNote, color: .orange) }
+            SheetNote(s.booted ? "\(model.status.coreName)\(s.slot > 0 ? ", slot \(s.slot)" : " (imported)") · instance \(model.instance)"
                       : "No firmware running · instance \(model.instance)")
         }
     }

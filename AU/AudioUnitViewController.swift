@@ -98,7 +98,9 @@ final class AUViewModel {
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var ticks = 0
 
-    var current: CoreInfo? { cores.first { $0.id == status.coreID } }
+    var current: CoreInfo? { cores.first { $0.id == status.coreKey } ?? status.coreInfo }
+    var perfNote = ""                                   // (M7) a Wasm core that can't keep up
+    @ObservationIgnored private var perf = PerfGuard()
 
     func attach(_ au: RFMAudioUnit) {
         self.au = au
@@ -124,6 +126,8 @@ final class AUViewModel {
         guard let au else { return }
         instance = au.state.short
         status = au.status()
+        let note = perf.update(status.core, name: status.coreName)
+        if note != perfNote { perfNote = note }
         let c = Self.chip(status.panel)
         if c != chip { chip = c }
         ticks += 1

@@ -431,6 +431,34 @@ public struct SheetNote: View {
     }
 }
 
+/// (M7) a short note over the faceplate (a Wasm core that can't keep up): a tap hides it until the problem has gone
+/// and come back
+public struct PerfBanner: View {
+    let text: String
+    @State private var hidden = false
+
+    public init(_ text: String) { self.text = text }
+
+    public var body: some View {
+        content.onChange(of: text.isEmpty) { _, empty in if empty { hidden = false } }
+    }
+
+    @ViewBuilder private var content: some View {
+        if !text.isEmpty && !hidden {
+            Text(text).font(RFMFonts.ui(12, 600)).foregroundStyle(.black)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.orange.opacity(0.92)))
+                .frame(maxWidth: 520)
+                .padding(.horizontal, 16)
+                .onTapGesture { hidden = true }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Hides the note")
+                .transition(.opacity)
+        }
+    }
+}
+
 /// a pill button in the sheet (accent: the prominent one)
 public struct SheetButton: View {
     let title: String

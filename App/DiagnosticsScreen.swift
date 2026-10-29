@@ -93,7 +93,7 @@ struct DiagnosticsScreen: View {
             .pickerStyle(.segmented)
             HStack(spacing: 8) {
                 Picker("Firmware", selection: Binding(get: { player.selected }, set: { player.select($0) })) {
-                    ForEach(player.cores) { c in Text("\(c.name) \(c.version)").tag(c.id) }
+                    ForEach(player.cores) { c in Text(c.title).tag(c.id) }
                 }
                 .pickerStyle(.menu)
                 .fixedSize()
@@ -310,7 +310,7 @@ struct CoreCard: View {
                 ("audio", player.audioRunning ? player.audioText : "off"),
                 ("ahead", player.audioRunning ? s.aheadText : "–"),
                 ("flash", "\(player.saves) saves" + (player.lastSave.map { ", last " + Self.time($0) } ?? "")
-                    + ", Documents/cores/\(player.selected).bin"),
+                    + ", Documents/cores/\(player.flashURL(player.selected).lastPathComponent)"),
             ])
         }
     }

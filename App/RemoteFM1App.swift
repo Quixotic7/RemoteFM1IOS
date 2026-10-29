@@ -9,6 +9,9 @@
 // UUID (UserDefaults rfm1.instance). -aucoretest (M4): only the AU core test (AUCoreTest.swift), run at launch.
 // The screen is the on-screen FM-1 (MainScreen); its launch arguments (-view, -deck, -knobs, -source, -sheet,
 // -sheetpage, -themeeditor, -theme, -orientation, -steps) are in MainScreen.swift's LaunchOptions.
+// M7: imported firmware (RFMKit's Firmware.swift): Documents/Firmware, synced into the App Group at launch, on
+// returning to the foreground and after an import or a delete; an opened .rfm1 (Files, Safari, AirDrop) is copied in
+// and selected. The selection is saved as a CoreRef (UserDefaults rfm1.coreRef; rfm1.core, the key, as before).
 
 import RFMKit
 import SwiftUI
@@ -18,6 +21,7 @@ import UIKit
 struct RemoteFM1App: App {
     @State private var controller: RemoteController?
     @State private var player: CorePlayer?
+    @State private var library: FirmwareLibrary?
     @Environment(\.scenePhase) private var phase
     private let coreTest: Bool
 
@@ -33,9 +37,16 @@ struct RemoteFM1App: App {
         let c = RemoteController(backend: backend, demoInput: backend.isFake, lease: PanelSession.Config(),
                                  identity: id, ownerName: "RemoteFM1 app")
         _controller = State(initialValue: c)
-        var core = d.string(forKey: "rfm1.core")      // (nil, or a core this build lacks: CorePlayer picks one)
-        if let i = args.firstIndex(of: "-core"), i + 1 < args.count { core = args[i + 1] }
-        let p = CorePlayer(link: c, selected: core)
+        let lib = FirmwareLibrary()
+        lib.sync()                              // (before the player: the catalog lists the imported files)
+        _library = State(initialValue: lib)
+        var core: String? = nil                 // (-core <key or id>; else the saved choice, resolved by CoreRef)
+        if let i = args.firstIndex(of: "-core"), i + 1 < args.count {
+            core = Self.coreArg(args[i + 1], lib)
+        }
+        let ref = CoreRef(d.dictionary(forKey: "rfm1.coreRef"))
+            ?? d.string(forKey: "rfm1.core").map { CoreRef(id: $0) }   // (a choice saved before M7)
+        let p = CorePlayer(link: c, selected: core, ref: core == nil ? ref : nil)
         _player = State(initialValue: p)
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
@@ -46,8 +57,8 @@ struct RemoteFM1App: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let controller, let player {
-                    MainScreen(controller: controller, player: player)
+                if let controller, let player, let library {
+                    MainScreen(controller: controller, player: player, library: library)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
                         .onChange(of: player.mode) { _, m in
                             UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")
@@ -55,8 +66,10 @@ struct RemoteFM1App: App {
                         }
                         .onChange(of: player.selected) { _, id in
                             UserDefaults.standard.set(id, forKey: "rfm1.core")
+                            if let r = player.selectedRef { UserDefaults.standard.set(r.dict, forKey: "rfm1.coreRef") }
                             controller.setOwnerName(Self.ownerName(player))
                         }
+                        .onOpenURL { url in Self.open(url, library, player) }
                         .onAppear { controller.setOwnerName(Self.ownerName(player)) }
                         .onChange(of: player.audioOn) { _, on in UserDefaults.standard.set(on, forKey: "rfm1.audio") }
                 } else if ProcessInfo.processInfo.arguments.contains("-aucoretest") {
@@ -68,7 +81,34 @@ struct RemoteFM1App: App {
         }
         .onChange(of: phase) { _, p in
             if p == .background, let player { Self.saveInBackground(player) }
+            if p == .active, let library, let player {          // (files added in the Files app meanwhile)
+                library.sync()
+                player.catalogChanged()
+            }
         }
+    }
+
+    /// an .rfm1 opened from Files, Safari's downloads or AirDrop: copied into Documents/Firmware and selected
+    @MainActor static func open(_ url: URL, _ library: FirmwareLibrary, _ player: CorePlayer) {
+        guard url.isFileURL else { return }
+        do {
+            let f = try library.importFile(url)
+            player.catalogChanged()
+            if f.error == nil {
+                player.select(f.key)
+                if player.mode != .core { player.setMode(.core) }
+            }
+        } catch {
+            RFMShared.log("firmware").error("open \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// -core's argument: a catalog key, a built-in core's id, or an imported firmware's id ("rfm1:felucca": the
+    /// imported Felucca)
+    @MainActor static func coreArg(_ a: String, _ lib: FirmwareLibrary) -> String {
+        guard a.hasPrefix(FirmwareCatalog.keyPrefix) else { return a }
+        let rest = String(a.dropFirst(FirmwareCatalog.keyPrefix.count))
+        return lib.files.first { $0.error == nil && ($0.coreID == rest || $0.sha256 == rest) }?.key ?? a
     }
 
     /// the flash saved as the app leaves the foreground (the core keeps playing if the sound is on)

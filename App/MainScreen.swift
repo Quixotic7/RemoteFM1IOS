@@ -5,6 +5,11 @@
 // lease, "Use this FM-1" when another instance holds it, Bluetooth pairing), View, Theme (and its editor), then
 // Firmware (the core picker, About), MIDI & audio, Settings (Diagnostics: the old debug screen with the test pattern
 // and the AU test). The last view is remembered per sound source. LaunchOptions reaches every state without touches.
+// M7: the Firmware page lists the built-in cores and the imported .rfm1 files (Documents/Firmware: FirmwareLibrary),
+// with "Add firmware…" (a document picker), a long press to delete one, and each invalid file with its error; a Wasm
+// core that can't keep up shows a note over the faceplate (PerfBanner).
+
+import UniformTypeIdentifiers
 
 import RFMKit
 import SwiftUI
@@ -45,7 +50,9 @@ enum AppSheetPage: String { case firmware, midi, settings }
 struct MainScreen: View {
     let controller: RemoteController
     let player: CorePlayer
+    let library: FirmwareLibrary
     @State private var ui = FaceplateUI()
+    @State private var showImporter = false
     @State private var feed: PanelFeed
     @State private var page: AppSheetPage?
     @State private var showDiagnostics = false
@@ -58,9 +65,10 @@ struct MainScreen: View {
     private let store = ThemeStore.shared
     private let options = LaunchOptions()
 
-    init(controller: RemoteController, player: CorePlayer) {
+    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary) {
         self.controller = controller
         self.player = player
+        self.library = library
         _feed = State(initialValue: PanelFeed(host: player))
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
         _source = State(initialValue: LaunchOptions().source ?? saved ?? .fm1)
@@ -92,6 +100,10 @@ struct MainScreen: View {
             FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip)
                 .equatable()
                 .ignoresSafeArea()
+            if !ui.sheetOpen && !ui.editorOpen {
+                VStack { Spacer(); PerfBanner(player.perfNote).padding(.bottom, 12) }
+                    .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
+            }
             PullDownSheet(open: $ui.sheetOpen) { sheet }
             if ui.editorOpen {
                 ThemeEditor(store: store, feed: feed) { withAnimation { ui.editorOpen = false } }
@@ -102,7 +114,17 @@ struct MainScreen: View {
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
-        .sheet(isPresented: $showAbout) { AboutFirmware(info: player.current) }
+        .sheet(isPresented: $showAbout) {
+            AboutFirmware(info: player.current, onDelete: deleteAction(player.current))
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [FirmwareLibrary.fileType, .data],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            var last: ImportedFirmware?
+            for u in urls { last = (try? library.importFile(u)) ?? last }
+            player.catalogChanged()
+            if let f = last, f.error == nil { player.select(f.key) }
+        }
         .fullScreenCover(isPresented: $showDiagnostics) {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
@@ -234,21 +256,60 @@ struct MainScreen: View {
         .padding(.top, 10)
     }
 
+    /// Delete for an imported file (nil for a built-in core)
+    private func deleteAction(_ c: CoreInfo?) -> (() -> Void)? {
+        guard let c, c.imported, let f = library.files.first(where: { $0.key == c.id }) else { return nil }
+        return {
+            library.delete(f)
+            player.catalogChanged()
+        }
+    }
+
     private var firmwarePage: some View {
-        SheetPage("Firmware", back: { page = nil }) {
-            SheetSectionTitle("Core", top: 12)
+        let builtIn = player.cores.filter { !$0.imported }
+        let imported = player.cores.filter(\.imported)
+        let broken = library.files.filter { $0.error != nil }
+        return SheetPage("Firmware", back: { page = nil }) {
+            SheetSectionTitle("Built in", top: 12)
             SheetList {
-                ForEach(Array(player.cores.enumerated()), id: \.element.id) { i, c in
-                    SheetRow("\(c.name)", value: c.version, divider: i < player.cores.count - 1, chevron: false,
+                ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
+                    SheetRow("\(c.name)", value: c.version, divider: i < builtIn.count - 1, chevron: false,
                              check: c.id == player.selected) { player.select(c.id) }
                 }
             }
+            SheetSectionTitle("Imported")
+            SheetList {
+                ForEach(imported) { c in
+                    SheetRow("\(c.name)", value: c.version, chevron: false, check: c.id == player.selected) { player.select(c.id) }
+                        .contextMenu {
+                            Button("About \(c.name)") { player.select(c.id); showAbout = true }
+                            if let del = deleteAction(c) { Button("Delete", role: .destructive, action: del) }
+                        }
+                }
+                ForEach(broken) { f in
+                    SheetRow(f.file, value: "can't load", chevron: false) {}
+                        .opacity(0.55)
+                        .contextMenu { Button("Delete", role: .destructive) { library.delete(f) } }
+                }
+                SheetRow("Add firmware…", divider: false) { showImporter = true }
+            }
+            SheetNote(imported.isEmpty && broken.isEmpty
+                      ? "Put .rfm1 firmware files in Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware, or add one here."
+                      : "Touch and hold an imported firmware to delete it. Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware holds them.")
+            ForEach(broken) { f in SheetNote("\(f.file): \(f.error ?? "")", color: .orange) }
+            if !library.message.isEmpty { SheetNote(library.message) }
             SheetList {
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)
                 SheetRow("Restart the firmware", divider: false, chevron: false) { player.powerCycle() }
             }
             .padding(.top, 16)
+            if player.current?.imported == true, player.status.booted {
+                SheetNote(player.status.coreWakes == 0 ? "Runs in the WebAssembly interpreter (no sound yet)."
+                          : String(format: "Runs in the WebAssembly interpreter: %u%% of the audio time on the core thread, "
+                                   + "%u underruns.", player.status.coreLoadPct, player.status.underruns))
+            }
+            if !player.perfNote.isEmpty { SheetNote(player.perfNote, color: .orange) }
             if player.mode != .core {
                 SheetNote("The test pattern is on (Settings · Diagnostics): the keys play nothing.")
                 SheetButton("Run the firmware") { player.setMode(.core) }.padding(.top, 8)
