@@ -208,6 +208,7 @@ public final class CorePlayer {
 
     public let flashDir: URL
     @ObservationIgnored nonisolated(unsafe) let e: OpaquePointer
+    @ObservationIgnored private let mapFollower: MidiMapFollower   // (M8) the global learned map
     @ObservationIgnored private let link: RemoteController?
     @ObservationIgnored private var engine: AVAudioEngine?
     @ObservationIgnored private var node: AVAudioSourceNode?
@@ -233,6 +234,7 @@ public final class CorePlayer {
         try? FileManager.default.createDirectory(at: self.flashDir, withIntermediateDirectories: true)
         if flashDir == nil { Self.migrateFlashFiles(to: self.flashDir) }
         e = rfme_new(link?.core)
+        mapFollower = MidiMapFollower(engine: e)
         rfms_scan(slotsDir)
         rescan()
         if let ref, selected == nil, let r = ref.resolve(in: cores) {
@@ -266,6 +268,7 @@ public final class CorePlayer {
 
     deinit {
         poller?.cancel()
+        mapFollower.stop()
         rfme_free(e)
     }
 

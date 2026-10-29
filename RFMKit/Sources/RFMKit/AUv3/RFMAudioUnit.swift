@@ -11,6 +11,8 @@
 //                build doesn't have (a default, a restored state): the first it has, with a note (Status.coreNote)
 //   MIDI         the host's MIDI to the core at its frame (FM1VST's mapping); the core's MIDI out to the host's
 //                MIDI output (midiOutputNames, MIDIOutputEventBlock)
+//   M8           the global learned map (MidiMapFollower: midi-map.json in the App Group), applied in the engine,
+//                so a learned knob works with the AU's window closed
 //   fullState    the instance UUID and format (InstanceState), the core, its version, its flash (flash_sync first,
 //                LZFSE) and the settings (CoreState); restoring boots the core from that flash
 //   the panel    a RemoteLink of its own (CoreMIDI, or on the simulator the process-wide shared fake unit) run only
@@ -47,6 +49,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 
     private let kernel: OpaquePointer
     let e: OpaquePointer                        // rfme_t (the faceplate plays it: PanelEngineHost)
+    private let mapFollower: MidiMapFollower    // (M8) the global learned map, kept by the engine
     private let link: OpaquePointer?            // rfmc_t
     public let session: PanelSession?
     public let backend: String                  // "none", "fake", "shared fake", "device"
@@ -124,6 +127,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             link = nil
         }
         e = rfme_new(link)
+        mapFollower = MidiMapFollower(engine: e)
         rfmk_set_engine(k, e)
         instanceState = state
 
@@ -192,6 +196,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         timer?.cancel()
         Self.unregister(self)
         rfmSetRenderContextEngine(nil)
+        mapFollower.stop()
         rfme_free(e)                            // (the clock stopped, the slot released; before the link goes)
         if let session { session.finish() }     // (the link and the lease freed in the background)
         rfmk_free(kernel)
