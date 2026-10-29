@@ -258,6 +258,70 @@ final class CoreTests: XCTestCase {
                      store.count, full.count))
         XCTAssertGreaterThan(a.peak, 64, "the store variant's held D4 is silent")
         XCTAssertEqual(c.status.halted, 0)
+        Self.checkSaadetLeds(try TestCore("saadet"), "saadet (store)")
+    }
+
+    /// Saadet's LEDs on the panel are steady (cores/saadet/core_saadet.c sd_lights): its three dim planes are PWM
+    /// duties (ui.c ui_leds: the keys' LIGHTS 1/8 1/4 1/2, the idle buttons 1/4, a breath), which the device's scan
+    /// lights one scan frame in mask + 1 (~1 ms frames: the eye sees a steady level). The only blinks Saadet means
+    /// are the breath (SAVE with a dump staged, FX deleting: 125 ms a step, 1 s round) and ARP's beat (an ARP
+    /// playing), neither on here; so on the home page, a key held for 3 s and let go for 1 s, no LED's level moves
+    /// but the held key's, and the levels are the duties: the held key lit, the scale's keys and the idle buttons
+    /// 1/4 (LIGHTS MID, the default). Sampled every device ms (the panel publishes every 8 ms, a UI frame is 15)
+    func testSaadetLedsAreSteady() throws {
+        Self.checkSaadetLeds(try TestCore("saadet"), "saadet")
+    }
+
+    /// the LEDs (27 keys, 14 buttons by label), each device ms for `ms`
+    static func ledTrace(_ c: TestCore, _ ms: Int) -> [[UInt8]] {
+        var out = [[UInt8]]()
+        var p = rfme_panel_t()
+        for _ in 0..<ms {
+            c.run(1)
+            _ = rfme_panel(c.e, &p)
+            out.append(withUnsafeBytes(of: p.key_led) { Array($0) } + withUnsafeBytes(of: p.btn_led) { Array($0) })
+        }
+        return out
+    }
+    /// per LED: how often its level moved, and how often it came back within 100 ms (a flicker: shorter than any
+    /// blink Saadet means)
+    static func ledMoves(_ t: [[UInt8]]) -> (moves: [Int], flicks: Int) {
+        var moves = [Int](repeating: 0, count: t.first?.count ?? 0), flicks = 0
+        for i in moves.indices {
+            var at = [Int]()                      // the samples where LED i changed
+            for s in 1..<t.count where t[s][i] != t[s - 1][i] { at.append(s) }
+            moves[i] = at.count
+            for j in at.indices.dropFirst() where at[j] - at[j - 1] < 100 && t[at[j]][i] == t[at[j - 1] - 1][i] {
+                flicks += 1
+            }
+        }
+        return (moves, flicks)
+    }
+    static func checkSaadetLeds(_ c: TestCore, _ what: String) {
+        c.boot()
+        c.run(2000)
+        let idle = ledTrace(c, 1000)
+        c.key(keyD4, true)
+        c.run(50)
+        let held = ledTrace(c, 3000)
+        c.key(keyD4, false)
+        c.run(50)
+        let after = ledTrace(c, 1000)
+        let (mi, fi) = ledMoves(idle), (mh, fh) = ledMoves(held), (ma, fa) = ledMoves(after)
+        let levels = Set((idle + held + after).flatMap { $0 }).sorted()
+        let last = held.last ?? []
+        print("core \(what) LEDs: moves idle \(mi.reduce(0, +)) / held \(mh.reduce(0, +)) / after \(ma.reduce(0, +)), "
+              + "flickers \(fi) / \(fh) / \(fa) (of \(idle.count + held.count + after.count) samples of 41); levels "
+              + "\(levels); held: keys \(last.prefix(27).map(String.init).joined(separator: " ")), buttons "
+              + "\(last.suffix(14).map(String.init).joined(separator: " "))")
+        XCTAssertEqual(fi + fh + fa, 0, "\(what): LEDs flicker")
+        XCTAssertEqual(mi.reduce(0, +) + mh.reduce(0, +) + ma.reduce(0, +), 0, "\(what): LEDs move with nothing blinking")
+        XCTAssertGreaterThanOrEqual(Int(last[keyD4]), 176, "\(what): the held key is not lit")
+        XCTAssertLessThan(Int(after.last?[keyD4] ?? 255), 176, "\(what): the key stays lit")
+        // the scale's keys and the idle buttons at the 1/4 duty (fm1p_duty_level(3) = 63: the DIM class)
+        XCTAssertGreaterThanOrEqual(last.prefix(27).filter { $0 == 63 }.count, 10, "\(what): the scale's keys are not at 1/4")
+        XCTAssertGreaterThanOrEqual(last.suffix(14).filter { $0 == 63 }.count, 10, "\(what): the idle buttons are not at 1/4")
+        XCTAssertEqual(c.status.halted, 0, what)
     }
 
     /// Boardwalk: its descriptor (MPL-2.0, the source at its commit, the credits); its screen draws; the boardwalk

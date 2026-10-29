@@ -17,8 +17,9 @@
  *   - the flash: app.c's host half keeps a 1 MiB array of its own (sd_nor); sd_flash / sd_read / sd_erase / sd_write
  *     here use the core's NOR image (core-glue/common/nor.c), which the host keeps: it is the device's flash, read in
  *     place (FL_XIP) as the device does.
- *   - the LEDs: app.c's host sd_lights draws nothing; here it writes the HAL's planes as the device's does (the lit
- *     plane; the three dim planes and their blink masks folded into the glow plane per frame).
+ *   - the LEDs: app.c's host sd_lights draws nothing; here it keeps the lit plane and the three dim planes with their
+ *     PWM duty masks, and the panel shows each LED at the brightest duty holding it (sd_core_leds_out), the steady
+ *     level the device's scan makes of them.
  * The second core: instrument.c's host build sets MELODEE_DUAL_CORE 0 (the paired kernels render in order on one
  * thread); nothing of CPU1 (hardware/cpu1.h, cpu1_entry.S) is compiled. No swapcontext, threads or clocks.
  * The managers' SysEx (Saadet's editor, app_sysex) is not wired: SysEx in goes to the app's MIDI queue as other MIDI.
@@ -101,21 +102,36 @@ int sd_write(uint32_t off, const void *src, uint32_t n)
 {
     return sd_data_ok(off, n) ? fm1nor_prog_span(off, src, n) : -1;
 }
-/* the LEDs (the device's sd_lights: fm1_led, and the three dim planes under their masks, the base's overlay
- * fm1_input.h SD_LED_PLANE): the phase moves a frame at a time here (a scan frame on the device) */
-static uint8_t sd_core_led_phase;
+/* the LEDs (the device's sd_lights: fm1_led, and the three dim planes and their masks, which the base's overlay of
+ * fm1_input.h lights (SD_LED_PLANE) in the scan frames where !(sd_led_phase & mask), the phase moving once a scan
+ * frame (~1 ms): a PWM duty of 1 / (mask + 1), 0xFF dark, that the eye sees as a steady level). Here they are kept
+ * as they are and drawn as those levels (sd_core_leds_out, as FM1VST's Melodee glue draws the same planes): not
+ * gated by a phase moving once a UI frame (15 ms), which lit a 1/4 plane one frame in four, a 1/2 one every other
+ * frame: the keys and buttons flickered */
+static uint8_t sd_core_dim[3][11], sd_core_mask[3] = {255u, 255u, 255u};
 void sd_lights(const uint8_t *bright, const uint8_t *dim, const uint8_t *masks)
 {
     uint32_t c, p;
-    sd_core_led_phase++;
-    for (c = 0; c < 11u; c++) {
-        uint8_t d = 0;
-        for (p = 0; p < 3u; p++)
-            if (masks[p] != 255u && !(sd_core_led_phase & masks[p]))
-                d |= dim[p * 11u + c];
+    for (c = 0; c < 11u; c++)
         fm1_led[c] = bright[c];
-        fm1_led_dim[c] = (uint8_t)(d & ~bright[c]);
+    for (p = 0; p < 3u; p++) {
+        for (c = 0; c < 11u; c++)
+            sd_core_dim[p][c] = dim[p * 11u + c];
+        sd_core_mask[p] = masks[p];
     }
+}
+/* plat_glue.h's fm1core_pl_out, its LEDs: fm1_led lit, else the brightest duty holding an LED (the overlay ORs the
+ * planes in each scan frame, and the duties nest: the brightest one's frames). fm1-base's own planes too
+ * (plat_lights' glow, plat_lights_mid), which Saadet does not use. Saadet has no PLAY green (common/panel.h
+ * fm1p_leds_brightest: dark) */
+static int sd_core_leds_out(fm1panel_t *p)
+{
+    const uint8_t *const planes[6] = {fm1_led, sd_core_dim[0], sd_core_dim[1], sd_core_dim[2], fm1_led_mid,
+                                      fm1_led_dim};
+    const uint8_t levels[6] = {FM1P_LED_LIT, fm1p_duty_level(sd_core_mask[0]), fm1p_duty_level(sd_core_mask[1]),
+                               fm1p_duty_level(sd_core_mask[2]), FM1P_LED_MID,
+                               (uint8_t)(fm1core_fb_dim_lo ? FM1P_LED_FAINT : FM1P_LED_DIM)};
+    return fm1p_leds_brightest(p, planes, levels, 6);
 }
 
 /* ---------------------------------------------------------------- the hooks (plat_glue.h) --- */
@@ -169,5 +185,9 @@ static void fm1core_pl_info(char *buf, uint32_t n)
     snprintf(buf, n, "engine %d playing %d", e, pl);
 }
 
+/* fm1core_pl_out's LED planes (lit, glow; no FM1CORE_PL_MID_PLANE) -> sd_core_leds_out above */
+#define fm1p_leds_planes(panel_, planes_, levels_, n_, green_) \
+    ((void)(planes_), (void)(levels_), (void)(n_), (void)(green_), sd_core_leds_out(panel_))
 #include "plat_glue.h"
+#undef fm1p_leds_planes
 #include "exit_end.h"
