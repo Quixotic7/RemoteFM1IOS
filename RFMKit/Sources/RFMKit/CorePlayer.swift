@@ -37,6 +37,25 @@ public struct CoreStatus: Sendable, Equatable {
     public var renderLastUs: UInt32 = 0, renderAvgUs: UInt32 = 0, renderMaxUs: UInt32 = 0, renderLastFrames: UInt32 = 0
     public var rate: Double = 0
     public var flashSize: UInt32 = 0, flashDirty: UInt32 = 0, flashCopies: UInt32 = 0
+    // M7: the core thread renders ahead of the callback (RFMEngine.h)
+    public var latencyFrames: UInt32 = 0, ringTarget: UInt32 = 0, ringFillMin: UInt32 = 0
+    public var underruns: UInt32 = 0, underrunFrames: UInt32 = 0
+    public var coreWakes: UInt64 = 0, coreAvgUs: UInt32 = 0, coreMaxUs: UInt32 = 0, coreLoadPct: UInt32 = 0
+    public var frameMaxUs: UInt32 = 0
+    public var realtime = false, workgroup = false
+
+    /// the render-ahead latency in ms (0: no render yet)
+    public var latencyMs: Double { rate > 0 ? Double(latencyFrames) / rate * 1000 : 0 }
+
+    /// the core thread, for the diagnostics: its latency, its time per render, the longest screen redraw, underruns
+    public var aheadText: String {
+        guard latencyFrames > 0 else { return "–" }
+        let fill = ringFillMin == UInt32.max ? "–" : String(ringFillMin)
+        return String(format: "%.1f ms ahead (%u frames, ring min %@ of %u); core %u us avg, %u max (%u%%), frame() max %u us; "
+                      + "%u underruns (%u frames)%@%@", latencyMs, latencyFrames, fill, ringTarget, coreAvgUs, coreMaxUs,
+                      coreLoadPct, frameMaxUs, underruns, underrunFrames, realtime ? ", real time" : "",
+                      workgroup ? ", in the audio workgroup" : "")
+    }
 
     /// the render callback's average time over its buffer's duration
     public var renderLoad: Double {
@@ -427,6 +446,18 @@ public final class CorePlayer {
         s.flashSize = r.flash_size
         s.flashDirty = r.flash_dirty
         s.flashCopies = r.flash_copies
+        s.latencyFrames = r.latency_frames
+        s.ringTarget = r.ring_target
+        s.ringFillMin = r.ring_fill_min
+        s.underruns = r.underruns
+        s.underrunFrames = r.underrun_frames
+        s.coreWakes = r.core_wakes
+        s.coreAvgUs = r.core_avg_us
+        s.coreMaxUs = r.core_max_us
+        s.coreLoadPct = r.core_load_pct
+        s.frameMaxUs = r.frame_max_us
+        s.realtime = r.realtime != 0
+        s.workgroup = r.workgroup != 0
         return s
     }
 

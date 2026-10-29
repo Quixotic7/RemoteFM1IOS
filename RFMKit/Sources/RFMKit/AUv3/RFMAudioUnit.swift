@@ -652,6 +652,8 @@ public struct AUReport: Codable, Sendable {
     public var slot = 0, booted = false, halted = false, clock = 0, powerCycles = 0
     public var renders: UInt64 = 0, sounding: UInt64 = 0, renderAvgUs = 0, renderMaxUs = 0, renderFrames = 0
     public var rate = 0.0, renderLoadPct = 0.0, levelRMS = 0.0
+    public var latencyFrames = 0, underruns = 0, coreAvgUs = 0, coreMaxUs = 0, frameMaxUs = 0, ringFillMin = 0
+    public var realtime = false, workgroup = false
     public var midiEvents: UInt64 = 0, midiIn = 0, midiNotes = 0, midiOut = 0, keysPressed = 0, devMs = 0
     public var owner = false, ownerName = "", ownerPid = 0, ownerStale = true, epoch: UInt64 = 0
     public var link = "", linkText = "", line = ""
@@ -687,6 +689,14 @@ public struct AUReport: Codable, Sendable {
         rate = s.core.rate
         renderLoadPct = s.core.renderLoad * 100
         levelRMS = s.levelRMS
+        latencyFrames = Int(s.core.latencyFrames)
+        underruns = Int(s.core.underruns)
+        coreAvgUs = Int(s.core.coreAvgUs)
+        coreMaxUs = Int(s.core.coreMaxUs)
+        frameMaxUs = Int(s.core.frameMaxUs)
+        ringFillMin = s.core.ringFillMin == UInt32.max ? -1 : Int(s.core.ringFillMin)
+        realtime = s.core.realtime
+        workgroup = s.core.workgroup
         midiEvents = s.midiEvents
         midiIn = Int(s.midiIn)
         midiNotes = Int(s.midiNotes)

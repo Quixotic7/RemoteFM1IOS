@@ -35,6 +35,8 @@ struct AUCoreTestSummary: Codable, Sendable {
         var rms = 0.0, peak = 0.0, frames = 0
         var renderAvgUs = 0, renderMaxUs = 0, renderFrames = 0, rate = 0.0, renderLoadPct = 0.0
         var midiNotes = 0, midiIn = 0
+        var latencyFrames = 0, underruns = 0, coreAvgUs = 0, coreMaxUs = 0, frameMaxUs = 0, ringFillMin = 0
+        var realtime = false, workgroup = false
     }
     var done = false
     var device = "", system = ""
@@ -150,6 +152,14 @@ final class AUCoreTestHost {
                 au.renderLoadPct = r.renderLoadPct
                 au.midiNotes = r.midiNotes
                 au.midiIn = r.midiIn
+                au.latencyFrames = r.latencyFrames
+                au.underruns = r.underruns
+                au.coreAvgUs = r.coreAvgUs
+                au.coreMaxUs = r.coreMaxUs
+                au.frameMaxUs = r.frameMaxUs
+                au.ringFillMin = r.ringFillMin
+                au.realtime = r.realtime
+                au.workgroup = r.workgroup
                 summary.reports["\(l) after the notes"] = r
             }
             summary.audio.append(au)
@@ -157,6 +167,11 @@ final class AUCoreTestHost {
                  String(format: "tap %.1f s: rms %.4f peak %.3f, %d frames; host notes %d (MIDI in %d); render avg %d us, max %d us per %d frames at %.0f Hz (%.1f%%)",
                         secs, m.rms, m.peak, m.frames, au.midiNotes, au.midiIn, au.renderAvgUs, au.renderMaxUs,
                         au.renderFrames, au.rate, au.renderLoadPct))
+            step("\(l) renders ahead", au.latencyFrames > 0,
+                 String(format: "latency %d frames (%.1f ms), ring min %d, %d underruns; core thread %d us avg, %d max per render, frame() max %d us%@%@",
+                        au.latencyFrames, au.rate > 0 ? Double(au.latencyFrames) / au.rate * 1000 : 0, au.ringFillMin,
+                        au.underruns, au.coreAvgUs, au.coreMaxUs, au.frameMaxUs, au.realtime ? ", real time" : "",
+                        au.workgroup ? ", in the host's workgroup" : ""))
         }
 
         // 2. A's automatic claim (the lease was empty), then A -> B -> A

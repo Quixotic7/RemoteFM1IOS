@@ -146,6 +146,7 @@ struct AUSheet: View {
             ("instance", model.instance),
             ("render", c.renders == 0 ? "–" : String(format: "avg %u us, max %u us per %u frames (%.0f%%)",
                                                     c.renderAvgUs, c.renderMaxUs, c.renderLastFrames, c.renderLoad * 100)),
+            ("ahead", c.aheadText),
             ("clock", ["stopped", "audio", "timer (no sound)", "caller"][min(max(c.clock, 0), 3)]),
             ("MIDI", "in \(s.midiIn) (\(s.midiNotes) notes), out \(s.midiOutMsgs)"),
             ("flash", "\(c.flashSize / 1024) KiB, from \(s.bootedFrom.isEmpty ? "–" : s.bootedFrom)"),

@@ -25,6 +25,8 @@ struct CoreTestSummary: Codable, Sendable {
     var steps: [Step] = []
     var sampleRate = 0.0, ioBufferMs = 0.0
     var renderFrames = 0, renders: UInt64 = 0, renderAvgUs = 0, renderMaxUs = 0, renderLoadPct = 0.0
+    var latencyFrames = 0, latencyMs = 0.0, ringTarget = 0, ringFillMin = 0, underruns = 0, underrunFrames = 0
+    var coreAvgUs = 0, coreMaxUs = 0, coreLoadPct = 0, frameMaxUs = 0, realtime = false, workgroup = false
     var coreCpuPct: Int?, coreShed: Int?
     var tapSeconds = 0.0, tapFrames = 0, outputRMS = 0.0, outputPeak = 0.0
     var lcdChanged = false, lcdWritesAtBoot = 0, lcdWritesAtEnd = 0, previewChanges = 0
@@ -168,6 +170,18 @@ final class CoreTest {
         s.renderAvgUs = Int(st.renderAvgUs)
         s.renderMaxUs = Int(st.renderMaxUs)
         s.renderLoadPct = st.renderLoad * 100
+        s.latencyFrames = Int(st.latencyFrames)
+        s.latencyMs = st.latencyMs
+        s.ringTarget = Int(st.ringTarget)
+        s.ringFillMin = st.ringFillMin == UInt32.max ? -1 : Int(st.ringFillMin)
+        s.underruns = Int(st.underruns)
+        s.underrunFrames = Int(st.underrunFrames)
+        s.coreAvgUs = Int(st.coreAvgUs)
+        s.coreMaxUs = Int(st.coreMaxUs)
+        s.coreLoadPct = Int(st.coreLoadPct)
+        s.frameMaxUs = Int(st.frameMaxUs)
+        s.realtime = st.realtime
+        s.workgroup = st.workgroup
         s.coreCpuPct = st.haveStats ? Int(st.cpuPct) : nil
         s.coreShed = st.haveStats ? Int(st.shed) : nil
         s.keysPressed = Int(st.keysPressed)
@@ -179,6 +193,7 @@ final class CoreTest {
         step("render callback", st.renders > 0, String(format: "%llu renders of %u frames, avg %u us, max %u us (%.1f%% "
                                                        + "of the buffer)", st.renders, st.renderLastFrames,
                                                        st.renderAvgUs, st.renderMaxUs, s.renderLoadPct))
+        step("render ahead", st.latencyFrames > 0 && st.underruns == 0, st.aheadText)
         step("LCD changed", s.lcdChanged, "lcd_writes \(s.lcdWritesAtBoot) -> \(s.lcdWritesAtEnd), "
              + "\(s.previewChanges) preview changes")
         let f1 = controller.fakeUnit()

@@ -308,6 +308,7 @@ struct CoreCard: View {
                                                          s.renderAvgUs, s.renderMaxUs, s.renderLastFrames,
                                                          s.renderLoad * 100)),
                 ("audio", player.audioRunning ? player.audioText : "off"),
+                ("ahead", player.audioRunning ? s.aheadText : "–"),
                 ("flash", "\(player.saves) saves" + (player.lastSave.map { ", last " + Self.time($0) } ?? "")
                     + ", Documents/cores/\(player.selected).bin"),
             ])

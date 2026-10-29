@@ -263,7 +263,9 @@ struct MainScreen: View {
             SheetList {
                 SheetToggle("Sound", on: Binding(get: { player.audioOn }, set: { player.setAudio($0) }), divider: false)
             }
-            SheetNote(player.audioRunning ? player.audioText : "No sound: the firmware runs on a timer.")
+            SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
+                                                                      player.status.latencyMs, player.status.underruns)
+                      : "No sound: the firmware runs on a timer.")
             SheetSectionTitle("MIDI")
             SheetList {
                 SheetRow("Bluetooth MIDI devices") { showBluetooth = true }
