@@ -24,6 +24,7 @@ final class CallbackDriver: @unchecked Sendable {
     private let done = DispatchSemaphore(value: 0)
     private var stopFlag = false
     private(set) var lateCallbacks = 0         // renders the driver itself started a buffer late (the Mac was busy)
+    private(set) var midiOut: [(frame: Int, pkt: UInt32)] = []   // the core's MIDI out (rfme_midi_out_take_at)
     let record: Bool
 
     init(_ e: OpaquePointer, frames: Int = 128, rate: Double = 48000, record: Bool = false) {
@@ -65,6 +66,7 @@ final class CallbackDriver: @unchecked Sendable {
         var ev = [rfme_midi_t](repeating: rfme_midi_t(), count: 1)
         let evs = lock.withLock { events }
         let t0 = mach_absolute_time()
+        midiOut.reserveCapacity(4096)
         var i = 0
         while count.map({ i < $0 }) ?? true {
             if i & 63 == 0 && stopped { break }
@@ -84,6 +86,10 @@ final class CallbackDriver: @unchecked Sendable {
                         _ = rfme_render_midi(e, l.baseAddress, r.baseAddress, UInt32(frames), rate, p.baseAddress, nev)
                     }
                 }
+            }
+            var pkt: UInt32 = 0, off: UInt32 = 0
+            while rfme_midi_out_take_at(e, &pkt, &off) != 0 {
+                if midiOut.count < 4096 { midiOut.append((i * frames + Int(off), pkt)) }
             }
             if record && i * frames + frames <= out.count {
                 out.withUnsafeMutableBufferPointer { o in
@@ -199,6 +205,36 @@ final class RenderAheadTests: XCTestCase {
         }
         let extra = (delays[1].delay - delays[0].delay) - (delays[1].latency - delays[0].latency)
         XCTAssertLessThanOrEqual(abs(extra), 128, "the delay did not follow the latency (off by \(extra) frames)")
+    }
+
+    /// the core's MIDI out keeps its place in the stream: a key played by host MIDI comes out of the firmware as a
+    /// note at the same frame as its sound starts (both a latency after the host's note), give or take a device block
+    func testMIDIOutKeepsItsFrame() throws {
+        let rate = 44100.0, at = 400, offset: UInt32 = 50
+        var found = false
+        for core in ["felucca", "choralroot", "melodee", "saadet"] {
+            let e = try engine(core)
+            rfme_midi_out_enable(e, 1)
+            rfme_set_midi(e, 1, 0, 0)
+            let d = CallbackDriver(e, frames: 128, rate: rate, record: true)
+            d.event(at: at, offset: offset, [0x90, 62, 110])
+            d.start(count: at + 200)
+            d.wait()
+            let lat = Int(status(e).latencyFrames)
+            rfme_free(e)
+            let due = at * 128 + Int(offset)
+            // a note on (USB-MIDI CIN 9, velocity > 0) after the host's note
+            guard let note = d.midiOut.first(where: { $0.frame >= at * 128 && $0.pkt & 0xF == 9 && ($0.pkt >> 24) & 0x7F > 0 }),
+                  let onset = d.out.indices.first(where: { $0 >= at * 128 && abs(d.out[$0]) > 1e-4 }) else {
+                print("\(core): no MIDI note out (\(d.midiOut.count) packets) or no sound")
+                continue
+            }
+            print("\(core): host note due \(due); MIDI out note at +\(note.frame - due), sound at +\(onset - due); latency \(lat)")
+            XCTAssertGreaterThanOrEqual(note.frame - due, lat - 128, core)
+            XCTAssertLessThanOrEqual(abs(note.frame - onset), 2 * 128, "\(core): the MIDI out and the sound apart")
+            found = true
+        }
+        if !found { throw XCTSkip("no core sends its played notes to MIDI out") }
     }
 
     /// under a running callback: other cores, power cycles, the timer clock and back, a flash save; no deadlock
