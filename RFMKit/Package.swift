@@ -45,12 +45,29 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("CoreMIDI"), .linkedFramework("CoreFoundation")]
         ),
+        // wasm3 v0.5.0 (MIT, Sources/CWasm3/README.md): the interpreter imported .rfm1 firmware runs in (M7). Its release
+        // flags in every configuration (its interpreter needs the optimiser's tail calls; DEBUG off: no asserts, no
+        // tracing)
+        .target(
+            name: "CWasm3",
+            path: "Sources/CWasm3",
+            exclude: ["README.md", "LICENSE"],
+            sources: ["bind", "code", "compile", "core", "emit", "env", "exec", "function", "info", "module", "optimize",
+                      "parse"].map { "source/m3_\($0).c" },
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("NASSERTS"),
+                .unsafeFlags(["-std=gnu11", "-O3", "-UDEBUG", "-fomit-frame-pointer", "-fno-stack-check",
+                              "-fno-stack-protector", "-w"]),
+            ]
+        ),
         // RemoteLink (session thread, event queue, triple buffer), fm1remote's patterns, and the C API for Swift.
         // M3: the slot loader and the core engine (FM1VST's engine/device.cpp in place, FM1Device.cpp; core-api/)
         .target(
             name: "RFMCore",
-            dependencies: ["CRemoteFM1"],
+            dependencies: ["CRemoteFM1", "CWasm3"],
             cxxSettings: [
+                .headerSearchPath("../CWasm3/source"),
                 .headerSearchPath("\(vendorFM1)/engine"),
                 .headerSearchPath("\(vendorFM1)/core-api"),
                 .headerSearchPath("\(vendorRFM)/host/include"),
