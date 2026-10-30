@@ -5,7 +5,7 @@
 // probe report through the AU's message channel, saves one instance's fullState into a third, shows the AU's view,
 // and writes everything to autest.json (Documents, and the App Group container when there is one). With -autest it
 // runs by itself at launch and then asks the extension to present its Bluetooth panel (autest-bt.json); with -aupage
-// <midi | learn | learn:KN1> (M8) it asks the view for that page instead (autest-page.json).
+// <midi | learn | learn:KN1 | window> (M8) it asks the view for that page instead (autest-page.json).
 //
 // It never starts the FM-1 link, and the probes never send MIDI or connect to an endpoint.
 
@@ -230,7 +230,7 @@ final class AUTestHost {
         finish()
 
         if auto, let i = CommandLine.arguments.firstIndex(of: "-aupage"), i + 1 < CommandLine.arguments.count {
-            // (M8) a page of the AU's view instead (scripts/sim_autest.sh AUPAGE=midi | learn | learn:KN1)
+            // (M8) a page of the AU's view instead (scripts/sim_autest.sh AUPAGE=midi | learn | learn:KN1 | window)
             try? await Task.sleep(for: .seconds(2))
             let what = CommandLine.arguments[i + 1]
             let r = units.first.map { call($0, "show", ["what": what]) }

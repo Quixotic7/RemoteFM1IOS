@@ -4,8 +4,8 @@
 // unit itself (RFMAudioUnit) and the probes are in RFMKit. Sheets (Bluetooth, About this firmware) are presented with
 // UIKit: SwiftUI's .sheet crashed inside the extension (M2). M8: MIDI learn on this instance's host MIDI (MidiLearnMode on
 // the faceplate's feed); the learned map is global (MidiMapStore, observed here). On a Mac (a host's window sized to
-// preferredContentSize, which it never changes) a resize corner sets that size; it is kept in the instance's state and
-// as new instances' default. iOS hosts size the view themselves.
+// preferredContentSize, which it never changes) a resize corner and the sheet's Window size set that size; it is kept
+// in the instance's state and as new instances' default. iOS hosts size the view themselves.
 
 import CoreAudioKit
 import RFMKit
@@ -20,6 +20,8 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
     private static let defaultSize = CGSize(width: 760, height: 352)     // (the iPhone-landscape faceplate's shape)
     private static let sizeKey = "rfm1.auViewSize"                      // (new instances' size on a Mac)
     private var dragFrom = CGSize.zero
+    private var dragLogged = Date.distantPast       // (the grip's "changed" log: at most every 250 ms)
+    private var dragChecked = false                 // (the bounds after a request: logged once per drag)
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -46,7 +48,22 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
             let wh = UserDefaults.standard.array(forKey: Self.sizeKey) as? [Double] ?? []
             if wh.count == 2 { preferredContentSize = Self.clamp(CGSize(width: wh[0], height: wh[1])) }
             if let s = model.viewSize { preferredContentSize = Self.clamp(s) }
-            model.onViewSize = { [weak self] s in self?.preferredContentSize = Self.clamp(s) }
+            model.onViewSize = { [weak self] s in
+                guard let self else { return }
+                let c = Self.clamp(s)
+                guard c != preferredContentSize else { return }
+                setSize(c)
+                log.info("size from the instance: \(Int(c.width))x\(Int(c.height))")
+            }
+            model.onPickSize = { [weak self] s in
+                guard let self else { return }
+                let c = Self.clamp(s)
+                setSize(c)
+                saveSize(c)
+                log.info("window size picked: \(Int(c.width))x\(Int(c.height))")
+                checkBounds(c, after: "the pick")
+            }
+            model.macWindow = true
             let grip = ResizeGrip()
             grip.translatesAutoresizingMaskIntoConstraints = false
             grip.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(dragGrip)))
@@ -58,7 +75,28 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
                 grip.heightAnchor.constraint(equalToConstant: 22),
             ])
         }
+        model.windowSize = preferredContentSize
         log.info("view loaded, pid \(getpid()), \(Int(self.preferredContentSize.width))x\(Int(self.preferredContentSize.height))")
+    }
+
+    private func setSize(_ s: CGSize) {
+        if s != preferredContentSize { preferredContentSize = s }
+        if s != model.windowSize { model.windowSize = s }
+    }
+
+    /// kept in the instance's state and as new instances' default
+    private func saveSize(_ s: CGSize) {
+        model.viewSize = s
+        UserDefaults.standard.set([Double(s.width), Double(s.height)], forKey: Self.sizeKey)
+    }
+
+    /// whether the host followed a size request (logs the view's bounds a moment later)
+    private func checkBounds(_ s: CGSize, after what: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            let b = view.bounds.size
+            log.info("bounds \(Int(b.width))x\(Int(b.height)) after \(what, privacy: .public) (\(Int(s.width))x\(Int(s.height)) requested)\(b == s ? "" : ": the host didn't follow", privacy: .public)")
+        }
     }
 
     private static func clamp(_ s: CGSize) -> CGSize {
@@ -70,15 +108,28 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
         switch g.state {
         case .began:
             dragFrom = view.bounds.width > 0 ? view.bounds.size : preferredContentSize
+            dragLogged = .distantPast
+            dragChecked = false
+            log.info("grip began at \(Int(self.dragFrom.width))x\(Int(self.dragFrom.height)) (preferred \(Int(self.preferredContentSize.width))x\(Int(self.preferredContentSize.height)))")
         case .changed, .ended:
             let t = g.translation(in: nil)
             let s = Self.clamp(CGSize(width: dragFrom.width + t.x, height: dragFrom.height + t.y))
-            if s != preferredContentSize { preferredContentSize = s }
-            if g.state == .ended {
-                model.viewSize = s
-                UserDefaults.standard.set([Double(s.width), Double(s.height)], forKey: Self.sizeKey)
-                log.info("resized to \(Int(s.width))x\(Int(s.height))")
+            setSize(s)
+            if !dragChecked {
+                dragChecked = true
+                checkBounds(s, after: "the grip's first request")
             }
+            if g.state == .ended {
+                saveSize(s)
+                log.info("grip ended: resized to \(Int(s.width))x\(Int(s.height))")
+            } else if Date().timeIntervalSince(dragLogged) >= 0.25 {
+                dragLogged = Date()
+                log.info("grip changed: \(Int(s.width))x\(Int(s.height)) requested")
+            }
+        case .cancelled:
+            log.info("grip cancelled")
+        case .failed:
+            log.info("grip failed")
         default:
             break
         }
@@ -110,7 +161,7 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
 
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        log.info("view appeared, \(Int(self.view.bounds.width))x\(Int(self.view.bounds.height))")
+        log.info("view appeared, \(Int(self.view.bounds.width))x\(Int(self.view.bounds.height)), preferred \(Int(self.preferredContentSize.width))x\(Int(self.preferredContentSize.height))")
     }
 
     // Called by the extension's host-facing machinery, not necessarily on the main thread: the AU is created here,
@@ -177,6 +228,10 @@ final class AUViewModel {
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
     @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
     @ObservationIgnored var onViewSize: (@MainActor (CGSize) -> Void)?    // (a Mac) an instance's own size
+    @ObservationIgnored var onPickSize: (@MainActor (CGSize) -> Void)?    // (a Mac) the sheet's Window size
+    var macWindow = false                               // (a Mac) the sheet's Window section
+    var windowSize = CGSize.zero                        // the view's preferredContentSize
+    @ObservationIgnored var sheetScroll: String?        // (the AU test) an id in the sheet shown at its top
     @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var ticks = 0
@@ -184,6 +239,12 @@ final class AUViewModel {
     var current: CoreInfo? { cores.first { $0.id == status.coreKey } ?? status.coreInfo }
     var perfNote = ""                                   // (M7) a Wasm core that can't keep up
     @ObservationIgnored private var perf = PerfGuard()
+
+    /// (a Mac) the sheet's Window sizes (the same shape as the default)
+    static let windowSizes: [(String, CGSize)] = [
+        ("Small", CGSize(width: 760, height: 352)), ("Medium", CGSize(width: 1000, height: 463)),
+        ("Large", CGSize(width: 1280, height: 593)), ("Extra large", CGSize(width: 1600, height: 741)),
+    ]
 
     /// the instance's own view size (the resize corner's, kept in its state)
     var viewSize: CGSize? {
@@ -195,7 +256,6 @@ final class AUViewModel {
         self.au = au
         feed.attach(au)
         learn.attach(au)
-        if let s = au.viewSize { onViewSize?(s) }
         au.onEvent = { [weak self] e in
             Task { @MainActor in
                 switch e {
@@ -207,6 +267,7 @@ final class AUViewModel {
                 }
             }
         }
+        if let s = au.viewSize { onViewSize?(s) }     // (after onEvent: a restore in between isn't missed)
         poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {
@@ -260,6 +321,12 @@ final class AUViewModel {
         if what == "midi" {
             ui.sheetOpen = true
             page = .midi
+        } else if what == "window" {
+            #if DEBUG
+            macWindow = true                            // (a screenshot of the Mac-only section on iOS)
+            #endif
+            sheetScroll = "window"
+            ui.sheetOpen = true
         } else if what.hasPrefix("learn") {
             learn.start(ui)
             if let t = what.split(separator: ":").dropFirst().first { learn.pick(String(t)) }

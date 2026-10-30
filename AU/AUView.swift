@@ -8,7 +8,7 @@
 // and Diagnostics (the instance's numbers and M2's probes). M7: the firmware page lists the imported .rfm1 files too
 // (the app's mirror in the App Group); a Wasm core that can't keep up shows a note over the faceplate. M8: Knobs from
 // MIDI (MIDI learn on the host's MIDI, the knob speed, the mappings: global, shared with the app); learn mode on the
-// faceplate, its bar and the toasts over the sheet (FaceplateOverlay).
+// faceplate, its bar and the toasts over the sheet (FaceplateOverlay). On a Mac: the window's size (Window).
 
 import RFMKit
 import SwiftUI
@@ -66,34 +66,58 @@ struct AUSheet: View {
     private var mainSheet: some View {
         VStack(spacing: 0) {
             SheetHeader("Controls", done: close)
-            ScrollView {
-                VStack(spacing: 0) {
-                    SheetSectionTitle("FM-1", top: 18)
-                    fm1Card
-                    SheetSectionTitle("View · or swipe sideways")
-                    ViewTiles(ui: model.ui) { model.userPicked = true }
-                    SheetSectionTitle("Theme")
-                    ThemeSwatches(store: store, edit: nil)
-                    SheetList {
-                        SheetRow("Firmware", value: model.status.coreName.isEmpty ? "–" : model.status.coreName) {
-                            model.page = .firmware
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        SheetSectionTitle("FM-1", top: 18)
+                        fm1Card
+                        SheetSectionTitle("View · or swipe sideways")
+                        ViewTiles(ui: model.ui) { model.userPicked = true }
+                        if model.macWindow { windowSection.id("window") }
+                        SheetSectionTitle("Theme")
+                        ThemeSwatches(store: store, edit: nil)
+                        SheetList {
+                            SheetRow("Firmware", value: model.status.coreName.isEmpty ? "–" : model.status.coreName) {
+                                model.page = .firmware
+                            }
+                            SheetStepper("MIDI octave", value: Binding(get: { model.status.settings.transpose },
+                                                                       set: { model.setTranspose($0) }), in: -2...2)
+                            SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
+                                     : "\(MidiMapStore.shared.mappings.count) learned") { model.page = .midi }
+                            SheetRow("Diagnostics", divider: false) {
+                                model.page = .diagnostics
+                                model.diagnosticsOpen = true
+                            }
                         }
-                        SheetStepper("MIDI octave", value: Binding(get: { model.status.settings.transpose },
-                                                                   set: { model.setTranspose($0) }), in: -2...2)
-                        SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
-                                 : "\(MidiMapStore.shared.mappings.count) learned") { model.page = .midi }
-                        SheetRow("Diagnostics", divider: false) {
-                            model.page = .diagnostics
-                            model.diagnosticsOpen = true
-                        }
+                        .padding(.top, 20)
+                        if !model.status.coreError.isEmpty { SheetNote(model.status.coreError, color: .orange) }
+                        else if !model.status.coreNote.isEmpty { SheetNote(model.status.coreNote, color: .orange) }
                     }
-                    .padding(.top, 20)
-                    if !model.status.coreError.isEmpty { SheetNote(model.status.coreError, color: .orange) }
-                    else if !model.status.coreNote.isEmpty { SheetNote(model.status.coreNote, color: .orange) }
+                    .padding(.bottom, 8)
                 }
-                .padding(.bottom, 8)
+                .scrollBounceBehavior(.basedOnSize)
+                .onAppear {
+                    guard let id = model.sheetScroll else { return }
+                    model.sheetScroll = nil
+                    DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    /// (a Mac) the window's size: hosts that follow preferredContentSize resize at once, Ableton when reopened
+    private var windowSection: some View {
+        let s = model.windowSize, sizes = AUViewModel.windowSizes
+        let i = sizes.firstIndex { $0.1 == s }
+        return VStack(spacing: 0) {
+            SheetSectionTitle("Window · \(Int(s.width))×\(Int(s.height))")
+            SheetList {
+                SheetSegmented("Size", options: sizes.map(\.0) + (i == nil ? ["Custom"] : []),
+                               selected: i ?? sizes.count, divider: false) { k in
+                    if k < sizes.count { model.onPickSize?(sizes[k].1) }
+                }
+            }
+            SheetNote("Ableton: close and reopen the plugin window to apply.")
         }
     }
 

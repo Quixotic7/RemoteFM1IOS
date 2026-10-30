@@ -417,8 +417,9 @@ public struct SheetSegmented: View {
                 ForEach(Array(options.enumerated()), id: \.offset) { i, o in
                     let on = i == selected
                     Button { pick(i) } label: {
-                        Text(o).font(RFMFonts.ui(13, on ? 700 : 600))
+                        Text(o).font(RFMFonts.ui(13, on ? 700 : 600)).lineLimit(1)
                             .foregroundStyle(on ? Palette.sheetBackground : Palette.sheetText)
+                            .padding(.horizontal, 8)
                             .frame(minWidth: 44).frame(height: 30)
                             .background(Capsule().fill(on ? Palette.sheetAccent : .clear))
                             .contentShape(Rectangle())
