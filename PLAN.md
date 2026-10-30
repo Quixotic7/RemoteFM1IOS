@@ -292,6 +292,16 @@ Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, ch
 - Licensing: the app ships only the interpreter; a user's .rfm1 comes from its author's release (GPL source there).
   FM1VST's glue could build .rfm1 files for the cores it already has, published with their source.
 
+**Deleting (the owner's iPhone test: a long press was too hidden).** The Firmware page's Imported section has Edit: a
+red minus per file, then "Delete?" in the row (no dialog, as in the sheet everywhere); Get firmware's page of an
+installed firmware has Delete. Built-in cores can't be deleted. The selection moves first when it is the file
+(`CorePlayer.replacement`: the same id's other file, newest, else its built-in core, else the first core), then the
+file goes from Documents/Firmware and the mirror. An AU instance playing it keeps its loaded module (Restart works from
+memory) and says the file was deleted; its project's next restore resolves its CoreRef as above. The folder shows in
+the Files app and in a Mac's Finder: `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` are in
+App/Info.plist itself (the INFOPLIST_KEY_ build settings didn't reach the merged plist), and `sync()` at launch makes
+`Firmware/` with its README.txt.
+
 **Get firmware (built).** The app lists .rfm1 files it can download, from feeds (`FirmwareFeeds.swift`):
 remotefm1.com's `catalog.json` (entries with an `rfm1` object) and the RemoteFM1FW GitHub releases (`<id>-<version>.rfm1`
 assets with their `sha256` digest), merged to one entry per firmware id at its newest version (numeric dot parts, a
@@ -340,7 +350,9 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
   the keys' channel play the keys (transposed, -2..+2 octaves), the rest to the firmware's MIDI in. "...and reach the
   firmware's MIDI in" also sends the key notes there. The AU gets its host's MIDI the same way (its own AUSettings).
 - **Keys from MIDI and Use learned knobs** (the owner's wish: the firmware has MIDI of its own, so the host's mapping
-  can get in its way). Keys from MIDI: Any (the default), a channel 1–16, or Off; notes on other channels go to the
+  can get in its way). Keys from MIDI: Any (the default), a channel 1–16, or Off (a row that opens a page in the
+  sheet: a SwiftUI Menu was clipped and couldn't be used in AUM on an iPhone, so the sheet has no menus, popovers or
+  dialogs; a learned encoder's mode is a page too); notes on other channels go to the
   firmware. A note-off lets go of the key its note-on pressed even after the setting changed (`noteKey` per channel).
   Use learned knobs off keeps the map but skips it (`rfme_set_midi`'s use_map): what it held is let go, its pots
   start again from their next value, mapped messages flow on to the keys and the firmware; learn still works. Both in
@@ -358,7 +370,8 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
 - **Tested.** `swift test`: the map, learn and the engine's feed (MidiMapTests, MidiEngineTests), the OMX wire, views,
   screen and link against a fake OMX-27 (OmxTests), the faceplate's sources, pickup mark and learn mode
   (PanelMidiTests). Simulator screenshots: the MIDI page, the input list, learn mode (`-learn`, `-learnpick KN1`,
-  `-demomap`), the AU's Knobs from MIDI page and learn mode (`AUPAGE=midi scripts/sim_autest.sh`).
+  `-demomap`), the AU's Knobs from MIDI page and learn mode (`AUPAGE=midi scripts/sim_autest.sh`), the Keys from MIDI
+  and Knob mode pages (`-sheetpage keychannel|midimode`, `AUPAGE=keychannel|midimode`).
 - **Device only, not tested yet.** A real MIDI keyboard or controller (USB, Bluetooth), learning from it and the mode
   guess on its knobs, a learned control in an AU host (AUM) routing MIDI to the instance, a real OMX-27 (its REMOTE
   firmware, the handshake, LEDs and screen pacing over USB on iOS, auto-reconnect on plugging in), the OMX in the
@@ -486,14 +499,28 @@ Nothing of the website's installer was read or copied.
   device's driver owner names Bluetooth). FM1Kit refuses to start when more than one FM-1 answers; the page then asks
   to leave only one connected (the unit can't be followed through its restarts by a serial number: FM1Kit notes that Felucca's USB device reports
   none, and RemoteFM1 0.2 uses felucca-bsp's).
+- **The prompt** (the owner's iPhone test: the page was hard to find; `InstallPrompt.swift`). Nothing is sent for it:
+  `FM1Ports` reads CoreMIDI's device list (RemoteMidi.c's candidate rule; plus a USB port named FM-1 or Felucca with
+  other USB IDs, which RemoteFM1 never has). A candidate the app's link has searched for 6 s with no answer to HELLO
+  gives "This FM-1 isn't answering as RemoteFM1. Install it?" (it may run another firmware, or be stuck); a port with
+  other USB IDs, after 2 s, "isn't running RemoteFM1"; Bluetooth only: connect a USB cable. Install opens the page,
+  Not now is kept per newest release (UserDefaults). A unit that answers with an older RemoteFM1 than releases.json's
+  newest gets a small notice (the list fetched once per launch then). Never while an install runs or the page is
+  open, while an AU holds the unit, or with the fake unit (DEBUG's `-fm1prompt` forces one for screenshots). The AU
+  can't install: its FM-1 card says to install from the app when its link finds a candidate that doesn't answer.
+  Unsure: the USB IDs and names of an FM-1 on M-VAVE's firmware (if it is neither 1209:0001 nor named FM-1 or Felucca,
+  it isn't seen).
 - **Simulated.** In the simulator, with the fake unit, and with DEBUG's `-installdemo check|writing|finished|cutoff`
   the FM-1 is FM1Kit's `SimulatedFM1` running RemoteFM1 0.2.2; nothing there makes a CoreMIDI client.
-- **Tested.** `swift test` (`FirmwareInstallTests`): releases.json and its cache, the package checks with RemoteFM1
+- **Tested.** `swift test` (`InstallPromptTests`: the prompt's rules, the port rule, the DEBUG prompt and Not now;
+  `FirmwareInstallTests`): releases.json and its cache, the package checks with RemoteFM1
   0.2.3's real package (`Fixtures/RemoteFM1`), a full install 0.2.2 → 0.2.3 on the SimulatedFM1 with the loader's
   second read, a tampered download and a wrong identity refused (the panel never paused), a cut-off install resumed,
   a unit waiting in its loader, a switch from another firmware, no FM-1, and the app's link and lease held and
-  released around an install on a fake link. Screenshots: `MATCH=install ONLY=phone scripts/sim_shots.sh`.
+  released around an install on a fake link. Screenshots: `MATCH=install ONLY=phone scripts/sim_shots.sh`,
+  `MATCH=prompt`.
 - **Device only, not tested yet.** A real FM-1 over USB from an iPhone or iPad: the handshake with RemoteFM1 0.2.x,
   its felucca-bsp loader (`ota-FM-1_900`, "Felucca Update") through FM1Kit's write and check, the identity after
   the restart, the Bluetooth filter, the panel reconnecting afterwards, an AU in another app yielding, the screen
-  staying on, and a cable pulled mid-write then resumed.
+  staying on, and a cable pulled mid-write then resumed; the prompt with a real FM-1 on another firmware (USB and
+  Bluetooth) and with an older RemoteFM1.

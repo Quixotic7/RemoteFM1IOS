@@ -166,8 +166,10 @@ FM1VST's `fm1_add_rfm1` makes them), run by wasm3 in the app and in the AUv3. To
 - Firmware › Add firmware… in the pull-down sheet; or
 - Files › On My iPhone › RemoteFM1 › Firmware: drop files there, then open the app.
 
-The Firmware page lists them under Imported (touch and hold to delete; About shows the authors, source link, credits
-and licence texts). A file that isn't a valid .rfm1 stays listed with its error. The AUv3 sees the files the app has
+The Firmware page lists them under Imported (Edit, then the red minus and "Delete?", deletes one; firmware built into
+the app can't be deleted; About shows the authors, source link, credits and licence texts). Deleting the one playing
+moves to its other version, its built-in core, or the first core; an AU instance playing it keeps playing until its
+project is opened again. Get firmware's page of an installed firmware has Delete too. A file that isn't a valid .rfm1 stays listed with its error. The AUv3 sees the files the app has
 seen (the app copies them into the App Group, `Firmware/<sha256>.rfm1` and `index.json`). Imported firmware works in
 store builds too. A firmware too heavy for the device shows a note instead of crackling silently.
 
@@ -206,7 +208,8 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
 
 The instrument's sheet › MIDI (each instance its own, saved with the host's project):
 
-- **Keys from MIDI** (Any): notes 53 and up on any channel, or on the one picked, play the FM-1's 27 keys (MIDI
+- **Keys from MIDI** (Any; the row opens a page: Any, Channel 1–16, Off, as menus can't open inside a host's view):
+  notes 53 and up on any channel, or on the one picked, play the FM-1's 27 keys (MIDI
   octave shifts them); notes on other channels go to the firmware's MIDI in. Off: every note goes there, for firmware
   with MIDI of its own (FIZZ: notes for its tracks, CCs for parameters). The other messages (CCs, pitch bend, notes
   outside the keys) always go there, unless a learned knob takes them.
@@ -249,6 +252,12 @@ its update loader and "Finish the install" completes it. The panel reconnects af
 RemoteFM1 version on the FM-1 and "Update available". It uses FM1Kit (MIT); in the simulator the FM-1 is FM1Kit's
 SimulatedFM1.
 
+When the app sees an FM-1 that isn't running RemoteFM1 (an FM-1 in the MIDI list that doesn't answer the link within
+a few seconds, or one with another firmware's USB IDs), it asks over the faceplate: Install (opens the page) or Not
+now (remembered until a newer release). Over Bluetooth it says to connect a USB cable. A RemoteFM1 older than the
+newest release gets a small notice instead. Never during an install or while an AU instance holds the FM-1; the AU's
+FM-1 card only says to install from the app.
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
@@ -265,10 +274,13 @@ SimulatedFM1.
   - `-view full|controls|screen`, `-deck buttons|keys`, `-knobs main|kn`: the view, the Controls deck, the knob set.
   - `-source phone|fm1`: the sound source (phone: the emulator, the link stopped; fm1: the link, the fake unit on the
     simulator).
-  - `-sheet`, `-sheetpage firmware|getfirmware|midi|midiinput|settings`: the pull-down sheet open (on a page);
+  - `-sheet`, `-sheetpage firmware|getfirmware|midi|midiinput|keychannel|midimode|settings`: the pull-down sheet open
+    (on a page);
     `-sheetscroll knobs|omx|footer`: the MIDI page (Get firmware) scrolled there; `-themeeditor`: the editor.
   - Debug builds: `-catalogitem <id>`: Get firmware's page of that firmware; `-catalogget <id>`: download and
-    install it at launch (the live list; `MATCH=getfw scripts/sim_shots.sh`).
+    install it at launch (the live list; `MATCH=getfw scripts/sim_shots.sh`); `-firmwareedit [ask]`: the Firmware
+    page in Edit (ask: its first row asks "Delete?"; `MATCH=fwedit`); `-fm1prompt install|unanswered|bluetooth|update`:
+    the install prompt or the update notice (`MATCH=prompt`).
   - `-learn`: MIDI learn on at launch; `-learnpick KN1` (any target: SELECT, MASTER, PLAY, OCT-...) with it picked;
     `-demomap`: replaces the global mappings with a few examples (screenshots only).
   - `-theme Tangerine|Midnight|Mint|Lilac|Cream`: a theme for this launch (not stored).
@@ -276,7 +288,7 @@ SimulatedFM1.
   - `-steps`: the step numbers 1–16 on the lower keys.
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices); without it the MIDI input starts with no source connected. On a device CoreMIDI is the default.
-- `-autest -aupage midi|learn|learn:KN1|sheet:midi`: the AU test, then that page of the AU's view (`AUPAGE=...
+- `-autest -aupage midi|keychannel|midimode|learn|learn:KN1|sheet:midi`: the AU test, then that page of the AU's view (`AUPAGE=...
   scripts/sim_autest.sh`; `sheet:midi`: the sheet at its MIDI section).
 - `-sheetpage install`: the installer's page; `-installdemo check|writing|finished|cutoff` (DEBUG builds): it runs by
   itself on FM1Kit's SimulatedFM1 (stops at the confirmation; installs; installs; is cut off at 45 %), for

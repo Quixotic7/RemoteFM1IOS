@@ -6,7 +6,9 @@
 # (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps; M8: -demomap,
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
 # -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo) and saves a PNG
-# per state ("name@s": that shot waits s seconds). The core runs (ChoralRoot by default) so the real framebuffer shows;
+# per state ("name@s": that shot waits s seconds). The iPhone fixes: -sheetpage keychannel | midimode, DEBUG's
+# -firmwareedit [ask] (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
+# install | unanswered | bluetooth | update. The core runs (ChoralRoot by default) so the real framebuffer shows;
 # "-source fm1" uses the fake unit (the simulator's default backend), whose demo input presses keys by itself. A
 # simulator this script booted is shut
 # down again; one that was booted stays booted.
@@ -59,6 +61,14 @@ PHONE_SHOTS=(
     "phone-midi-learn-kn1|-source phone -view full -demomap -learnpick KN1 -orientation portrait"
     "phone-midi-learn-kn3-controls|-source phone -view controls -knobs kn -learnpick KN3 -orientation portrait"
     "phone-midi-learn-landscape|-source phone -view full -demomap -learnpick SEQ -orientation landscape"
+    "phone-sheet-keychannel|-source phone -view full -sheetpage keychannel -orientation portrait"
+    "phone-sheet-midimode|-source phone -view full -sheetpage midimode -demomap -orientation portrait"
+    "phone-firmware-fwedit|-source phone -view full -firmwareedit -orientation portrait"
+    "phone-firmware-fwedit-ask|-source phone -view full -firmwareedit ask -orientation portrait"
+    "phone-prompt-install|-source fm1 -view full -fm1prompt install -orientation portrait"
+    "phone-prompt-unanswered|-source fm1 -view full -fm1prompt unanswered -orientation portrait"
+    "phone-prompt-bluetooth|-source fm1 -view full -fm1prompt bluetooth -orientation portrait"
+    "phone-prompt-update|-source fm1 -view full -fm1prompt update -orientation portrait"
     # Get firmware (the live list; the last two after -catalogget has installed S1Vave)
     "phone-getfw-list|-source phone -view full -sheetpage getfirmware -orientation portrait"
     "phone-getfw-detail|-source phone -view full -catalogitem s1vave -orientation portrait"
@@ -105,6 +115,12 @@ run_device() {
         if [[ $name == *@* ]]; then wait=${name#*@}; name=${name%@*}; fi
         [[ -z ${MATCH:-} || $name == *"$MATCH"* ]] || continue
         xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+        if [[ $name == *-fwedit* ]]; then                # (an imported file to delete)
+            local data
+            data=$(xcrun simctl get_app_container "$udid" "$BUNDLE" data)
+            mkdir -p "$data/Documents/Firmware"
+            cp "$ROOT/RFMKit/Tests/RFMKitTests/Fixtures/amb-1.3.rfm1" "$data/Documents/Firmware/"
+        fi
         # shellcheck disable=SC2086
         xcrun simctl launch "$udid" "$BUNDLE" $args >/dev/null
         sleep "$wait"
