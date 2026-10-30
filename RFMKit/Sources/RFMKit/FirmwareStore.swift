@@ -139,6 +139,9 @@ public final class FirmwareStore {
     public private(set) var checking = false
     /// the last check's trouble ("" when every feed answered)
     public private(set) var problem = ""
+    /// the last check, one line a feed: what came back (a byte count, firmware found, or how an unreadable answer
+    /// starts), so a screenshot shows what a phone received
+    public private(set) var report: [String] = []
     /// the download running
     public private(set) var progress: Progress?
     /// the last install's result, and its error
@@ -193,18 +196,17 @@ public final class FirmwareStore {
         attempted = Date()
         defer { checking = false }
         let transport = transport
-        let results = await withTaskGroup(of: (Int, Result<Data, FirmwareStoreError>).self) { g in
-            for (i, f) in feeds.enumerated() {
-                g.addTask {
-                    do { return (i, .success(try await transport.data(from: f.url))) }
-                    catch { return (i, .failure(.from(error))) }
-                }
+        // one task a feed, started together, awaited in feed order. (Not a task group of (index, result) tuples: a
+        // Release build, Swift 6.4, gave every child the first index, so GitHub's answer was read as the catalog's.)
+        let tasks = feeds.map { f in
+            Task<Result<Data, FirmwareStoreError>, Never> {
+                do { return .success(try await transport.data(from: f.url)) }
+                catch { return .failure(.from(error)) }
             }
-            var r: [(Int, Result<Data, FirmwareStoreError>)] = []
-            for await x in g { r.append(x) }
-            return r.sorted { $0.0 < $1.0 }
         }
-        var snaps: [FeedSnapshot] = [], problems: [String] = []
+        var results: [(Int, Result<Data, FirmwareStoreError>)] = []
+        for (i, t) in tasks.enumerated() { results.append((i, await t.value)) }
+        var snaps: [FeedSnapshot] = [], problems: [String] = [], lines: [String] = []
         let now = Date()
         for (i, r) in results {
             let f = feeds[i]
@@ -212,17 +214,24 @@ public final class FirmwareStore {
             case .success(let d):
                 if let s = try? FeedSnapshot.parse(d, feed: f, fetched: now) {
                     snaps.append(s)
+                    lines.append("\(f.name): \(d.count) bytes, \(s.firmware.count) to download")
                     continue
                 }
+                let head = String(decoding: d.prefix(80), as: UTF8.self)
+                    .replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+                lines.append("\(f.name): \(d.count) bytes, not a list: \"\(head)\"")
+                log.error("\(f.url.absoluteString, privacy: .public): unreadable, \(d.count) bytes: \(head, privacy: .public)")
                 problems.append(FirmwareStoreError.unreadable(f.name).message)
             case .failure(let e):
                 log.error("\(f.url.absoluteString, privacy: .public): \(e.message, privacy: .public)")
+                lines.append("\(f.name): \(e.message)")
                 problems.append(e == .offline ? e.message : "\(f.name): \(e.message)")
             }
             if let old = snapshots.first(where: { $0.feed == f }) { snaps.append(old) }
         }
         snapshots = snaps
         available = FeedSnapshot.merge(snaps)
+        report = lines
         problem = Array(Set(problems)).sorted().joined(separator: " ")
         saveCache()
         log.info("checked \(self.feeds.count) feed(s): \(self.available.count) firmware, \(problems.count) problem(s)")

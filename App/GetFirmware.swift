@@ -45,6 +45,7 @@ struct GetFirmwarePage: View {
             .id("footer")
             if !store.problem.isEmpty && !list.isEmpty { SheetNote(store.problem, color: .orange) }
             SheetNote(CatalogText.footer(store))
+            if !store.report.isEmpty { SheetNote("Last check: " + store.report.joined(separator: "; ")) }
         }
         .task { await store.refreshIfOlder(than: 600) }     // (opening the page checks, unless it just did)
     }
