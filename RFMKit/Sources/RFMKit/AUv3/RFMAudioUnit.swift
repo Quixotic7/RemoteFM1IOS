@@ -49,6 +49,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     }
 
     private let kernel: OpaquePointer
+    private var tornDown = false
     let e: OpaquePointer                        // rfme_t (the faceplate plays it: PanelEngineHost)
     private let mapFollower: MidiMapFollower    // (M8) the global learned map, kept by the engine
     private let link: OpaquePointer?            // rfmc_t
@@ -196,6 +197,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     }
 
     deinit {
+        tornDown = true                         // (AUAudioUnit's dealloc calls deallocateRenderResources after this)
         timer?.cancel()
         Self.unregister(self)
         rfmSetRenderContextEngine(nil)
@@ -247,6 +249,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     }
 
     public override func deallocateRenderResources() {
+        // (from AUAudioUnit's own dealloc, after deinit freed the engine and the kernel: nothing of ours is left)
+        guard !tornDown else { return super.deallocateRenderResources() }
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))     // (the core thread runs by the wall clock again)
         rfmk_set_midi_out(kernel, nil)
         rfmk_deallocate(kernel)

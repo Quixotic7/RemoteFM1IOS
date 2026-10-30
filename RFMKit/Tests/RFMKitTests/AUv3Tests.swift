@@ -90,6 +90,15 @@ final class AUv3Tests: XCTestCase {
         XCTAssertNil(c.viewSize)
     }
 
+    /// a host that releases the AU with its render resources still allocated: AUAudioUnit's dealloc then calls
+    /// deallocateRenderResources after deinit freed the engine and the kernel (it crashed: a double free)
+    func testReleasedWhileAllocated() throws {
+        var au: RFMAudioUnit? = try makeAU()
+        try au?.allocateRenderResources()
+        XCTAssertTrue(au?.renderResourcesAllocated ?? false)
+        au = nil
+    }
+
     func testBussesAndMIDI() throws {
         let au = try makeAU()
         XCTAssertEqual(au.outputBusses.count, 1)
