@@ -130,8 +130,8 @@ public struct CoreRef: Codable, Equatable, Sendable {
                         keepFlash: false)
     }
 
-    /// version a before b ("1.6.1" < "1.6.10")
-    static func older(_ a: String, _ b: String) -> Bool { a.compare(b, options: .numeric) == .orderedAscending }
+    /// version a before b ("1.6.1" < "1.6.10", "1.0-beta.2" < "1.0": FirmwareVersion)
+    static func older(_ a: String, _ b: String) -> Bool { FirmwareVersion.less(a, b) }
 
     // ---- UserDefaults / plist form
     public var dict: [String: String] { ["kind": kind, "id": id, "version": version, "sha256": sha256] }
