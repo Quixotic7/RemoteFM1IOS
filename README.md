@@ -153,6 +153,7 @@ libremotefm1's own tests, built outside the source tree:
 Besides the built-in cores, the app plays `.rfm1` files: FM-1 firmware built as WebAssembly (docs/RFM1-FORMAT.md;
 FM1VST's `fm1_add_rfm1` makes them), run by wasm3 in the app and in the AUv3. To add one:
 
+- Firmware › Get firmware in the pull-down sheet: the firmware you can download (see below); or
 - open the file on the iPhone (Files, Safari's downloads, AirDrop): RemoteFM1 opens, copies it in and plays it; or
 - Firmware › Add firmware… in the pull-down sheet; or
 - Files › On My iPhone › RemoteFM1 › Firmware: drop files there, then open the app.
@@ -161,6 +162,16 @@ The Firmware page lists them under Imported (touch and hold to delete; About sho
 and licence texts). A file that isn't a valid .rfm1 stays listed with its error. The AUv3 sees the files the app has
 seen (the app copies them into the App Group, `Firmware/<sha256>.rfm1` and `index.json`). Imported firmware works in
 store builds too. A firmware too heavy for the device shows a note instead of crackling silently.
+
+**Get firmware** lists the .rfm1 files on remotefm1.com (`catalog.json`) and in the
+[RemoteFM1FW releases](https://github.com/Quixotic7/RemoteFM1FW/releases) on GitHub, one entry per firmware at its
+newest version; firmware built into the app isn't listed. Install downloads the file, checks its size and SHA-256
+against the list, and adds it as Add firmware… does. When a newer version of a firmware you have is listed, its row
+says Update, and the Firmware row shows a badge with the count; updating removes the older file (saved sounds and
+projects open with the new one). The app checks at launch at most once a day and when the page opens, never in the
+background; the last list is kept, so the page works offline. A firmware author can publish their own feed (a
+`catalog.json` like remotefm1.com's, or GitHub releases with `<id>-<version>.rfm1` assets): `FirmwareFeed.defaults` in
+`RFMKit/Sources/RFMKit/FirmwareFeeds.swift` lists the feeds. Tests: `FirmwareStoreTests` (saved copies of both lists).
 
 Tests: `WasmTests` and `ImportTests` (the loader, AMB-1 from `RFMKit/Tests/RFMKitTests/Fixtures`, Felucca and
 ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped without them). On the simulator:
@@ -197,8 +208,10 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
   - `-view full|controls|screen`, `-deck buttons|keys`, `-knobs main|kn`: the view, the Controls deck, the knob set.
   - `-source phone|fm1`: the sound source (phone: the emulator, the link stopped; fm1: the link, the fake unit on the
     simulator).
-  - `-sheet`, `-sheetpage firmware|midi|midiinput|settings`: the pull-down sheet open (on a page); `-sheetscroll
-    knobs|omx`: the MIDI page scrolled there; `-themeeditor`: the editor.
+  - `-sheet`, `-sheetpage firmware|getfirmware|midi|midiinput|settings`: the pull-down sheet open (on a page);
+    `-sheetscroll knobs|omx|footer`: the MIDI page (Get firmware) scrolled there; `-themeeditor`: the editor.
+  - Debug builds: `-catalogitem <id>`: Get firmware's page of that firmware; `-catalogget <id>`: download and
+    install it at launch (the live list; `MATCH=getfw scripts/sim_shots.sh`).
   - `-learn`: MIDI learn on at launch; `-learnpick KN1` (any target: SELECT, MASTER, PLAY, OCT-...) with it picked;
     `-demomap`: replaces the global mappings with a few examples (screenshots only).
   - `-theme Tangerine|Midnight|Mint|Lilac|Cream`: a theme for this launch (not stored).

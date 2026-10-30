@@ -288,6 +288,21 @@ Audio is bit-identical to the native core. % of a 128-frame buffer at 48 kHz, ch
 - Licensing: the app ships only the interpreter; a user's .rfm1 comes from its author's release (GPL source there).
   FM1VST's glue could build .rfm1 files for the cores it already has, published with their source.
 
+**Get firmware (built).** The app lists .rfm1 files it can download, from feeds (`FirmwareFeeds.swift`):
+remotefm1.com's `catalog.json` (entries with an `rfm1` object) and the RemoteFM1FW GitHub releases (`<id>-<version>.rfm1`
+assets with their `sha256` digest), merged to one entry per firmware id at its newest version (numeric dot parts, a
+pre-release below its release), each feed's copy kept as an alternative, details from the catalog's entry of the same
+id. `FirmwareStore` fetches them (20 s timeout), keeps each feed's last good list in Caches (shown offline, with its
+date), downloads over https only to a temporary file with progress and Cancel, refuses a file whose size or SHA-256
+differs, then hands it to `FirmwareLibrary.importFile`, the path a manual import takes (the loader's check, the App
+Group mirror). An installed firmware (its manifest's id and version) with a newer listed version shows Update;
+updating removes the older files of that id, and saved choices fall back to the same id (`CoreRef.resolve`). Checks:
+at launch at most once a day and when the page opens; no background fetch. Built-in cores of the same or a newer
+version aren't listed. More feeds (a firmware author's own) are more entries in `FirmwareFeed.defaults`; there is no
+UI for adding one yet. For App Review (2.5.2): the user picks each download, every file is verified (size, SHA-256,
+the format's checks: imports only from a fixed WASI list, fixed memory), it runs only in the sandboxed interpreter,
+and nothing runs until the user selects it.
+
 **.fwsc: the FM-1's own package, run by fm1-emu's interpreter** (MIT). x real time at 240 MHz (the FM-1's clock),
 idle / chord:
 
