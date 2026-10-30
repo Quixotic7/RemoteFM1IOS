@@ -16,7 +16,8 @@
 // download (RFMKit's FirmwareStore); a row there opens the firmware's page. The Firmware row shows the badge too.
 // Settings › Install RemoteFM1 on the FM-1 (RFMKit's Install/: FM1Kit over USB; -sheetpage install). An FM-1 that isn't
 // running RemoteFM1, or an older RemoteFM1, gets a prompt over the faceplate (InstallPrompter; DEBUG: -fm1prompt
-// install | unanswered | bluetooth | update) whose Install opens that page.
+// install | unanswered | bluetooth | update) whose Install opens that page. Settings › Send a DX7 cartridge (RFMKit's
+// Cart/: a .syx sent as a user bank; -sheetpage cart, DEBUG -cartdemo); an .syx opened from Files lands there.
 
 import UniformTypeIdentifiers
 
@@ -41,6 +42,7 @@ struct LaunchOptions {
     var demoMap = false                                 // a few mappings, as if learned (writes the global map)
     var catalogItem: String?                            // (DEBUG) -catalogitem <id>: that firmware's Get firmware page
     var catalogGet: String?                             // (DEBUG) -catalogget <id>: download and install it at launch
+    var cartDemo = false                                // (DEBUG) -cartdemo: two made-up cartridges on the cart page
     var firmwareEdit: String?                           // (DEBUG) -firmwareedit [ask]: the Firmware page in Edit (ask:
                                                         // the first imported row asks "Delete?")
 
@@ -65,6 +67,7 @@ struct LaunchOptions {
         #if DEBUG
         catalogItem = value("-catalogitem")
         catalogGet = value("-catalogget")
+        cartDemo = a.contains("-cartdemo")
         if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
         #endif
     }
@@ -72,7 +75,7 @@ struct LaunchOptions {
 
 enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
-    case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install
+    case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install, cart
     case keyChannel = "keychannel", midiMode = "midimode"
 }
 
@@ -181,6 +184,12 @@ struct MainScreen: View {
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .onAppear(perform: launch)
+        .onOpenURL { url in                             // (an .syx from Files or AirDrop: the cartridge page)
+            guard url.isFileURL, url.pathExtension.lowercased() == "syx" else { return }
+            CartSender.shared(for: controller).add(url: url)
+            page = .cart
+            withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+        }
         .task { await catalog.refreshIfOlder(than: 86_400) }     // (at launch, at most once a day)
         .onChange(of: ui.page) { _, _ in saveView() }
         .onChange(of: ui.deck) { _, _ in saveView() }
@@ -221,6 +230,9 @@ struct MainScreen: View {
             editingFirmware = true
             if e == "ask" { confirmDelete = library.files.first?.file }
         }
+        #if DEBUG
+        if options.cartDemo { CartSender.shared(for: controller).addDemo() }
+        #endif
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
         if options.learn {
@@ -308,6 +320,7 @@ struct MainScreen: View {
             }
         case .settings: settingsPage
         case .install: InstallFirmwarePage(installer: .shared(for: controller)) { page = .settings }
+        case .cart: SendCartPage(sender: .shared(for: controller)) { page = .settings }
         case nil: mainSheet
         }
     }
@@ -550,7 +563,11 @@ struct MainScreen: View {
             }
             SheetNote("Diagnostics has the link, the core, the unit's HELLO_R and the test pattern mode.")
             SheetSectionTitle("FM-1 firmware")
-            SheetList { InstallFirmwareRow(installer: .shared(for: controller)) { page = .install } }
+            SheetList {
+                InstallFirmwareRow(installer: .shared(for: controller), divider: true) { page = .install }
+                SendCartRow(sender: .shared(for: controller)) { page = .cart }
+            }
+            SheetNote("A DX7 cartridge (.syx) becomes a user bank on RemoteFM1 0.3.0 or later.")
         }
     }
 }

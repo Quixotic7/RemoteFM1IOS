@@ -174,7 +174,7 @@ public final class ControllerInput {
     }
 
     #if canImport(CoreMIDI)
-    private static func name(_ o: MIDIObjectRef) -> String {
+    nonisolated static func name(_ o: MIDIObjectRef) -> String {
         var s: Unmanaged<CFString>?
         if MIDIObjectGetStringProperty(o, kMIDIPropertyDisplayName, &s) != noErr || s == nil {
             MIDIObjectGetStringProperty(o, kMIDIPropertyName, &s)
@@ -182,14 +182,14 @@ public final class ControllerInput {
         return (s?.takeRetainedValue() as String?) ?? ""
     }
 
-    private static func offline(_ o: MIDIObjectRef) -> Bool {
+    nonisolated static func offline(_ o: MIDIObjectRef) -> Bool {
         var v: Int32 = 0
         return MIDIObjectGetIntegerProperty(o, kMIDIPropertyOffline, &v) == noErr && v != 0
     }
 
     /// RemoteMidi.c's cm_scan, for a source: its device's USB IDs (none on Bluetooth MIDI), else an "FM-1" name; a
     /// source with no device (a virtual one): the website's name test
-    static func isFM1(_ src: MIDIEndpointRef) -> Bool {
+    nonisolated static func isFM1(_ src: MIDIEndpointRef) -> Bool {
         var ent = MIDIEntityRef(), dev = MIDIDeviceRef()
         guard MIDIEndpointGetEntity(src, &ent) == noErr, ent != 0 else { return unitName(name(src)) }
         MIDIEntityGetDevice(ent, &dev)

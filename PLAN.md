@@ -542,3 +542,16 @@ Nothing of the website's installer was read or copied.
   the restart, the Bluetooth filter, the panel reconnecting afterwards, an AU in another app yielding, the screen
   staying on, and a cable pulled mid-write then resumed; the prompt with a real FM-1 on another firmware (USB and
   Bluetooth) and with an older RemoteFM1.
+
+## 14. Sending a DX7 cartridge (user banks)
+
+RemoteFM1 0.3.0 keeps a DX7 32-voice bulk dump (4104 bytes, `F0 43 0n 09 20 00`, 4096 data, checksum, `F7`) as a
+user bank (RemoteFM1's `docs/CART-UPLOAD.md`, branch cart-upload). Settings › Send a DX7 cartridge (RFMKit `Cart/`):
+`DX7Cart` parses a file (one or more dumps back to back), recomputes a wrong checksum, sets the channel to 0, lists
+the 32 voice names, and refuses anything else in plain words. `CartSender` lets the app's panel go of the FM-1 as for
+an install (the session ended, the lease held as "sending a cartridge"), waits 400 ms, sends each dump as one SysEx
+(MIDISendSysex) to the FM-1 destination found by RemoteMidi.c's rule (`ControllerInput.isFM1`; several: the page
+asks), 1 s between dumps, Bluetooth in 512-byte parts 100 ms apart, then restarts the panel. 0.3.0 sends no reply:
+"Sent: the FM-1 should now show the new USER bank". App only (not the AU). The simulator, the fake link and DEBUG's
+`-cartdemo` use `FakeCartTransport`, which sends nothing. An .syx opened from Files or AirDrop lands on the page
+(imported UTI `com.quixotic7.remotefm1.syx`). Tests: CartTests. Later: 0.3.1's bank query after sending.

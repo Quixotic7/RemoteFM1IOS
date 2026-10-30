@@ -19,11 +19,14 @@ extension RemoteController: PanelLinkPausing {
 
     public var unitHello: UnitHello? { hello }
 
-    public func pauseForInstall() async -> Bool {
+    public func pauseForInstall() async -> Bool { await pause(as: "RemoteFM1 app / installing firmware") }
+
+    /// the session stopped and the lease held under this name (an install; a cartridge sent: CartTransport+App.swift)
+    func pause(as name: String) async -> Bool {
         let wasRunning = isRunning
         if let session {
             await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
-                session.hold(as: "RemoteFM1 app / installing firmware") { _ in k.resume() }
+                session.hold(as: name) { _ in k.resume() }
             }
         } else if let core {
             rfmc_stop(core)

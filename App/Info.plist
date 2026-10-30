@@ -16,6 +16,18 @@
 				<string>com.quixotic7.rfm1</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>DX7 cartridge</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.quixotic7.remotefm1.syx</string>
+			</array>
+		</dict>
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
@@ -43,6 +55,30 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>rfm1</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>MIDI System Exclusive file</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.quixotic7.remotefm1.syx</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>syx</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-sysex</string>
 				</array>
 			</dict>
 		</dict>

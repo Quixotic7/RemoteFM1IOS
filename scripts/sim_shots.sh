@@ -5,7 +5,7 @@
 # closed): builds, then on an iPhone and an iPad simulator launches the app once per state with its launch arguments
 # (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps; M8: -demomap,
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
-# -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo) and saves a PNG
+# -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo; the cartridge page: -sheetpage cart, DEBUG's -cartdemo) and saves a PNG
 # per state ("name@s": that shot waits s seconds). The iPhone fixes: -sheetpage keychannel | midimode, DEBUG's
 # -firmwareedit [ask] (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
 # install | unanswered | bluetooth | update. The core runs (ChoralRoot by default) so the real framebuffer shows;
@@ -81,6 +81,7 @@ PHONE_SHOTS=(
     "phone-install-check@10|-source fm1 -view full -sheetpage install -installdemo check -orientation portrait"
     "phone-install-writing@9|-source fm1 -view full -sheetpage install -installdemo writing -orientation portrait"
     "phone-install-finished@45|-source fm1 -view full -sheetpage install -installdemo finished -orientation portrait"
+    "phone-cart|-source fm1 -view full -sheetpage cart -cartdemo -orientation portrait"
     "phone-install-cutoff@25|-source fm1 -view full -sheetpage install -installdemo cutoff -orientation portrait"
 )
 PAD_SHOTS=(

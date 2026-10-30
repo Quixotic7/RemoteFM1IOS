@@ -260,6 +260,14 @@ now (remembered until a newer release). Over Bluetooth it says to connect a USB 
 newest release gets a small notice instead. Never during an install or while an AU instance holds the FM-1; the AU's
 FM-1 card only says to install from the app.
 
+## Sending a DX7 cartridge
+
+Controls › Settings › Send a DX7 cartridge sends DX7 32-voice cartridges (.syx, picked in Files or opened from Files
+or AirDrop) to an FM-1 running RemoteFM1 0.3.0 or later, which keeps each as a user bank (USER1..USER3; a fourth
+replaces the oldest). The page shows the voice names and fixes a wrong checksum or channel; the panel lets go of the
+FM-1 while it sends. USB is preferred; Bluetooth MIDI is paced. Screenshot: `MATCH=cart scripts/sim_shots.sh`
+(`-sheetpage cart -cartdemo`). PLAN.md section 14.
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
