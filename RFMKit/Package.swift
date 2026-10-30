@@ -3,7 +3,7 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // RFMKit: libremotefm1 and FM1VST's CoreMIDI back end (in place, from vendor/FM1VST, through the vendor symlink),
 // RemoteLink (a copy, RFMCore/RemoteLink.h says what changed), the AUv3's render kernel and M2's probes, and the Swift
-// API the app and the extension use.
+// API the app and the extension use. FM1Kit (MIT, github.com/ocean/FM1Kit): installing RemoteFM1 on the FM-1 (Install/).
 import PackageDescription
 
 let rfm = "remote/RemoteFM1"            // inside vendor/FM1VST
@@ -15,6 +15,10 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "RFMKit", targets: ["RFMKit"]),
+    ],
+    dependencies: [
+        // 0.4.x fixes, not 0.5 (FM1Kit's minor versions may change its API before 1.0)
+        .package(url: "https://github.com/ocean/FM1Kit.git", .upToNextMinor(from: "0.4.5")),
     ],
     targets: [
         // libremotefm1 (portable C99), RemoteFM1's macOS glue (host.c) and FM1VST's CoreMIDI back end
@@ -80,9 +84,10 @@ let package = Package(
             linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("AVFoundation")]
         ),
         // the UI's fonts (OFL, bundled) and design/tokens.json (a copy; a test keeps the two equal)
-        .target(name: "RFMKit", dependencies: ["RFMCore"],
+        .target(name: "RFMKit", dependencies: ["RFMCore", .product(name: "FM1Kit", package: "FM1Kit")],
                 resources: [.copy("Resources/Fonts"), .copy("Resources/tokens.json")]),
-        .testTarget(name: "RFMKitTests", dependencies: ["RFMKit"], exclude: ["Fixtures"]),
+        .testTarget(name: "RFMKitTests", dependencies: ["RFMKit", .product(name: "FM1Kit", package: "FM1Kit")],
+                    exclude: ["Fixtures"]),
     ],
     swiftLanguageModes: [.v6],
     cLanguageStandard: .c99,
