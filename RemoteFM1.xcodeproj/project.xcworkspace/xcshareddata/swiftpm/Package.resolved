@@ -1,0 +1,15 @@
+{
+  "originHash" : "3c0327c3981fea7e8efea45872f23dd1043c4b1d4f34d34116b14ae8dc149f5d",
+  "pins" : [
+    {
+      "identity" : "fm1kit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ocean/FM1Kit.git",
+      "state" : {
+        "revision" : "88b609cd8c631b884d977b7954cb0b21351f2f04",
+        "version" : "0.4.5"
+      }
+    }
+  ],
+  "version" : 3
+}

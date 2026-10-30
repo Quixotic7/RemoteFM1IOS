@@ -11,6 +11,7 @@
 // M8: the MIDI & audio page has the MIDI input (a sub-page), the notes' settings, Knobs from MIDI (MIDI learn, the
 // knob speed, the mappings) and the OMX-27; Learn closes the sheet and puts the faceplate in learn mode (its bar and
 // the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
+// Settings › Install RemoteFM1 on the FM-1 (RFMKit's Install/: FM1Kit over USB; -sheetpage install).
 
 import UniformTypeIdentifiers
 
@@ -56,7 +57,7 @@ struct LaunchOptions {
 }
 
 enum SoundSource: String { case phone, fm1 }
-enum AppSheetPage: String { case firmware, midi, midiInput = "midiinput", settings }
+enum AppSheetPage: String { case firmware, midi, midiInput = "midiinput", settings, install }
 
 struct MainScreen: View {
     let controller: RemoteController
@@ -221,6 +222,7 @@ struct MainScreen: View {
         case .midi: midiPage
         case .midiInput: midiInputPage
         case .settings: settingsPage
+        case .install: InstallFirmwarePage(installer: .shared(for: controller)) { page = .settings }
         case nil: mainSheet
         }
     }
@@ -398,6 +400,8 @@ struct MainScreen: View {
                 SheetRow("AU test", divider: false) { showAUTest = true }
             }
             SheetNote("Diagnostics has the link, the core, the unit's HELLO_R and the test pattern mode.")
+            SheetSectionTitle("FM-1 firmware")
+            SheetList { InstallFirmwareRow(installer: .shared(for: controller)) { page = .install } }
         }
     }
 }

@@ -2,8 +2,9 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // Diagnostics (the sheet's Settings -> Diagnostics; the app's one screen before the faceplate): the link's state and
 // controls, the mode (M1's test pattern, or a firmware core: M3), the firmware, the sound, the frame being sent, the
-// core's numbers, the unit's HELLO_R, the link's numbers and the panel's last events, and the AU test. Two columns on
-// a regular width (iPad), one on an iPhone.
+// core's numbers, the unit's HELLO_R (with the RemoteFM1 version on it, "Update available" and the installer's page),
+// the link's numbers and the panel's last events, and the AU test. Two columns on a regular width (iPad), one on an
+// iPhone.
 
 import RFMKit
 import SwiftUI
@@ -235,13 +236,18 @@ struct PanelCard: View {
 
 struct UnitCard: View {
     let controller: RemoteController
+    @State private var showInstall = false
 
     var body: some View {
+        let installer = FirmwareInstaller.shared(for: controller)
         Card(title: "Unit (HELLO_R)") {
             if let h = controller.hello {
                 Rows(rows: [
                     ("name", h.name),
                     ("firmware", "\(h.firmwareVersion) (ver \(h.version))"),
+                    ("RemoteFM1", installer.unitVersion.map { v in
+                        "\(v)" + (installer.updateAvailable.map { " · update available: \($0.version)" } ?? " · the newest")
+                    } ?? "–"),
                     ("proto", "\(h.proto)"),
                     ("identity", h.identity),
                     ("link", h.isBluetooth ? "Bluetooth" : "USB"),
@@ -256,6 +262,14 @@ struct UnitCard: View {
                 Text("No unit has answered yet.")
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
+            Button(installer.updateAvailable.map { "Update available: install RemoteFM1 \($0.version)…" }
+                   ?? "Install RemoteFM1 on the FM-1…") { showInstall = true }
+                .buttonStyle(.bordered)
+                .tint(installer.updateAvailable == nil ? nil : DebugTheme.accent)
+        }
+        .task { await installer.releases.refreshIfStale() }
+        .sheet(isPresented: $showInstall) {
+            InstallFirmwareScreen(installer: installer) { showInstall = false }
         }
     }
 }
