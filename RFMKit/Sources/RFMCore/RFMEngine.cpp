@@ -192,7 +192,9 @@ struct rfme final : rfm::HostParams::Panel {
     int8_t noteKey[16][128];
     uint32_t inRing[kInRing] = {};
     uint32_t inR = 0, inW = 0;
-    std::atomic<int> notesPlayKeys{1}, transpose{0}, keyNotesToFw{0};
+    std::atomic<int> keyChannel{RFME_KEYS_ANY}, transpose{0}, keyNotesToFw{0};
+    std::atomic<bool> mapOn{true};
+    bool mapWasOn = true;                   // (the core thread's) mapOn as syncMap last saw it
     std::atomic<bool> midiOutOn{false};
     rfm::Spsc<OutPacket, 2048> midiOutQ;                 // the core thread -> the render thread (the AU's MIDI output)
     std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
@@ -404,13 +406,18 @@ struct rfme final : rfm::HostParams::Panel {
 
     // ---- (M8) learn and the learned map (the clock's thread)
     // the newest map, if rfme_set_midi_map gave one since: whatever the old one held is let go
+    // turned off (rfme_set_midi): let go of what it held, its pots start again when it is back on
     void syncMap()
     {
-        const rfm::MapTable *t = mapIn.take();
-        if (!t)
-            return;
         uint32_t held = 0;
-        mapper->adopt(*t, &held);
+        if (const rfm::MapTable *t = mapIn.take())
+            mapper->adopt(*t, &held);
+        const bool on = mapOn.load(std::memory_order_relaxed);
+        if (on != mapWasOn) {
+            mapWasOn = on;
+            if (!on)
+                held |= mapper->rest();
+        }
         for (int l = 0; l < FM1P_NB; l++)
             if ((held >> l) & 1u)
                 mapButton(l, false);
@@ -485,7 +492,9 @@ struct rfme final : rfm::HostParams::Panel {
         }
     }
 
-    // one host MIDI message (Processor.cpp handleMidi + forwardMidi); M8: learn, then the learned map, first
+    // one host MIDI message (Processor.cpp handleMidi + forwardMidi); M8: learn, then the learned map (when on),
+    // first. Note-ons on the keys' channel (or any) play the keys; a note-off lets go of the key its note-on
+    // pressed, whatever the channel setting is now
     void hostMidi(const uint8_t *d, uint32_t n)
     {
         if (n == 0 || !(d[0] & 0x80))
@@ -494,18 +503,20 @@ struct rfme final : rfm::HostParams::Panel {
         if (learnTake(d, n))
             return;
         rfm::MidiMapper::Act act;
-        if (mapper->feed(d, n, masterV, act)) {         // (a mapped source is always consumed)
+        if (mapWasOn && mapper->feed(d, n, masterV, act)) {   // (a mapped source is always consumed)
             midiMapped.fetch_add(1, std::memory_order_relaxed);
             mapAct(act);
             return;
         }
         bool keyNote = false;
-        if (notesPlayKeys.load(std::memory_order_relaxed) && d[0] < 0xF0) {
+        if (d[0] < 0xF0) {
             const uint8_t st = d[0] & 0xF0, ch = d[0] & 0x0F;
             const uint8_t note = n > 1 ? (d[1] & 0x7F) : 0, vel = n > 2 ? (d[2] & 0x7F) : 0;
+            const int kc = keyChannel.load(std::memory_order_relaxed);
+            const bool keysHere = kc == RFME_KEYS_ANY || kc == ch + 1;
             if (st == 0x90 && n >= 3 && vel > 0) {
                 const int key = (int)note - kNoteBase + 12 * transpose.load(std::memory_order_relaxed);
-                if (noteKey[ch][note] < 0 && key >= 0 && key < FM1P_NKEY) {
+                if (keysHere && noteKey[ch][note] < 0 && key >= 0 && key < FM1P_NKEY) {
                     noteKey[ch][note] = (int8_t)key;
                     midiVel[key] = vel;
                     keyCount[key]++;
@@ -1326,9 +1337,10 @@ uint32_t rfme_latency(rfme_t *e, double rate, uint32_t buffer)
 
 void rfme_set_offline(rfme_t *e, int on) { e->offline.store(on != 0); }
 
-void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware)
+void rfme_set_midi(rfme_t *e, int key_channel, int transpose, int key_notes_to_firmware, int use_map)
 {
-    e->notesPlayKeys.store(notes_play_keys != 0);
+    e->keyChannel.store(key_channel < RFME_KEYS_OFF || key_channel > 16 ? RFME_KEYS_OFF : key_channel);
+    e->mapOn.store(use_map != 0);
     e->transpose.store(transpose < -2 ? -2 : transpose > 2 ? 2 : transpose);
     e->keyNotesToFw.store(key_notes_to_firmware != 0);
 }

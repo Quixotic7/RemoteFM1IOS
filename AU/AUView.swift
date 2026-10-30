@@ -126,23 +126,27 @@ struct AUSheet: View {
         return VStack(spacing: 0) {
             SheetSectionTitle("MIDI").id("midi")
             SheetList {
-                SheetToggle("MIDI notes play keys", on: Binding(get: { s.notesPlayKeys },
-                                                                set: { v in set { $0.notesPlayKeys = v } }))
-                SheetToggle("...and reach the firmware's MIDI in", on: Binding(get: { s.keyNotesToFirmware },
-                                                                              set: { v in set { $0.keyNotesToFirmware = v } }))
-                    .disabled(!s.notesPlayKeys)
-                    .opacity(s.notesPlayKeys ? 1 : 0.45)
+                KeyChannelRows(channel: Binding(get: { s.keyChannel }, set: { v in set { $0.keyChannel = v } }),
+                               toFirmware: Binding(get: { s.keyNotesToFirmware },
+                                                   set: { v in set { $0.keyNotesToFirmware = v } }))
                 SheetStepper("MIDI octave", value: Binding(get: { s.transpose }, set: { v in set { $0.transpose = v } }),
                              in: -2...2)
                 SheetToggle("Send the host's clock and transport", on: Binding(get: { s.hostClock },
                                                                               set: { v in set { $0.hostClock = v } }))
+                SheetToggle("Use learned knobs", on: useMap)
                 SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
                          : "\(MidiMapStore.shared.mappings.count) learned", divider: false) { model.page = .midi }
             }
-            SheetNote("Off: every note goes to the firmware's MIDI in (FIZZ's tracks). The host's clock: its tempo, "
-                      + "start, stop and position as MIDI clock (clock in the host's MIDI is then dropped). The "
-                      + "firmware's MIDI out is this instrument's MIDI output.")
+            SheetNote("Keys from MIDI: notes on that channel (or any) play the keys. Notes on other channels, every "
+                      + "note when Off (FIZZ's tracks), and whatever the learned knobs don't take go to the firmware's "
+                      + "MIDI in. Use learned knobs off: the mappings are kept but do nothing; Learn still works. The host's clock: its tempo, start, stop and position as MIDI clock (clock "
+                      + "in the host's MIDI is then dropped). The firmware's MIDI out is this instrument's MIDI output.")
         }
+    }
+
+    /// AUSettings.useLearnedMap
+    private var useMap: Binding<Bool> {
+        Binding(get: { model.status.settings.useLearnedMap }, set: { v in model.changeSettings { $0.useLearnedMap = v } })
     }
 
     /// the panel's state, "Use this FM-1" (design section 10: when another instance holds it) and the Bluetooth pairing
@@ -214,7 +218,7 @@ struct AUSheet: View {
     /// Knobs from MIDI: learned from the host's MIDI (route a controller to this instrument in the host)
     private var midiPage: some View {
         SheetPage("Knobs from MIDI", back: { model.page = nil }) {
-            MidiMapSection(top: 12, titled: false) { model.startLearn() }
+            MidiMapSection(top: 12, titled: false, useMap: useMap) { model.startLearn() }
             SheetNote("Learn listens to the MIDI the host sends this instrument: route your controller to it. The "
                       + "mappings are shared by the RemoteFM1 app and every instance.")
         }

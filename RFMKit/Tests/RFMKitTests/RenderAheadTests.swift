@@ -215,7 +215,7 @@ final class RenderAheadTests: XCTestCase {
         for core in ["felucca", "choralroot", "melodee", "saadet"] {
             let e = try engine(core)
             rfme_midi_out_enable(e, 1)
-            rfme_set_midi(e, 1, 0, 0)
+            rfme_set_midi(e, 0, 0, 0, 1)
             let d = CallbackDriver(e, frames: 128, rate: rate, record: true)
             d.event(at: at, offset: offset, [0x90, 62, 110])
             d.start(count: at + 200)

@@ -105,22 +105,61 @@ public struct InstanceState: Equatable, Sendable {
 
 /// The instance's per-instance settings (FM1VST's MIDI options; the host's clock, PLAN.md section 11)
 public struct AUSettings: Equatable, Sendable {
-    public var notesPlayKeys = true             // MIDI notes 53.. play the FM-1's keys
+    /// whose MIDI notes play the FM-1's keys: any channel, one, or none
+    public enum KeyChannel: Equatable, Hashable, Sendable {
+        case any, channel(Int), off
+
+        /// all of them, in the picker's order
+        public static let all: [KeyChannel] = [.any] + (1...16).map { .channel($0) } + [.off]
+
+        public var label: String {
+            switch self {
+            case .any: "Any"
+            case .channel(let c): "Ch \(c)"
+            case .off: "Off"
+            }
+        }
+
+        /// rfme_set_midi's key_channel: 0 any, 1..16, -1 off
+        public var engineValue: Int32 {
+            switch self {
+            case .any: 0
+            case .channel(let c): Int32(c)
+            case .off: -1
+            }
+        }
+
+        public init(engineValue v: Int) {
+            self = v == 0 ? .any : (1...16).contains(v) ? .channel(v) : .off
+        }
+    }
+
+    public var keyChannel = KeyChannel.any      // MIDI notes 53.. on it play the FM-1's keys; the rest go to the firmware
     public var transpose = 0                    // octaves, -2..2
     public var keyNotesToFirmware = false       // the notes that played a key also go to the firmware's MIDI in
+    public var useLearnedMap = true             // MIDI learn's knobs and buttons play (off: kept, their messages flow on)
     public var hostClock = true                 // the host's tempo and transport as MIDI clock to the firmware
     public init() {}
 
+    /// notes play keys at all (the old on/off)
+    public var notesPlayKeys: Bool { keyChannel != .off }
+
     init(_ d: [String: Any]?) {
-        notesPlayKeys = (d?["notesPlayKeys"] as? NSNumber)?.boolValue ?? true
+        if let c = (d?["keyChannel"] as? NSNumber)?.intValue {
+            keyChannel = KeyChannel(engineValue: c)
+        } else if let old = (d?["notesPlayKeys"] as? NSNumber)?.boolValue {
+            keyChannel = old ? .any : .off              // (saved before the channel choice)
+        }
         transpose = max(-2, min(2, (d?["transpose"] as? NSNumber)?.intValue ?? 0))
         keyNotesToFirmware = (d?["keyNotesToFirmware"] as? NSNumber)?.boolValue ?? false
+        useLearnedMap = (d?["useLearnedMap"] as? NSNumber)?.boolValue ?? true
         hostClock = (d?["hostClock"] as? NSNumber)?.boolValue ?? true
     }
 
+    /// (notesPlayKeys too, for an older build reading it)
     var dict: [String: Any] {
-        ["notesPlayKeys": notesPlayKeys, "transpose": transpose, "keyNotesToFirmware": keyNotesToFirmware,
-         "hostClock": hostClock]
+        ["keyChannel": Int(keyChannel.engineValue), "notesPlayKeys": notesPlayKeys, "transpose": transpose,
+         "keyNotesToFirmware": keyNotesToFirmware, "useLearnedMap": useLearnedMap, "hostClock": hostClock]
     }
 }
 

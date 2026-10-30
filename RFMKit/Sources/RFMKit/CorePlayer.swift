@@ -341,7 +341,7 @@ public final class CorePlayer {
 
     private func applyMidiSettings() {
         let m = midiSettings
-        rfme_set_midi(e, m.notesPlayKeys ? 1 : 0, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0)
+        rfme_set_midi(e, m.keyChannel.engineValue, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0, m.useLearnedMap ? 1 : 0)
     }
 
     public func setAudio(_ on: Bool) {

@@ -102,15 +102,28 @@ final class AUMidiTests: XCTestCase {
 
     func testSettingsDefaultsAndState() {
         let d = AUSettings()
-        XCTAssertTrue(d.notesPlayKeys)
+        XCTAssertEqual(d.keyChannel, .any)
         XCTAssertEqual(d.transpose, 0)
         XCTAssertFalse(d.keyNotesToFirmware)
+        XCTAssertTrue(d.useLearnedMap)
         XCTAssertTrue(d.hostClock)
         XCTAssertEqual(AUSettings([:]), d, "a state without the keys: the defaults")
         XCTAssertEqual(AUSettings(["notesPlayKeys": true, "transpose": 0, "keyNotesToFirmware": false]), d,
                        "a state from before the host clock: on")
+        XCTAssertEqual(AUSettings(["notesPlayKeys": false]).keyChannel, .off, "an old \"notes play keys\" off")
+        XCTAssertEqual(AUSettings(["notesPlayKeys": true]).keyChannel, .any)
+        XCTAssertEqual(AUSettings(["keyChannel": 10, "notesPlayKeys": true]).keyChannel, .channel(10))
+        XCTAssertEqual(AUSettings(["keyChannel": 0, "notesPlayKeys": false]).keyChannel, .any, "keyChannel wins")
+        XCTAssertEqual(AUSettings(["keyChannel": 99]).keyChannel, .off)
+        XCTAssertEqual(AUSettings.KeyChannel.all.count, 18)
+        for k in AUSettings.KeyChannel.all { var x = d; x.keyChannel = k; XCTAssertEqual(AUSettings(x.dict), x) }
+        XCTAssertEqual(AUSettings(["useLearnedMap": false]).useLearnedMap, false)
         var s = d
-        s.notesPlayKeys = false
+        s.keyChannel = .channel(7)
+        s.useLearnedMap = false
+        XCTAssertEqual(s.dict["notesPlayKeys"] as? Bool, true, "an older build reads the keys on")
+        XCTAssertEqual(AUSettings(s.dict), s)
+        s.keyChannel = .off
         s.keyNotesToFirmware = true
         s.hostClock = false
         s.transpose = -1
@@ -121,8 +134,8 @@ final class AUMidiTests: XCTestCase {
     }
 
     /// the switches reach the firmware: a key note (60) plays the keys and stays away from the firmware by default;
-    /// "...and reach the firmware" sends it too; with "notes play keys" off every note goes there. Note 30 (no key)
-    /// always goes there. And fullState carries them to a new instance.
+    /// "...and reach the firmware" sends it too; with the keys off every note goes there, and with the keys on
+    /// channel 2 channel 1's notes do. Note 30 (no key) always goes there.
     func testSwitchesReachTheFirmware() throws {
         let (au, log) = try makeAU(host: nil)
         render(au, count: 20)
@@ -139,9 +152,12 @@ final class AUMidiTests: XCTestCase {
         au.settings.keyNotesToFirmware = true
         XCTAssertTrue(play(60), "...and reach the firmware: the key note too")
         au.settings.keyNotesToFirmware = false
-        au.settings.notesPlayKeys = false
+        au.settings.keyChannel = .off
         XCTAssertTrue(play(60), "notes don't play keys: every note to the firmware")
         XCTAssertEqual(au.status().midiNotes, 2, "a note played a key with the keys off")
+        au.settings.keyChannel = .channel(2)
+        XCTAssertTrue(play(60), "keys on channel 2: a channel 1 note to the firmware")
+        XCTAssertEqual(au.status().midiNotes, 2)
     }
 
     // MARK: the host's clock
@@ -232,7 +248,7 @@ final class AUMidiTests: XCTestCase {
     /// MIDI that caused it, within one device block, inside the render that plays its frame
     func testCoreMIDIOutReachesTheOutputBlock() throws {
         var s = AUSettings()
-        s.notesPlayKeys = false
+        s.keyChannel = .off
         let (au, log) = try makeAU(host: nil, settings: s)
         render(au, count: 20)
         let base = 20 * frames

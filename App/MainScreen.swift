@@ -408,18 +408,18 @@ struct MainScreen: View {
             SheetSectionTitle("MIDI")
             SheetList {
                 SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { page = .midiInput }
-                SheetToggle("MIDI notes play keys", on: m.notesPlayKeys)
-                SheetToggle("...and reach the firmware's MIDI in", on: m.keyNotesToFirmware)
+                KeyChannelRows(channel: m.keyChannel, toFirmware: m.keyNotesToFirmware)
                 SheetStepper("Transpose", value: m.transpose, in: -2...2) { t in
                     t == 0 ? "0" : "\(t > 0 ? "+" : "−")\(abs(t)) oct"
                 }
                 SheetRow("Bluetooth MIDI devices") { showBluetooth = true }
                 SheetRow("Look for the FM-1 again", divider: false, chevron: false) { controller.rescan() }
             }
-            SheetNote("A MIDI keyboard plays the keys (transposed by octaves); the other notes, and every note when "
-                      + "they don't play the keys, go to the firmware's MIDI in.")
+            SheetNote("Keys from MIDI: notes on that channel (or any) play the keys, transposed by octaves. Notes on "
+                      + "other channels, notes outside the keys, every note when Off, and whatever the learned knobs "
+                      + "don't take go to the firmware's MIDI in.")
             SheetNote("FM-1 link: \(controller.statusText)")
-            MidiMapSection(learn: startLearn).id("knobs")
+            MidiMapSection(useMap: m.useLearnedMap, learn: startLearn).id("knobs")
             SheetSectionTitle("OMX-27").id("omx")
             OmxSection(link: midi.omx)
         }

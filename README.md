@@ -28,7 +28,7 @@ screen, the test pattern and the AU test).
   a small AUv3 host for its own extension.
 - `AU/`: the AUv3 extension `RemoteFM1AU` (aumu `Rfm1` `Qx7u`, "Quixotic7: RemoteFM1"): its view controller, which is
   also the AU factory, and its SwiftUI view (the faceplate; its sheet: Use this FM-1, Bluetooth, view, theme,
-  firmware and About, Diagnostics, MIDI: notes play keys, the octave, the host's clock, Knobs from MIDI).
+  firmware and About, Diagnostics, MIDI: keys from MIDI, the octave, the host's clock, Knobs from MIDI).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
   `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
   needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
@@ -190,12 +190,14 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
 ## MIDI controllers, MIDI learn and the OMX-27
 
 - **A MIDI keyboard or controller** (USB or Bluetooth): Controls › MIDI & audio › MIDI input (All by default, None,
-  or one device). Its notes play the keys (Transpose: octaves); "...and reach the firmware's MIDI in" also sends them
-  to the firmware. In the AUv3, the host's MIDI does the same (route your controller to the instrument).
+  or one device). Its notes play the keys (Keys from MIDI: any channel, one, or Off; Transpose: octaves); "...and
+  reach the firmware's MIDI in" also sends them to the firmware. In the AUv3, the host's MIDI does the same (route
+  your controller to the instrument).
 - **MIDI learn**: Knobs from MIDI › Learn (in the app and the AUv3), then tap a knob, MASTER or a button on the panel,
   then move a control on your device. Done ends it; Forget drops the tapped control's bindings. The list shows each
   mapping (an encoder's mode can be changed; × removes it); Knob speed sets detents per CC step. One set of mappings
-  for the app and every AU instance.
+  for the app and every AU instance; Use learned knobs (on) turns them off for the app or one instance without
+  forgetting them (their messages then go on to the keys and the firmware).
 - **OMX-27** (the app): MIDI & audio › Connect my OMX-27, with the OMX-27 on USB and its firmware with REMOTE mode.
   Its keys, encoder and pots play the FM-1; K1 picks the view, K2 the colours, K5 is MASTER. It connects by itself
   next time. To leave remote mode, hold AUX and the encoder on the OMX-27.
@@ -204,9 +206,12 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
 
 The instrument's sheet › MIDI (each instance its own, saved with the host's project):
 
-- **MIDI notes play keys** (on): notes 53 and up play the FM-1's 27 keys (MIDI octave shifts them). Off: every note
-  goes to the firmware's MIDI in, for firmware with MIDI of its own (FIZZ: notes for its tracks, CCs for parameters).
-  The other messages (CCs, pitch bend, notes outside the keys) always go there.
+- **Keys from MIDI** (Any): notes 53 and up on any channel, or on the one picked, play the FM-1's 27 keys (MIDI
+  octave shifts them); notes on other channels go to the firmware's MIDI in. Off: every note goes there, for firmware
+  with MIDI of its own (FIZZ: notes for its tracks, CCs for parameters). The other messages (CCs, pitch bend, notes
+  outside the keys) always go there, unless a learned knob takes them.
+- **Use learned knobs** (on): MIDI learn's mappings play the panel. Off: they are kept but do nothing, and their
+  messages go on to the keys and the firmware.
 - **...and reach the firmware's MIDI in** (off): the notes that play keys also go to the firmware.
 - **Send the host's clock and transport** (on): the host's tempo and transport as MIDI clock (24 per beat), Start,
   Stop, Continue and Song Position, so a firmware's sequencer follows the host. Only hosts that give their tempo and

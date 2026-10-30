@@ -336,9 +336,15 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
 
 - **Controller input (app).** `ControllerInput` (RFMKit/MIDI) connects the CoreMIDI sources picked on MIDI & audio ›
   MIDI input (All, None, one device), never the FM-1 and never the OMX-27 while it is in REMOTE mode. Channel messages
-  go to the engine (`rfme_midi_in`): learn, then the learned map, then notes 53.. play the keys (transposed, -2..+2
-  octaves), the rest to the firmware's MIDI in. "...and reach the firmware's MIDI in" also sends the key notes there.
-  The AU gets its host's MIDI the same way (its own AUSettings).
+  go to the engine (`rfme_midi_in`): learn, then the learned map (when Use learned knobs is on), then notes 53.. on
+  the keys' channel play the keys (transposed, -2..+2 octaves), the rest to the firmware's MIDI in. "...and reach the
+  firmware's MIDI in" also sends the key notes there. The AU gets its host's MIDI the same way (its own AUSettings).
+- **Keys from MIDI and Use learned knobs** (the owner's wish: the firmware has MIDI of its own, so the host's mapping
+  can get in its way). Keys from MIDI: Any (the default), a channel 1–16, or Off; notes on other channels go to the
+  firmware. A note-off lets go of the key its note-on pressed even after the setting changed (`noteKey` per channel).
+  Use learned knobs off keeps the map but skips it (`rfme_set_midi`'s use_map): what it held is let go, its pots
+  start again from their next value, mapped messages flow on to the keys and the firmware; learn still works. Both in
+  `AUSettings` (the old `notesPlayKeys` reads as Any or Off, and is still written for an older build).
 - **MIDI learn (app and AU).** Knobs from MIDI › Learn closes the sheet: the learnable controls (7 encoders, MASTER, 14
   buttons) are outlined, a tap picks one, the next CC or note binds to it (the mode guessed for an encoder's CC).
   The map is global (`MidiMapStore`: `midi-map.json` in the App Group, a Darwin notification on save) and runs on the
@@ -363,9 +369,10 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
 The owner's wish: in an AU host the firmware gets the MIDI (FIZZ drives each track from notes and takes CCs for its
 parameters), follows the host's clock and transport, and its MIDI out reaches the host.
 
-- **The switches** (the AU's sheet, MIDI; per instance in `AUSettings`, so in `fullState`): MIDI notes play keys (on),
-  ...and reach the firmware's MIDI in (off), MIDI octave (0), Send the host's clock and transport (on). The first
-  three as the app's; off, every note goes to the core's `midi_in` (RFMEngine's host MIDI path, section 10).
+- **The switches** (the AU's sheet, MIDI; per instance in `AUSettings`, so in `fullState`): Keys from MIDI (Any, a
+  channel, Off), ...and reach the firmware's MIDI in (off), MIDI octave (0), Send the host's clock and transport
+  (on), Use learned knobs (on). All but the clock as the app's; Off, every note goes to the core's `midi_in`
+  (RFMEngine's host MIDI path, section 10).
 - **The host's clock.** Hosts don't send MIDI clock to instruments, so the render block reads `musicalContextBlock`
   (tempo, beat) and `transportStateBlock` (moving, cycling, the cycle) every buffer and `RFMHostClock` (plain C++,
   `rfmhc_run`) makes the messages with their frames: 0xF8 every 1/24 beat while moving; Start at beat 0, else Song
@@ -470,7 +477,8 @@ Nothing of the website's installer was read or copied.
 - **The flow** (`FirmwareInstaller`): Check the FM-1 (FM1Kit's `identify`: a unit in its loader is offered "Finish
   the install"; `check`: what it runs and what the install does), then confirm (FM1Kit counts any change between
   custom firmwares, RemoteFM1 0.2.2 → 0.2.3 too, as a firmware switch, which can erase projects and samples; a
-  reinstall is confirmed too), then the install in a full-screen cover that can't be dismissed (FM1Kit's
+  reinstall is confirmed too; the page says plainly "Updates RemoteFM1 0.2.2 to 0.2.3." and warns about erasing only
+  for a switch from another firmware), then the install in a full-screen cover that can't be dismissed (FM1Kit's
   `InstallProgress`: getting ready, installing, checking, restarting), the screen kept awake (`isIdleTimerDisabled`)
   and a background task's grace period. Errors in FM1Kit's words (`FM1Advice`), "Finish the install" (`resume`, the
   same package) when it was cut off.

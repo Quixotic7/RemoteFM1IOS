@@ -204,11 +204,70 @@ final class MidiEngineTests: XCTestCase {
         send(c, noteOff(62), firmware: true)
         c.run(10)
         XCTAssertEqual(c.status.midi_to_core - s0.midi_to_core, 2)
-        rfme_set_midi(c.e, 1, 1, 0)                     // (FM1VST's transpose, +1 octave: D3 plays key 9)
+        rfme_set_midi(c.e, 0, 1, 0, 1)                   // (FM1VST's transpose, +1 octave: D3 plays key 9)
         XCTAssertNotEqual(feed(c, noteOn(50)).keys & (1 << 9), 0)
         feed(c, noteOff(50))
         XCTAssertEqual(rfme_midi_in(c.e, [0xF0, 1, 2], 3, 0), 0, "SysEx: not passed")
         XCTAssertEqual(rfme_midi_in(c.e, [0x40], 1, 0), 0, "no status byte")
+    }
+
+    /// the keys' channel: any plays on every channel; channel 2 plays only there, other channels go to midi_in;
+    /// off sends every note there. A note-off lets go of the key its note-on pressed after the setting changed
+    func testKeyChannel() throws {
+        let c = try core()
+        func keyed(_ ch: Int) -> (key: Bool, toCore: UInt32) {
+            let s0 = c.status
+            let k = feed(c, noteOn(62, 100, ch)).keys & (1 << 9) != 0
+            feed(c, noteOff(62, ch))
+            XCTAssertEqual(panel(c).keys, 0)
+            return (k, c.status.midi_to_core - s0.midi_to_core)
+        }
+        XCTAssertTrue(keyed(1).key && keyed(1).toCore == 0, "any: channel 1")
+        XCTAssertTrue(keyed(9).key, "any: channel 9")
+        rfme_set_midi(c.e, 2, 0, 0, 1)
+        XCTAssertTrue(keyed(2).key, "channel 2 plays the keys")
+        XCTAssertEqual(keyed(2).toCore, 0)
+        let other = keyed(1)
+        XCTAssertFalse(other.key, "channel 1 does not")
+        XCTAssertEqual(other.toCore, 2, "its note-on and note-off go to midi_in")
+        rfme_set_midi(c.e, Int32(RFME_KEYS_OFF), 0, 0, 1)
+        let off = keyed(2)
+        XCTAssertFalse(off.key)
+        XCTAssertEqual(off.toCore, 2, "off: every note to midi_in")
+        // held across a change: the note-off still lets go of its key (and stays away from midi_in, as its note-on)
+        rfme_set_midi(c.e, Int32(RFME_KEYS_ANY), 0, 0, 1)
+        XCTAssertNotEqual(feed(c, noteOn(62, 100, 3)).keys & (1 << 9), 0)
+        rfme_set_midi(c.e, Int32(RFME_KEYS_OFF), 0, 0, 1)
+        let s0 = c.status
+        XCTAssertEqual(feed(c, noteOff(62, 3)).keys, 0, "the key let go with the keys off")
+        XCTAssertEqual(c.status.midi_to_core, s0.midi_to_core)
+        rfme_set_midi(c.e, 5, 0, 0, 1)
+        XCTAssertNotEqual(feed(c, noteOn(62, 100, 5)).keys & (1 << 9), 0)
+        rfme_set_midi(c.e, 6, 0, 0, 1)
+        XCTAssertEqual(feed(c, noteOff(62, 5)).keys, 0, "the key let go on another key channel")
+    }
+
+    /// the learned map off: a mapped CC and note flow on (the CC to midi_in, the note plays its key), what it held
+    /// is let go; on again it plays
+    func testLearnedMapSwitch() throws {
+        let c = try core()
+        let fx = UInt32(1) << UInt32(RFME_B_FX)
+        map(c, [MidiMapping(src: "cc:1:21", target: "KN1", mode: .rel64), MidiMapping(src: "cc:1:80", target: "FX"),
+                MidiMapping(src: "note:1:62", target: "HOME")])
+        XCTAssertNotEqual(feed(c, cc(80, 127)).labels & fx, 0)
+        rfme_set_midi(c.e, Int32(RFME_KEYS_ANY), 0, 0, 0)
+        XCTAssertEqual(panel(c).labels & fx, 0, "off: FX let go")
+        let k1 = enc(panel(c), Int32(RFME_E_K1)), s0 = c.status
+        feed(c, cc(21, 65))
+        XCTAssertEqual(enc(panel(c), Int32(RFME_E_K1)), k1, "KN1 does not turn")
+        XCTAssertEqual(c.status.midi_to_core - s0.midi_to_core, 1, "the mapped CC reaches midi_in")
+        XCTAssertEqual(c.status.midi_mapped, s0.midi_mapped)
+        XCTAssertNotEqual(feed(c, noteOn(62)).keys & (1 << 9), 0, "the mapped note plays its key")
+        XCTAssertEqual(feed(c, noteOff(62)).keys, 0)
+        rfme_set_midi(c.e, Int32(RFME_KEYS_ANY), 0, 0, 1)
+        XCTAssertEqual(enc(feed(c, cc(21, 65)), Int32(RFME_E_K1)) - k1, 1, "on again: KN1 turns")
+        XCTAssertEqual(feed(c, noteOn(62)).keys, 0, "and the note is HOME's")
+        feed(c, noteOff(62))
     }
 
     /// render ahead (RFME_CLOCK_AUDIO, offline so the test's renders wait for the core thread): the host's mapped CC
@@ -258,7 +317,7 @@ final class MidiEngineTests: XCTestCase {
         let q = CorePlayer(link: nil, slotsDir: CoreTests.coresDir, flashDir: flash, midiDefaults: d)
         XCTAssertEqual(q.midiSettings.transpose, -1)
         XCTAssertTrue(q.midiSettings.keyNotesToFirmware)
-        XCTAssertTrue(q.midiSettings.notesPlayKeys)
+        XCTAssertEqual(q.midiSettings.keyChannel, .any)
     }
 
     /// MidiLearn on an engine: KN1 picked, a pot moved on the controller binds it (absolute); after learn the pot

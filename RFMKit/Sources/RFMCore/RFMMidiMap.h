@@ -41,6 +41,9 @@ public:
     void seed(uint8_t ch, uint8_t num, uint8_t value);
     // nothing held (a boot): the labels the map held, now let go by the caller's reset
     void release();
+    // the map turned off: nothing held, and its pots start again from their next value. Returns the labels it
+    // held, for the caller to let go
+    uint32_t rest();
 
     static int32_t relDelta(uint8_t mode, int32_t v);
 

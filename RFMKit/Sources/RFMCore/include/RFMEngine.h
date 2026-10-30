@@ -19,8 +19,8 @@
 //   core -> files   the flash image copied by the clock every 30 device s when flash_dirty moved, or when asked; the
 //                   caller writes it (never on the audio thread)
 //   host -> core    (M4, the AUv3) host MIDI at its frame in the render (rfme_render_midi): FM1VST's mapping (notes
-//                   53.. play the keys, with the host's velocity, transposed by octaves; everything else, and the key
-//                   notes too if asked, to the core's midi_in as USB-MIDI packets)
+//                   53.. on the keys' channel, or any, play the keys, with the host's velocity, transposed by octaves;
+//                   everything else, and the key notes too if asked, to the core's midi_in as USB-MIDI packets)
 //   core -> host    (M4) the core's midi_out_take packets, to the AU's MIDI output (rfme_midi_out_take)
 //   controller      (M8) a MIDI controller's messages (rfme_midi_in) take host MIDI's path on the core thread; learn
 //                   and the learned map (rfme_set_midi_map) come first there, for host MIDI too
@@ -129,9 +129,12 @@ void rfme_set_workgroup(rfme_t *e, void *os_workgroup);
 // (control thread) the output unit's workgroup (kAudioOutputUnitProperty_OSWorkgroup of an AudioUnit, e.g.
 // AVAudioEngine's outputNode.audioUnit) to rfme_set_workgroup; 1: it had one
 int rfme_use_output_workgroup(rfme_t *e, void *audio_unit);
-// (any thread) FM1VST's settings: MIDI notes play the keys (default 1), transpose -2..2 octaves (0), key notes also
-// to the firmware (0)
-void rfme_set_midi(rfme_t *e, int notes_play_keys, int transpose, int key_notes_to_firmware);
+// (any thread) FM1VST's settings: the channel whose notes play the keys (RFME_KEYS_ANY, the default; 1..16; or
+// RFME_KEYS_OFF: notes on other channels go to the firmware's midi_in), transpose -2..2 octaves (0), key notes also
+// to the firmware (0), and the learned map on (1; off: it is kept, mapped messages flow on as if unmapped, learn
+// still works)
+enum { RFME_KEYS_OFF = -1, RFME_KEYS_ANY = 0 };
+void rfme_set_midi(rfme_t *e, int key_channel, int transpose, int key_notes_to_firmware, int use_map);
 // the core's MIDI out kept for rfme_midi_out_take (on: the AU has a MIDI output; off: counted and dropped)
 void rfme_midi_out_enable(rfme_t *e, int on);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render

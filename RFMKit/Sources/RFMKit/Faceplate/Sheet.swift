@@ -448,6 +448,51 @@ public struct SheetSegmented: View {
     }
 }
 
+/// a row whose value opens a menu of choices (Keys from MIDI: Any, Ch 1–16, Off)
+public struct SheetMenu: View {
+    let title: String
+    let options: [String]
+    let selected: Int
+    var divider = true
+    let pick: (Int) -> Void
+
+    public init(_ title: String, options: [String], selected: Int, divider: Bool = true, pick: @escaping (Int) -> Void) {
+        self.title = title
+        self.options = options
+        self.selected = selected
+        self.divider = divider
+        self.pick = pick
+    }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
+            Spacer(minLength: 8)
+            Menu {
+                Picker(title, selection: Binding(get: { selected }, set: { pick($0) })) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { i, o in Text(o).tag(i) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(options.indices.contains(selected) ? options[selected] : "").font(RFMFonts.ui(14, 600))
+                        .lineLimit(1).monospacedDigit()
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(Palette.sheetText)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(Capsule().fill(Palette.sheetRaised))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(title)
+            .accessibilityValue(options.indices.contains(selected) ? options[selected] : "")
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
+    }
+}
+
 /// (M8) a row with a − value + stepper (Transpose, MIDI octave)
 public struct SheetStepper: View {
     let title: String

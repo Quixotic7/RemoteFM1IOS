@@ -5,7 +5,8 @@
 //                   (asked again inline: no alert, as the extension can't present one safely)
 //   MidiInputList   the MIDI input: all, none, or one device (the app's ControllerInput)
 //   OmxSection      the OMX-27: what it does, Connect / Disconnect, its status, the note (the app)
-// The app's MIDI & audio page and the AU's Knobs from MIDI page use them.
+//   KeyChannelRows  Keys from MIDI (Any, Ch 1–16, Off) and "...and reach the firmware's MIDI in"
+// The app's MIDI & audio page and the AU's sheet use them.
 
 #if os(iOS)
 import SwiftUI
@@ -20,18 +21,44 @@ func modeShort(_ m: MidiMode) -> String {
     }
 }
 
+/// Keys from MIDI: the channel whose notes play the keys, and whether those notes reach the firmware too (dimmed
+/// when Off). Two rows of a SheetList
+public struct KeyChannelRows: View {
+    @Binding var channel: AUSettings.KeyChannel
+    @Binding var toFirmware: Bool
+
+    public init(channel: Binding<AUSettings.KeyChannel>, toFirmware: Binding<Bool>) {
+        _channel = channel
+        _toFirmware = toFirmware
+    }
+
+    public var body: some View {
+        let all = AUSettings.KeyChannel.all
+        SheetMenu("Keys from MIDI", options: all.map(\.label), selected: all.firstIndex(of: channel) ?? 0) { i in
+            channel = all[i]
+        }
+        SheetToggle("...and reach the firmware's MIDI in", on: $toFirmware)
+            .disabled(channel == .off)
+            .opacity(channel == .off ? 0.45 : 1)
+    }
+}
+
 public struct MidiMapSection: View {
     let store: MidiMapStore
     let learn: () -> Void
     var top: CGFloat
     var titled: Bool
+    var useMap: Binding<Bool>?
     @State private var confirming = false
 
-    /// learn: starts learn mode (the host closes its sheet). titled: the section's title (not on a page of its own)
-    public init(store: MidiMapStore = .shared, top: CGFloat = 20, titled: Bool = true, learn: @escaping () -> Void) {
+    /// learn: starts learn mode (the host closes its sheet). titled: the section's title (not on a page of its own).
+    /// useMap: the "Use learned knobs" switch (AUSettings.useLearnedMap), nil: none
+    public init(store: MidiMapStore = .shared, top: CGFloat = 20, titled: Bool = true, useMap: Binding<Bool>? = nil,
+                learn: @escaping () -> Void) {
         self.store = store
         self.top = top
         self.titled = titled
+        self.useMap = useMap
         self.learn = learn
     }
 
@@ -55,13 +82,16 @@ public struct MidiMapSection: View {
                 .padding(.leading, 16).padding(.trailing, 8).padding(.vertical, 8)
                 .frame(minHeight: 60)
                 .overlay(alignment: .bottom) { Palette.sheetLine.frame(height: 1) }
+                if let useMap { SheetToggle("Use learned knobs", on: useMap) }
                 SheetSegmented("Knob speed", options: ["½×", "1×", "2×"],
                                selected: MidiMap.speeds.firstIndex(of: store.speed) ?? 1, divider: false) { i in
                     store.setSpeed(MidiMap.speeds[i])
                 }
             }
             SheetNote("Tap Learn, then a knob or button on the panel, then move a control on your MIDI device. "
-                      + "Knob speed: detents per CC step, for learned knobs.")
+                      + "Knob speed: detents per CC step, for learned knobs."
+                      + (useMap == nil ? "" : " Use learned knobs off: the mappings are kept but do nothing, and their "
+                         + "messages go on to the keys and the firmware. Learn still works."))
             if !maps.isEmpty {
                 SheetList {
                     ForEach(Array(maps.enumerated()), id: \.element.id) { i, m in

@@ -383,7 +383,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     }
 
     private func applySettingsLocked() {
-        rfme_set_midi(e, settings_.notesPlayKeys ? 1 : 0, Int32(settings_.transpose), settings_.keyNotesToFirmware ? 1 : 0)
+        let m = settings_
+        rfme_set_midi(e, m.keyChannel.engineValue, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0, m.useLearnedMap ? 1 : 0)
         rfmk_set_host_clock(kernel, settings_.hostClock ? 1 : 0)
     }
 

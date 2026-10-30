@@ -81,6 +81,19 @@ void MidiMapper::release()
     btnOut_ = 0;
 }
 
+uint32_t MidiMapper::rest()
+{
+    const uint32_t held = btnOut_;
+    for (uint32_t i = 0; i < n_; i++) {
+        Src &s = s_[list_[i]];
+        s.down = s.picked = s.hinted = false;
+        s.last = -1;
+        s.acc = 0;
+    }
+    btnOut_ = 0;
+    return held;
+}
+
 bool MidiMapper::pickedUp(Src &s, int32_t v, double at, double tol)
 {
     const int32_t last = s.last;
