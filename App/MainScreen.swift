@@ -6,8 +6,9 @@
 // Firmware (the core picker, About), MIDI & audio, Settings (Diagnostics: the old debug screen with the test pattern
 // and the AU test). The last view is remembered per sound source. LaunchOptions reaches every state without touches.
 // M7: the Firmware page lists the built-in cores and the imported .rfm1 files (Documents/Firmware: FirmwareLibrary),
-// with "Add firmware…" (a document picker), a long press to delete one, and each invalid file with its error; a Wasm
-// core that can't keep up shows a note over the faceplate (PerfBanner).
+// with "Add firmware…" (a document picker), Edit (a delete control per imported file, "Delete?" asked in the row; the
+// selection moves to the same firmware's other version, its built-in core or the first core first), and each invalid
+// file with its error; a Wasm core that can't keep up shows a note over the faceplate (PerfBanner).
 // M8: the MIDI & audio page has the MIDI input (a sub-page), the notes' settings, Knobs from MIDI (MIDI learn, the
 // knob speed, the mappings) and the OMX-27; Learn closes the sheet and puts the faceplate in learn mode (its bar and
 // the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
@@ -38,6 +39,8 @@ struct LaunchOptions {
     var demoMap = false                                 // a few mappings, as if learned (writes the global map)
     var catalogItem: String?                            // (DEBUG) -catalogitem <id>: that firmware's Get firmware page
     var catalogGet: String?                             // (DEBUG) -catalogget <id>: download and install it at launch
+    var firmwareEdit: String?                           // (DEBUG) -firmwareedit [ask]: the Firmware page in Edit (ask:
+                                                        // the first imported row asks "Delete?")
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -60,6 +63,7 @@ struct LaunchOptions {
         #if DEBUG
         catalogItem = value("-catalogitem")
         catalogGet = value("-catalogget")
+        if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
         #endif
     }
 }
@@ -194,6 +198,12 @@ struct MainScreen: View {
             ui.sheetOpen = true
         }
         if let id = options.catalogGet { Task { await launchInstall(id) } }
+        if let e = options.firmwareEdit {
+            page = .firmware
+            ui.sheetOpen = true
+            editingFirmware = true
+            if e == "ask" { confirmDelete = library.files.first?.file }
+        }
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
         if options.learn {
@@ -262,7 +272,8 @@ struct MainScreen: View {
                 page = .catalogItem
             }
         case .catalogItem:
-            CatalogDetailPage(store: catalog, id: catalogItem ?? "", library: library, back: { page = .getFirmware }) { key in
+            CatalogDetailPage(store: catalog, id: catalogItem ?? "", library: library, back: { page = .getFirmware },
+                              delete: delete) { key in
                 player.select(key)
                 if player.mode != .core { player.setMode(.core) }
                 page = .firmware
@@ -349,16 +360,23 @@ struct MainScreen: View {
     /// Delete for an imported file (nil for a built-in core)
     private func deleteAction(_ c: CoreInfo?) -> (() -> Void)? {
         guard let c, c.imported, let f = library.files.first(where: { $0.key == c.id }) else { return nil }
-        return {
-            library.delete(f)
-            player.catalogChanged()
-        }
+        return { delete(f) }
+    }
+
+    /// an imported file deleted (the folder, the App Group's mirror); the selection moves first when it was this one
+    private func delete(_ f: ImportedFirmware) {
+        if f.error == nil { player.willDelete(f.key) }
+        library.delete(f)
+        player.catalogChanged()
+        if confirmDelete == f.file { confirmDelete = nil }
+        if library.files.isEmpty { editingFirmware = false }
     }
 
     private var firmwarePage: some View {
         let builtIn = player.cores.filter { !$0.imported }
         let imported = player.cores.filter(\.imported)
         let broken = library.files.filter { $0.error != nil }
+        let files = library.files
         return SheetPage("Firmware", back: { page = nil }) {
             SheetSectionTitle("Built in", top: 12)
             SheetList {
@@ -368,25 +386,63 @@ struct MainScreen: View {
                 }
             }
             SheetSectionTitle("Imported")
+                .overlay(alignment: .bottomTrailing) {
+                    if !files.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                editingFirmware.toggle()
+                                confirmDelete = nil
+                            }
+                        } label: {
+                            Text(editingFirmware ? "Done" : "Edit").font(RFMFonts.ui(14, 700))
+                                .foregroundStyle(Palette.sheetAccent)
+                                .padding(.horizontal, 6).frame(height: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(editingFirmware ? "Done deleting" : "Edit imported firmware")
+                    }
+                }
             SheetList {
                 ForEach(imported) { c in
-                    SheetRow("\(c.name)", value: c.version, chevron: false, check: c.id == player.selected) { player.select(c.id) }
-                        .contextMenu {
-                            Button("About \(c.name)") { player.select(c.id); showAbout = true }
-                            if let del = deleteAction(c) { Button("Delete", role: .destructive, action: del) }
+                    if editingFirmware, let f = files.first(where: { $0.key == c.id && $0.error == nil }) {
+                        FirmwareDeleteRow(title: c.name, value: c.version, playing: c.id == player.selected,
+                                          divider: !broken.isEmpty || c.id != imported.last?.id,
+                                          asking: confirmDelete == f.file,
+                                          ask: { withAnimation { confirmDelete = f.file } },
+                                          cancel: { withAnimation { confirmDelete = nil } },
+                                          delete: { withAnimation { delete(f) } })
+                    } else {
+                        SheetRow("\(c.name)", value: c.version, chevron: false, check: c.id == player.selected) {
+                            player.select(c.id)
                         }
+                    }
                 }
                 ForEach(broken) { f in
-                    SheetRow(f.file, value: "can't load", chevron: false) {}
-                        .opacity(0.55)
-                        .contextMenu { Button("Delete", role: .destructive) { library.delete(f) } }
+                    if editingFirmware {
+                        FirmwareDeleteRow(title: f.file, value: "can't load", playing: false,
+                                          divider: f.file != broken.last?.file,
+                                          asking: confirmDelete == f.file,
+                                          ask: { withAnimation { confirmDelete = f.file } },
+                                          cancel: { withAnimation { confirmDelete = nil } },
+                                          delete: { withAnimation { delete(f) } })
+                    } else {
+                        SheetRow(f.file, value: "can't load", chevron: false) {}
+                            .opacity(0.55)
+                    }
                 }
-                SheetRow("Get firmware", badge: updates) { page = .getFirmware }
-                SheetRow("Add firmware…", divider: false) { showImporter = true }
+                if !editingFirmware {
+                    SheetRow("Get firmware", badge: updates) { page = .getFirmware }
+                    SheetRow("Add firmware…", divider: false) { showImporter = true }
+                }
             }
-            SheetNote(imported.isEmpty && broken.isEmpty
+            SheetNote(files.isEmpty
                       ? "Put .rfm1 firmware files in Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware, or add one here."
-                      : "Touch and hold an imported firmware to delete it. Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware holds them.")
+                      : editingFirmware
+                      ? "Deleting removes the file from this \(UIDevice.current.model) and from the AU instrument. The "
+                        + "firmware built into the app can't be deleted. An AU instance playing it keeps playing until "
+                        + "its project is opened again; then it plays another version, or another firmware."
+                      : "Edit deletes imported firmware. Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware holds them.")
             ForEach(broken) { f in SheetNote("\(f.file): \(f.error ?? "")", color: .orange) }
             if !library.message.isEmpty { SheetNote(library.message) }
             SheetList {
@@ -473,5 +529,44 @@ struct MainScreen: View {
             SheetSectionTitle("FM-1 firmware")
             SheetList { InstallFirmwareRow(installer: .shared(for: controller)) { page = .install } }
         }
+    }
+}
+
+/// an imported firmware's row in the Firmware page's Edit: the red minus asks "Delete?" in the row itself
+struct FirmwareDeleteRow: View {
+    let title: String
+    let value: String
+    let playing: Bool
+    var divider = true
+    let asking: Bool
+    let ask: () -> Void
+    let cancel: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if asking {
+                SheetConfirm("Delete \(title)?", action: "Delete", cancel: cancel, confirm: delete)
+            } else {
+                Button(action: ask) {
+                    Image(systemName: "minus.circle.fill").font(.system(size: 20))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, SheetConfirm.red)
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(title)")
+                Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
+                Spacer(minLength: 8)
+                if playing {
+                    Text("playing").font(RFMFonts.ui(12, 600)).foregroundStyle(Palette.sheetAccent)
+                }
+                Text(value).font(RFMFonts.ui(15, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(1)
+            }
+        }
+        .padding(.leading, asking ? 16 : 8).padding(.trailing, asking ? 4 : 16)
+        .frame(minHeight: 52)
+        .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
     }
 }

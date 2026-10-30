@@ -295,6 +295,22 @@ public final class CorePlayer {
 
     /// the catalog read again (the app's firmware folder changed: an import, a delete). A selection that went away
     /// while nothing runs falls back to the first core
+    /// an imported file is about to be deleted: when it is the selection, the selection moves first (replacement)
+    public func willDelete(_ key: String) {
+        guard let k = Self.replacement(deleting: key, selected: selected, in: cores) else { return }
+        select(k)
+    }
+
+    /// the core to select when `key` is deleted: nil when it isn't the selection; else the same firmware's other file
+    /// (its newest version), else its built-in core, else the first core (CoreRef.resolve without the deleted file)
+    public nonisolated static func replacement(deleting key: String, selected: String, in cores: [CoreInfo]) -> String? {
+        guard key == selected, let c = cores.first(where: { $0.id == key }) else { return nil }
+        let rest = cores.filter { $0.id != key }
+        var ref = CoreRef(c)
+        ref.version = ""                        // (any version of it, the newest)
+        return ref.resolve(in: rest)?.key
+    }
+
     public func catalogChanged() {
         rescan()
         if !cores.contains(where: { $0.id == selected }), bootedID == nil, let p = Self.pick(nil, in: cores) {

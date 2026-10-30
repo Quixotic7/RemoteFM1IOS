@@ -120,16 +120,23 @@ public struct AboutFirmware: View {
                 .font(.footnote)
             }
         }
-        if let onDelete {
-            Button(role: .destructive) { confirmDelete = true } label: { Text("Delete this file") }
-                .padding(.top, 6)
-                .confirmationDialog("Delete \(c.fileName.isEmpty ? c.name : c.fileName)?", isPresented: $confirmDelete,
-                                    titleVisibility: .visible) {
+        if let onDelete {                       // (asked again inline, as the Firmware page does)
+            if confirmDelete {
+                HStack(spacing: 12) {
+                    Text("Delete \(c.fileName.isEmpty ? c.name : c.fileName)?").font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 4)
+                    Button("Cancel") { confirmDelete = false }
                     Button("Delete", role: .destructive) {
                         onDelete()
                         close()
                     }
+                    .buttonStyle(.borderedProminent).tint(.red)
                 }
+                .padding(.top, 6)
+            } else {
+                Button(role: .destructive) { confirmDelete = true } label: { Text("Delete this file") }
+                    .padding(.top, 6)
+            }
         }
     }
 

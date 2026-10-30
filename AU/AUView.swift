@@ -198,6 +198,11 @@ struct AUSheet: View {
                     }
                 }
             }
+            if model.fileGone {
+                SheetNote("\(model.status.coreName.isEmpty ? "This firmware" : model.status.coreName)'s file was deleted in "
+                          + "the RemoteFM1 app. It keeps playing here; when the project is opened again, another version "
+                          + "of it (or another firmware) plays.", color: .orange)
+            }
             SheetNote("Add .rfm1 firmware in the RemoteFM1 app (Firmware › Add firmware…, or Files › RemoteFM1 › Firmware); "
                       + "open the app once after adding files so the instrument sees them.")
             SheetList {

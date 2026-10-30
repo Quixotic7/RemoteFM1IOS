@@ -3,10 +3,12 @@
 // Get firmware (PLAN.md section 9): the sheet's pages for RFMKit's FirmwareStore. The list (name, version, author,
 // category, size, one line, and Install / Installed / Update, or the download's ring: a tap cancels it), a check, the
 // footer (where the list comes from, when it was read); a row opens the firmware's page (its description, the
-// details, the links, the button, Play once it is here). Firmware built into the app isn't listed.
+// details, the links, the button, Play once it is here, and Delete: asked again in place). Firmware built into the app
+// isn't listed.
 
 import RFMKit
 import SwiftUI
+import UIKit
 
 /// the list
 struct GetFirmwarePage: View {
@@ -54,8 +56,10 @@ struct CatalogDetailPage: View {
     let id: String
     let library: FirmwareLibrary
     let back: () -> Void
+    let delete: (ImportedFirmware) -> Void
     let play: (String) -> Void
     @Environment(\.openURL) private var openURL
+    @State private var asking = false
 
     var body: some View {
         if let e = store.available.first(where: { $0.id == id }) {
@@ -70,8 +74,8 @@ struct CatalogDetailPage: View {
     private func page(_ e: AvailableFirmware) -> some View {
         let state = store.state(e)
         let p = store.progress?.id == e.id ? store.progress : nil
-        let here = library.files.filter { $0.error == nil && $0.coreID == e.id }
-            .max { FirmwareVersion.less($0.version, $1.version) }
+        let mine = library.files.filter { $0.error == nil && ($0.coreID == e.id || $0.sha256 == e.sha256) }
+        let here = mine.filter { $0.coreID == e.id }.max { FirmwareVersion.less($0.version, $1.version) }
         let links = [("Source code", e.sourceURL), ("Website", e.site)].filter { URL(string: $0.1)?.host != nil }
         return SheetPage(e.displayName, backTitle: "Get firmware", back: back) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -123,6 +127,7 @@ struct CatalogDetailPage: View {
                         SheetNote("The update replaces the version here. Saved sounds and projects that used it open "
                                   + "with the new one.")
                     }
+                    if !mine.isEmpty { deleteRow(mine) }
                 }
             }
             .padding(.top, 16)
@@ -151,6 +156,34 @@ struct CatalogDetailPage: View {
                       + "is checked against its size and SHA-256, and by the app's .rfm1 loader. It runs only when you "
                       + "pick it.")
         }
+    }
+}
+
+extension CatalogDetailPage {
+    /// Delete (every file of this firmware here), asked again in place
+    @ViewBuilder func deleteRow(_ files: [ImportedFirmware]) -> some View {
+        let what = files.count == 1 ? "\(files[0].name) \(files[0].version)" : "\(files.count) versions"
+        Group {
+            if asking {
+                SheetConfirm("Delete \(what) from this \(UIDevice.current.model)?", action: "Delete",
+                             cancel: { asking = false }) {
+                    asking = false
+                    for f in files { delete(f) }
+                }
+            } else {
+                HStack {
+                    Button { asking = true } label: {
+                        Text(files.count == 1 ? "Delete" : "Delete \(what)").font(RFMFonts.ui(14, 700))
+                            .foregroundStyle(SheetConfirm.red)
+                            .padding(.horizontal, 16).frame(height: 44)
+                            .overlay(Capsule().strokeBorder(Palette.sheetBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.top, 12)
     }
 }
 

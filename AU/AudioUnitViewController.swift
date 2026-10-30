@@ -238,6 +238,11 @@ final class AUViewModel {
     @ObservationIgnored private var ticks = 0
 
     var current: CoreInfo? { cores.first { $0.id == status.coreKey } ?? status.coreInfo }
+    /// the imported firmware playing here was deleted in the app (its mirror is gone; the module stays loaded)
+    var fileGone: Bool {
+        FirmwareCatalog.isKey(status.coreKey) && status.core.booted && !cores.isEmpty
+            && !cores.contains { $0.id == status.coreKey }
+    }
     var perfNote = ""                                   // (M7) a Wasm core that can't keep up
     @ObservationIgnored private var perf = PerfGuard()
 
