@@ -14,6 +14,8 @@
 // and selected. The selection is saved as a CoreRef (UserDefaults rfm1.coreRef; rfm1.core, the key, as before).
 // M8: the MIDI side (AppMidi: controllers, MIDI learn, the OMX-27) is made here with the player and lives as long as
 // the app.
+// Get firmware: the FirmwareStore (RFMKit) is made here too; an install tells the player the catalog changed, and an
+// update that replaces the selected file selects the new one first.
 
 import RFMKit
 import SwiftUI
@@ -24,6 +26,7 @@ struct RemoteFM1App: App {
     @State private var controller: RemoteController?
     @State private var player: CorePlayer?
     @State private var library: FirmwareLibrary?
+    @State private var store: FirmwareStore?
     @State private var midi: AppMidi?
     @Environment(\.scenePhase) private var phase
     private let coreTest: Bool
@@ -51,6 +54,12 @@ struct RemoteFM1App: App {
             ?? d.string(forKey: "rfm1.core").map { CoreRef(id: $0) }   // (a choice saved before M7)
         let p = CorePlayer(link: c, selected: core, ref: core == nil ? ref : nil)
         _player = State(initialValue: p)
+        let st = FirmwareStore(library: lib)
+        st.didChange = { p.catalogChanged() }
+        st.willReplace = { old, new in
+            if old.contains(where: { $0.key == p.selected }) { p.select(new.key) }   // (the flash is shared by id)
+        }
+        _store = State(initialValue: st)
         _midi = State(initialValue: AppMidi(player: p))
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
@@ -61,8 +70,8 @@ struct RemoteFM1App: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let controller, let player, let library, let midi {
-                    MainScreen(controller: controller, player: player, library: library, midi: midi)
+                if let controller, let player, let library, let store, let midi {
+                    MainScreen(controller: controller, player: player, library: library, catalog: store, midi: midi)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
                         .onChange(of: player.mode) { _, m in
                             UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")

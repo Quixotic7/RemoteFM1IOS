@@ -11,6 +11,8 @@
 // M8: the MIDI & audio page has the MIDI input (a sub-page), the notes' settings, Knobs from MIDI (MIDI learn, the
 // knob speed, the mappings) and the OMX-27; Learn closes the sheet and puts the faceplate in learn mode (its bar and
 // the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
+// Get firmware (GetFirmware.swift): a row on the Firmware page (its badge: the updates) opens the list of firmware to
+// download (RFMKit's FirmwareStore); a row there opens the firmware's page. The Firmware row shows the badge too.
 
 import UniformTypeIdentifiers
 
@@ -33,6 +35,8 @@ struct LaunchOptions {
     var learnPick: String?
     var sheetScroll: String?                            // an id on the sheet's page shown at the top (knobs, omx)
     var demoMap = false                                 // a few mappings, as if learned (writes the global map)
+    var catalogItem: String?                            // (DEBUG) -catalogitem <id>: that firmware's Get firmware page
+    var catalogGet: String?                             // (DEBUG) -catalogget <id>: download and install it at launch
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -52,21 +56,29 @@ struct LaunchOptions {
         learn = a.contains("-learn") || learnPick != nil
         demoMap = a.contains("-demomap")
         sheetScroll = value("-sheetscroll")
+        #if DEBUG
+        catalogItem = value("-catalogitem")
+        catalogGet = value("-catalogget")
+        #endif
     }
 }
 
 enum SoundSource: String { case phone, fm1 }
-enum AppSheetPage: String { case firmware, midi, midiInput = "midiinput", settings }
+enum AppSheetPage: String {
+    case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings
+}
 
 struct MainScreen: View {
     let controller: RemoteController
     let player: CorePlayer
     let library: FirmwareLibrary
+    let catalog: FirmwareStore
     let midi: AppMidi
     @State private var ui = FaceplateUI()
     @State private var showImporter = false
     @State private var feed: PanelFeed
     @State private var page: AppSheetPage?
+    @State private var catalogItem: String?             // the firmware a Get firmware page shows
     @State private var showDiagnostics = false
     @State private var showAUTest = false
     @State private var showBluetooth = false
@@ -77,10 +89,11 @@ struct MainScreen: View {
     private let store = ThemeStore.shared
     private let options = LaunchOptions()
 
-    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, midi: AppMidi) {
+    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, catalog: FirmwareStore, midi: AppMidi) {
         self.controller = controller
         self.player = player
         self.library = library
+        self.catalog = catalog
         self.midi = midi
         _feed = State(initialValue: midi.feed)
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
@@ -147,6 +160,7 @@ struct MainScreen: View {
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .onAppear(perform: launch)
+        .task { await catalog.refreshIfOlder(than: 86_400) }     // (at launch, at most once a day)
         .onChange(of: ui.page) { _, _ in saveView() }
         .onChange(of: ui.deck) { _, _ in saveView() }
         .onChange(of: ui.knobSet) { _, _ in saveView() }
@@ -168,6 +182,12 @@ struct MainScreen: View {
         if options.steps { ui.stepNumbers = true }
         if options.sheet || options.sheetPage != nil { ui.sheetOpen = true }
         page = options.sheetPage
+        if let id = options.catalogItem {
+            catalogItem = id
+            page = .catalogItem
+            ui.sheetOpen = true
+        }
+        if let id = options.catalogGet { Task { await launchInstall(id) } }
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
         if options.learn {
@@ -182,6 +202,18 @@ struct MainScreen: View {
                 if l { DispatchQueue.main.async { turned = true } }
             }
         }
+    }
+
+    /// (DEBUG) -catalogget: the list read (if it has no entry yet), then the firmware installed
+    private func launchInstall(_ id: String) async {
+        while catalog.checking { try? await Task.sleep(for: .milliseconds(100)) }
+        if !catalog.available.contains(where: { $0.id == id }) { await catalog.refresh() }
+        guard let e = catalog.available.first(where: { $0.id == id }) else {
+            RFMShared.log("catalog").error("-catalogget \(id, privacy: .public): not in the list")
+            return
+        }
+        let f = await catalog.install(e)
+        RFMShared.log("catalog").info("-catalogget \(id, privacy: .public): \(f?.file ?? catalog.failure, privacy: .public)")
     }
 
     private func viewKey(_ s: SoundSource) -> String { "rfm1.view.\(s.rawValue)" }
@@ -218,6 +250,17 @@ struct MainScreen: View {
     @ViewBuilder private var sheet: some View {
         switch page {
         case .firmware: firmwarePage
+        case .getFirmware:
+            GetFirmwarePage(store: catalog, builtIn: builtIn, scrollTo: options.sheetScroll, back: { page = .firmware }) { id in
+                catalogItem = id
+                page = .catalogItem
+            }
+        case .catalogItem:
+            CatalogDetailPage(store: catalog, id: catalogItem ?? "", library: library, back: { page = .getFirmware }) { key in
+                player.select(key)
+                if player.mode != .core { player.setMode(.core) }
+                page = .firmware
+            }
         case .midi: midiPage
         case .midiInput: midiInputPage
         case .settings: settingsPage
@@ -245,7 +288,7 @@ struct MainScreen: View {
                     SheetSectionTitle("Theme")
                     ThemeSwatches(store: store) { withAnimation { ui.editorOpen = true } }
                     SheetList {
-                        SheetRow("Firmware", value: player.current?.name ?? "–") { page = .firmware }
+                        SheetRow("Firmware", value: player.current?.name ?? "–", badge: updates) { page = .firmware }
                         SheetRow("MIDI & audio") { page = .midi }
                         SheetRow("Settings", divider: false) { page = .settings }
                     }
@@ -257,6 +300,12 @@ struct MainScreen: View {
             .scrollBounceBehavior(.basedOnSize)
         }
     }
+
+    /// the cores built into the app (Get firmware doesn't list them)
+    private var builtIn: [CoreInfo] { player.cores.filter { !$0.imported } }
+
+    /// the firmware here with a newer version to download
+    private var updates: Int { catalog.updates(builtIn: builtIn).count }
 
     private var fm1Line: String {
         if let p = controller.panel, p.heldElsewhere {
@@ -316,6 +365,7 @@ struct MainScreen: View {
                         .opacity(0.55)
                         .contextMenu { Button("Delete", role: .destructive) { library.delete(f) } }
                 }
+                SheetRow("Get firmware", badge: updates) { page = .getFirmware }
                 SheetRow("Add firmware…", divider: false) { showImporter = true }
             }
             SheetNote(imported.isEmpty && broken.isEmpty

@@ -5,7 +5,7 @@
 // View tiles, the theme swatches, the list rows and a sub-page with a back button. The app and the AUv3 put their
 // own items in it. It is drawn in the view itself (no SwiftUI .sheet: that crashed inside the extension, M2).
 // M8: a segmented row (Knob speed), a stepper row (Transpose, MIDI octave), a status line with a dot (the OMX-27), a
-// back title for pages under pages (MIDI input), and a first scroll position (screenshots).
+// back title for pages under pages (MIDI input), and a first scroll position (screenshots). Get firmware: a row's badge.
 
 #if os(iOS)
 import SwiftUI
@@ -315,15 +315,18 @@ public struct SheetRow: View {
     var divider = true
     var chevron = true
     var check = false
+    var badge = 0
     let action: () -> Void
 
+    /// badge: a count in an accent dot (updates), 0 none
     public init(_ title: String, value: String? = nil, divider: Bool = true, chevron: Bool = true, check: Bool = false,
-                action: @escaping () -> Void) {
+                badge: Int = 0, action: @escaping () -> Void) {
         self.title = title
         self.value = value
         self.divider = divider
         self.chevron = chevron
         self.check = check
+        self.badge = badge
         self.action = action
     }
 
@@ -332,6 +335,13 @@ public struct SheetRow: View {
             HStack(spacing: 8) {
                 Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
                 Spacer(minLength: 8)
+                if badge > 0 {
+                    Text("\(badge)").font(RFMFonts.ui(12, 700)).foregroundStyle(Palette.sheetBackground)
+                        .monospacedDigit()
+                        .padding(.horizontal, 7).frame(minWidth: 22, minHeight: 22)
+                        .background(Capsule().fill(Palette.sheetAccent))
+                        .accessibilityLabel(badge == 1 ? "1 update" : "\(badge) updates")
+                }
                 if let value {
                     Text(value).font(RFMFonts.ui(15, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(1)
                 }
