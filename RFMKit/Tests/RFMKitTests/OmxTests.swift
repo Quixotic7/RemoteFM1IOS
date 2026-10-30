@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The OMX-27 in REMOTE mode (RFMKit/OMX27): the website's web/site/test.mjs OMX checks, ported (the wire, the packing
 // against remote_test.py's vectors, the session's pacing on a fake clock, the views, LEDs, zones, K5's pickup), the

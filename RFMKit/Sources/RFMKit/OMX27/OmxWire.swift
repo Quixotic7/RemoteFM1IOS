@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The OMX-27's REMOTE mode, the wire: the website's js/omx27.js, ported as is (OMX-27 firmware q7-2026-3:
 // SYSEX_SPEC.md "REMOTE mode", omx_mode_remote.cpp, tools/remote_test.py).

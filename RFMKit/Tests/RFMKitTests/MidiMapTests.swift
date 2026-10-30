@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // M8: the learned map without an engine. The website's web/site/test.mjs "MIDI learn" checks (targets, parsing, the
 // mode guess, the list's lines, rebinding, learn, the stored form), the store and its follower, the controller input's

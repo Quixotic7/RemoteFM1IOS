@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // What OmxLink talks through, behind protocols so the Mac tests drive it with a fake OMX-27 and a fake clock:
 //   OmxTransport   the MIDI ports: the endpoints now, one source listened to and one destination sent to, setup

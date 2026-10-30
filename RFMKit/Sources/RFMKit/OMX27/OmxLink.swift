@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // USE MY OMX-27 (the standalone app): the OMX-27 in REMOTE mode as the FM-1's controller (OmxWire the wire, OmxViews
 // the views, OmxScreen its screen). The website's js/omx-link.js, ported as is. The ports whose names say OMX; the

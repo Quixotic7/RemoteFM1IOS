@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The learned MIDI map on the core thread (M8): the website's js/midi-map.js MidiMap.feed, in C++. A message from a
 // mapped source becomes at most one action (an encoder turned, a button pressed or let go, MASTER set, or MASTER

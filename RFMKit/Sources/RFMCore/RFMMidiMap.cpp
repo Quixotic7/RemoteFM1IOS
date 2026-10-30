@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The learned MIDI map (RFMMidiMap.h): js/midi-map.js MidiMap.feed, pickedUp and relDelta as the website has them.
 // Also RemoteMidi.c's FM-1 candidate rule for the app's controller input (rfme_fm1_candidate).

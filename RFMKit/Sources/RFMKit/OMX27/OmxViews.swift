@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The OMX-27 as the FM-1's controller (REMOTE mode, OmxWire.swift): its views, what each key does in them, its LEDs
 // and its screen's text. The website's js/omx27-views.js, ported as is (the owner's design:

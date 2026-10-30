@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // M8 in the engine (RFME_CLOCK_CALLER, ChoralRoot): a controller's MIDI (rfme_midi_in), the learned map
 // (rfme_set_midi_map: test.mjs's MidiMap.feed checks, run where the app runs them), MASTER's pickup, learn diverting

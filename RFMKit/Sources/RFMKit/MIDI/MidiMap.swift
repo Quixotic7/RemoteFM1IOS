@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // MIDI learn's map (M8): a controller's knobs, pots and buttons on the panel's knobs, MASTER and buttons. The website's
 // js/midi-map.js, with its ids and stored form, so a map reads the same in both:

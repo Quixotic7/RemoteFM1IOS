@@ -241,4 +241,9 @@ The instrument's sheet › MIDI (each instance its own, saved with the host's pr
 
 ## Licence
 
-GPL-3.0-only (`LICENSE`).
+GPL-3.0-only (`LICENSE`), except these files, which are MPL-2.0 (`LICENSES/MPL-2.0.txt`; the author's decision,
+2026-10-30, so FIZZ for iOS can reuse them, as FM1VST did with its own): the MIDI map and learn
+(`RFMKit/Sources/RFMKit/MIDI/MidiMap.swift`, `MidiLearn.swift`, `RFMKit/Sources/RFMCore/RFMMidiMap.{h,cpp}`), the
+OMX-27 (`RFMKit/Sources/RFMKit/OMX27/OmxWire.swift`, `OmxViews.swift`, `OmxScreen.swift`, `OmxTransport.swift`,
+`OmxLink.swift`) and their tests (`MidiMapTests.swift`, `MidiEngineTests.swift`, `OmxTests.swift`). Each file's SPDX
+line says which.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // The OMX-27's 128 x 32 screen, drawn (the website's omx-link.js render): the view's name large, its context small,
 // four marks for K1's views; 1-bit at 50%, packed for the OMX. Chakra Petch Bold (bundled), the title from 19 px down

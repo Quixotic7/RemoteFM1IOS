@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 RemoteFM1 contributors
 // MIDI learn (M8): js/midi-map.js Learn. A control picked on the panel, then the next CC or note binds to it; while
 // the control keeps moving, the mode is guessed again from its values. The engine diverts the messages (rfme_learn,
