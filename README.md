@@ -56,7 +56,8 @@ screen, the test pattern and the AU test).
     fonts, the layouts, the keybed's geometry, `PanelFeed`: touches in, LEDs and the screen out; the parts, the views,
     the sheet, the theme editor); `Resources/`: the four OFL fonts and a copy of `design/tokens.json`; `AUv3/`: the audio unit (`RFMAudioUnit`), its state (`InstanceState`,
     `CoreState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel, About this firmware and the
-    Diagnostics view.
+    Diagnostics view; `Install/`: installing RemoteFM1 on the FM-1 with FM1Kit (the releases, the package checks,
+    `FirmwareInstaller`, its page; tested by `FirmwareInstallTests` on FM1Kit's SimulatedFM1).
 - `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
   with its `firmware/engines`, `cores/melodee`). Read-only.
 - `vendor/FIZZ`: FIZZ v0.12.0-beta.12 (MPL-2.0) as a git submodule (its own submodule, fm1-base, is not needed).
@@ -181,6 +182,18 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
   Its keys, encoder and pots play the FM-1; K1 picks the view, K2 the colours, K5 is MASTER. It connects by itself
   next time. To leave remote mode, hold AUX and the encoder on the OMX-27.
 
+## Installing RemoteFM1 on the FM-1
+
+Controls › Settings › Install RemoteFM1 on the FM-1 puts RemoteFM1 firmware on the FM-1 from the app, without the
+website (PLAN.md section 11). Connect the FM-1 with a USB cable (Bluetooth can't install firmware; only one FM-1
+connected), pick the release (the newest by default; its USB-only package and older releases can be picked), then
+Check the FM-1: the app downloads the package from remotefm1.com, checks its SHA-256 and identity, lets go of the FM-1
+(the panel pauses; an AU in another app gives it up) and shows what is on the FM-1 and what will be installed.
+Confirm, then Install: keep the app open until it finishes (the screen stays on). If it is cut off, the FM-1 waits in
+its update loader and "Finish the install" completes it. The panel reconnects afterwards. Diagnostics shows the
+RemoteFM1 version on the FM-1 and "Update available". It uses FM1Kit (MIT); in the simulator the FM-1 is FM1Kit's
+SimulatedFM1.
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
@@ -207,7 +220,13 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices); without it the MIDI input starts with no source connected. On a device CoreMIDI is the default.
 - `-autest -aupage midi|learn|learn:KN1`: the AU test, then that page of the AU's view (`AUPAGE=... scripts/sim_autest.sh`).
+- `-sheetpage install`: the installer's page; `-installdemo check|writing|finished|cutoff` (DEBUG builds): it runs by
+  itself on FM1Kit's SimulatedFM1 (stops at the confirmation; installs; installs; is cut off at 45 %), for
+  `MATCH=install scripts/sim_shots.sh`.
 
 ## Licence
 
-GPL-3.0-only (`LICENSE`).
+GPL-3.0-only (`LICENSE`). Other people's code in the app: wasm3 v0.5.0 (MIT, `RFMKit/Sources/CWasm3`), FM1Kit 0.4.x
+(Drew Robinson, MIT, https://github.com/ocean/FM1Kit, a Swift package dependency of RFMKit; its licence is shown on the
+install page), the four UI fonts (OFL, `RFMKit/Sources/RFMKit/Resources/Fonts`), and the cores with their own
+licences (PLAN.md section 7).
