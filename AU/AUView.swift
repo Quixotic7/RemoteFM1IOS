@@ -10,6 +10,7 @@
 // MIDI (MIDI learn on the host's MIDI, the knob speed, the mappings: global, shared with the app); learn mode on the
 // faceplate, its bar and the toasts over the sheet (FaceplateOverlay). The MIDI section: notes play keys, ...and reach
 // the firmware, the octave, the host's clock (PLAN.md section 11). On a Mac: the window's size (Window).
+// Keys from MIDI and a learned knob's mode are pages of the sheet: a SwiftUI Menu is clipped in a host (AUM).
 
 import RFMKit
 import SwiftUI
@@ -59,6 +60,8 @@ struct AUSheet: View {
         switch model.page {
         case .firmware: firmwarePage
         case .midi: midiPage
+        case .keyChannel: keyChannelPage
+        case .midiMode: modePage
         case .diagnostics: diagnosticsPage
         case nil: mainSheet
         }
@@ -126,9 +129,11 @@ struct AUSheet: View {
         return VStack(spacing: 0) {
             SheetSectionTitle("MIDI").id("midi")
             SheetList {
-                KeyChannelRows(channel: Binding(get: { s.keyChannel }, set: { v in set { $0.keyChannel = v } }),
+                KeyChannelRows(channel: s.keyChannel,
                                toFirmware: Binding(get: { s.keyNotesToFirmware },
-                                                   set: { v in set { $0.keyNotesToFirmware = v } }))
+                                                   set: { v in set { $0.keyNotesToFirmware = v } })) {
+                    model.page = .keyChannel
+                }
                 SheetStepper("MIDI octave", value: Binding(get: { s.transpose }, set: { v in set { $0.transpose = v } }),
                              in: -2...2)
                 SheetToggle("Send the host's clock and transport", on: Binding(get: { s.hostClock },
@@ -215,10 +220,34 @@ struct AUSheet: View {
         }
     }
 
+    /// Keys from MIDI's choices (a page: a SwiftUI Menu can't open inside the host's view)
+    private var keyChannelPage: some View {
+        SheetPage("Keys from MIDI", back: { back(to: nil) }) {
+            KeyChannelList(channel: Binding(get: { model.status.settings.keyChannel },
+                                            set: { v in model.changeSettings { $0.keyChannel = v } }))
+        }
+    }
+
+    /// a learned encoder's mode
+    private var modePage: some View {
+        SheetPage("Knob mode", backTitle: "Knobs from MIDI", back: { back(to: .midi) }) {
+            MidiModeList(src: model.modeSource ?? "")
+        }
+    }
+
+    /// back to the main sheet (at its MIDI section) or to a page
+    private func back(to p: AUViewModel.Page?) {
+        if p == nil { model.sheetScroll = "midi" }
+        model.page = p
+    }
+
     /// Knobs from MIDI: learned from the host's MIDI (route a controller to this instrument in the host)
     private var midiPage: some View {
         SheetPage("Knobs from MIDI", back: { model.page = nil }) {
-            MidiMapSection(top: 12, titled: false, useMap: useMap) { model.startLearn() }
+            MidiMapSection(top: 12, titled: false, useMap: useMap, pickMode: { src in
+                model.modeSource = src
+                model.page = .midiMode
+            }) { model.startLearn() }
             SheetNote("Learn listens to the MIDI the host sends this instrument: route your controller to it. The "
                       + "mappings are shared by the RemoteFM1 app and every instance.")
         }

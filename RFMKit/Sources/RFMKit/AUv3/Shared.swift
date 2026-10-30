@@ -112,10 +112,23 @@ public struct AUSettings: Equatable, Sendable {
         /// all of them, in the picker's order
         public static let all: [KeyChannel] = [.any] + (1...16).map { .channel($0) } + [.off]
 
+        /// the page's groups: Any, Channel 1-16, Off
+        public static let groups: [[KeyChannel]] = [[.any], (1...16).map { .channel($0) }, [.off]]
+
+        /// short, for a row's value
         public var label: String {
             switch self {
             case .any: "Any"
             case .channel(let c): "Ch \(c)"
+            case .off: "Off"
+            }
+        }
+
+        /// in full, for the page's rows
+        public var longLabel: String {
+            switch self {
+            case .any: "Any"
+            case .channel(let c): "Channel \(c)"
             case .off: "Off"
             }
         }

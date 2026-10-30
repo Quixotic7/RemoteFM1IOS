@@ -213,13 +213,14 @@ private final class ResizeGrip: UIView {
 @MainActor
 @Observable
 final class AUViewModel {
-    enum Page { case firmware, midi, diagnostics }
+    enum Page { case firmware, midi, keyChannel, midiMode, diagnostics }
     var instance = "–"
     var status = RFMAudioUnit.Status()
     var cores: [CoreInfo] = []
     var report: ProbeReport?
     var diagnosticsOpen = false
     var page: Page?
+    var modeSource: String?                             // (midiMode) the mapping whose mode the page shows
     @ObservationIgnored var sheetScroll: String?        // (the AU test) a section of the sheet shown at the top
     var chip = PanelChip.emulator                       // (set only when it changes: the faceplate reads it)
     let ui = FaceplateUI()
@@ -321,6 +322,13 @@ final class AUViewModel {
         if what == "midi" {
             ui.sheetOpen = true
             page = .midi
+        } else if what == "keychannel" {
+            ui.sheetOpen = true
+            page = .keyChannel
+        } else if what == "midimode" {                  // (the first encoder mapping; none: the page says so)
+            modeSource = MidiMapStore.shared.mappings.first { $0.mode != nil }?.src ?? ""
+            ui.sheetOpen = true
+            page = .midiMode
         } else if what == "window" {
             #if DEBUG
             macWindow = true                            // (a screenshot of the Mac-only section on iOS)

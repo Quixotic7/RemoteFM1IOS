@@ -67,6 +67,7 @@ struct LaunchOptions {
 enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
     case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install
+    case keyChannel = "keychannel", midiMode = "midimode"
 }
 
 struct MainScreen: View {
@@ -80,6 +81,10 @@ struct MainScreen: View {
     @State private var feed: PanelFeed
     @State private var page: AppSheetPage?
     @State private var catalogItem: String?             // the firmware a Get firmware page shows
+    @State private var modeSource: String?              // the mapping the Knob mode page shows
+    @State private var midiScroll: String?              // where the MIDI & audio page opens (back from Knob mode)
+    @State private var editingFirmware = false          // the Firmware page's Edit: a delete control per imported row
+    @State private var confirmDelete: String?           // the file (its name) whose row asks "Delete?"
     @State private var showDiagnostics = false
     @State private var showAUTest = false
     @State private var showBluetooth = false
@@ -264,6 +269,15 @@ struct MainScreen: View {
             }
         case .midi: midiPage
         case .midiInput: midiInputPage
+        case .keyChannel:
+            SheetPage("Keys from MIDI", backTitle: "MIDI & audio", back: { page = .midi }) {
+                KeyChannelList(channel: Binding(get: { player.midiSettings.keyChannel },
+                                                set: { player.midiSettings.keyChannel = $0 }))
+            }
+        case .midiMode:
+            SheetPage("Knob mode", backTitle: "MIDI & audio", back: { midiScroll = "knobs"; page = .midi }) {
+                MidiModeList(src: modeSource ?? MidiMapStore.shared.mappings.first { $0.mode != nil }?.src ?? "")
+            }
         case .settings: settingsPage
         case .install: InstallFirmwarePage(installer: .shared(for: controller)) { page = .settings }
         case nil: mainSheet
@@ -397,7 +411,7 @@ struct MainScreen: View {
 
     private var midiPage: some View {
         let m = Binding(get: { player.midiSettings }, set: { player.midiSettings = $0 })
-        return SheetPage("MIDI & audio", scrollTo: options.sheetScroll, back: { page = nil }) {
+        return SheetPage("MIDI & audio", scrollTo: midiScroll ?? options.sheetScroll, back: { midiScroll = nil; page = nil }) {
             SheetSectionTitle("Audio", top: 12)
             SheetList {
                 SheetToggle("Sound", on: Binding(get: { player.audioOn }, set: { player.setAudio($0) }), divider: false)
@@ -407,8 +421,11 @@ struct MainScreen: View {
                       : "No sound: the firmware runs on a timer.")
             SheetSectionTitle("MIDI")
             SheetList {
-                SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { page = .midiInput }
-                KeyChannelRows(channel: m.keyChannel, toFirmware: m.keyNotesToFirmware)
+                SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { midiScroll = nil; page = .midiInput }
+                KeyChannelRows(channel: player.midiSettings.keyChannel, toFirmware: m.keyNotesToFirmware) {
+                    midiScroll = nil
+                    page = .keyChannel
+                }
                 SheetStepper("Transpose", value: m.transpose, in: -2...2) { t in
                     t == 0 ? "0" : "\(t > 0 ? "+" : "−")\(abs(t)) oct"
                 }
@@ -419,7 +436,10 @@ struct MainScreen: View {
                       + "other channels, notes outside the keys, every note when Off, and whatever the learned knobs "
                       + "don't take go to the firmware's MIDI in.")
             SheetNote("FM-1 link: \(controller.statusText)")
-            MidiMapSection(useMap: m.useLearnedMap, learn: startLearn).id("knobs")
+            MidiMapSection(useMap: m.useLearnedMap, pickMode: { src in
+                modeSource = src
+                page = .midiMode
+            }, learn: startLearn).id("knobs")
             SheetSectionTitle("OMX-27").id("omx")
             OmxSection(link: midi.omx)
         }

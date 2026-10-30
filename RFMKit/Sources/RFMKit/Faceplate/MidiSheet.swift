@@ -3,10 +3,13 @@
 // (M8) the sheet's MIDI pieces (js/sheet.js's Playing section, js/omx-link.js mountOmx), in Sheet.swift's style:
 //   MidiMapSection  Knobs from MIDI: Learn, the knob speed, the learned mappings (an encoder's mode, remove), Clear all
 //                   (asked again inline: no alert, as the extension can't present one safely)
+//   MidiModeList    an encoder mapping's mode, a page of its own (opened from MidiMapSection's row)
 //   MidiInputList   the MIDI input: all, none, or one device (the app's ControllerInput)
 //   OmxSection      the OMX-27: what it does, Connect / Disconnect, its status, the note (the app)
-//   KeyChannelRows  Keys from MIDI (Any, Ch 1–16, Off) and "...and reach the firmware's MIDI in"
-// The app's MIDI & audio page and the AU's sheet use them.
+//   KeyChannelRows  Keys from MIDI (its value opens KeyChannelList) and "...and reach the firmware's MIDI in"
+//   KeyChannelList  the Keys from MIDI page: Any, Channel 1–16, Off
+// The app's MIDI & audio page and the AU's sheet use them. Choices open a page in the sheet, never a SwiftUI Menu,
+// popover or dialog: in an AU host those are clipped to the extension's view and can't be used (AUM, on an iPhone).
 
 #if os(iOS)
 import SwiftUI
@@ -21,25 +24,84 @@ func modeShort(_ m: MidiMode) -> String {
     }
 }
 
-/// Keys from MIDI: the channel whose notes play the keys, and whether those notes reach the firmware too (dimmed
-/// when Off). Two rows of a SheetList
+/// Keys from MIDI: the channel whose notes play the keys (a row that opens KeyChannelList), and whether those notes
+/// reach the firmware too (dimmed when Off). Two rows of a SheetList
 public struct KeyChannelRows: View {
-    @Binding var channel: AUSettings.KeyChannel
+    let channel: AUSettings.KeyChannel
     @Binding var toFirmware: Bool
+    let open: () -> Void
 
-    public init(channel: Binding<AUSettings.KeyChannel>, toFirmware: Binding<Bool>) {
-        _channel = channel
+    /// open: shows the Keys from MIDI page (the host's own page navigation)
+    public init(channel: AUSettings.KeyChannel, toFirmware: Binding<Bool>, open: @escaping () -> Void) {
+        self.channel = channel
         _toFirmware = toFirmware
+        self.open = open
     }
 
     public var body: some View {
-        let all = AUSettings.KeyChannel.all
-        SheetMenu("Keys from MIDI", options: all.map(\.label), selected: all.firstIndex(of: channel) ?? 0) { i in
-            channel = all[i]
-        }
+        SheetRow("Keys from MIDI", value: channel.label, action: open)
+            .accessibilityValue(channel.longLabel)
         SheetToggle("...and reach the firmware's MIDI in", on: $toFirmware)
             .disabled(channel == .off)
             .opacity(channel == .off ? 0.45 : 1)
+    }
+}
+
+/// the Keys from MIDI page's content: Any, Channel 1–16, Off, the current one checked
+public struct KeyChannelList: View {
+    @Binding var channel: AUSettings.KeyChannel
+
+    public init(channel: Binding<AUSettings.KeyChannel>) { _channel = channel }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(AUSettings.KeyChannel.groups.enumerated()), id: \.offset) { g, group in
+                SheetList {
+                    ForEach(Array(group.enumerated()), id: \.offset) { i, k in
+                        SheetRow(k.longLabel, divider: i < group.count - 1, chevron: false, check: k == channel) {
+                            channel = k
+                        }
+                    }
+                }
+                .padding(.top, g == 0 ? 12 : 14)
+                if g == 0 { SheetNote("Notes on every channel play the keys.") }
+                if g == 2 { SheetNote("Every note goes to the firmware's MIDI in; none play the keys.") }
+            }
+            SheetNote("Notes on other channels go to the firmware's MIDI in.")
+        }
+    }
+}
+
+/// an encoder mapping's mode, as a page: how its CC values turn the knob
+public struct MidiModeList: View {
+    let store: MidiMapStore
+    let src: String
+
+    public init(store: MidiMapStore = .shared, src: String) {
+        self.store = store
+        self.src = src
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let m = store.mappings.first(where: { $0.src == src }), let mode = m.mode {
+                Text("\(m.target) ← \(MidiSource.label(m.src))").font(RFMFonts.ui(15, 700))
+                    .foregroundStyle(Palette.sheetText)
+                    .padding(.top, 8).padding(.bottom, 10)
+                SheetList {
+                    ForEach(Array(MidiMode.allCases.enumerated()), id: \.offset) { i, md in
+                        SheetRow(md.label, divider: i < MidiMode.allCases.count - 1, chevron: false, check: md == mode) {
+                            store.setMode(m.src, md)
+                        }
+                    }
+                }
+                SheetNote("How the controller's CC values turn the knob. Absolute: a pot or fader (0–127). The "
+                          + "relative ones are endless encoders: 64 ± n, two's complement (1 up, 127 down), or a sign "
+                          + "bit (1 up, 65 down). Learn guesses it; change it if the knob jumps or turns the wrong way.")
+            } else {
+                SheetNote("This mapping is gone.")
+            }
+        }
     }
 }
 
@@ -49,16 +111,19 @@ public struct MidiMapSection: View {
     var top: CGFloat
     var titled: Bool
     var useMap: Binding<Bool>?
+    let pickMode: (String) -> Void
     @State private var confirming = false
 
     /// learn: starts learn mode (the host closes its sheet). titled: the section's title (not on a page of its own).
-    /// useMap: the "Use learned knobs" switch (AUSettings.useLearnedMap), nil: none
+    /// useMap: the "Use learned knobs" switch (AUSettings.useLearnedMap), nil: none. pickMode: opens the mode page
+    /// (MidiModeList) for a mapping's source
     public init(store: MidiMapStore = .shared, top: CGFloat = 20, titled: Bool = true, useMap: Binding<Bool>? = nil,
-                learn: @escaping () -> Void) {
+                pickMode: @escaping (String) -> Void, learn: @escaping () -> Void) {
         self.store = store
         self.top = top
         self.titled = titled
         self.useMap = useMap
+        self.pickMode = pickMode
         self.learn = learn
     }
 
@@ -116,16 +181,10 @@ public struct MidiMapSection: View {
                 .accessibilityLabel(m.description)
             Spacer(minLength: 4)
             if let mode = m.mode {
-                Menu {
-                    ForEach(MidiMode.allCases, id: \.self) { md in
-                        Button { store.setMode(m.src, md) } label: {
-                            if md == mode { Label(md.label, systemImage: "checkmark") } else { Text(md.label) }
-                        }
-                    }
-                } label: {
+                Button { pickMode(m.src) } label: {
                     HStack(spacing: 4) {
                         Text(modeShort(mode)).font(RFMFonts.ui(13, 600)).lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
                     }
                     .foregroundStyle(Palette.sheetText)
                     .padding(.horizontal, 10).frame(height: 30)
@@ -133,6 +192,7 @@ public struct MidiMapSection: View {
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("\(m.target): how CC values turn it")
                 .accessibilityValue(mode.label)
             }
@@ -152,19 +212,9 @@ public struct MidiMapSection: View {
 
     @ViewBuilder private var clearAll: some View {
         if confirming {
-            HStack(spacing: 8) {
-                Text("Clear every mapping?").font(RFMFonts.ui(13, 600)).foregroundStyle(Palette.sheetText)
-                Spacer(minLength: 4)
-                SheetButton("Cancel") { confirming = false }
-                Button {
-                    confirming = false
-                    store.clear()
-                } label: {
-                    Text("Clear all").font(RFMFonts.ui(14, 700)).foregroundStyle(.white)
-                        .padding(.horizontal, 16).frame(height: 44)
-                        .background(Capsule().fill(Color(.sRGB, red: 0.82, green: 0.25, blue: 0.2, opacity: 1)))
-                }
-                .buttonStyle(.plain)
+            SheetConfirm("Clear every mapping?", action: "Clear all", cancel: { confirming = false }) {
+                confirming = false
+                store.clear()
             }
         } else {
             HStack {

@@ -6,6 +6,7 @@
 // own items in it. It is drawn in the view itself (no SwiftUI .sheet: that crashed inside the extension, M2).
 // M8: a segmented row (Knob speed), a stepper row (Transpose, MIDI octave), a status line with a dot (the OMX-27), a
 // back title for pages under pages (MIDI input), and a first scroll position (screenshots). Get firmware: a row's badge.
+// No SwiftUI Menu, popover or dialog in here: inside an AU host they are clipped and can't be used; a choice is a page.
 
 #if os(iOS)
 import SwiftUI
@@ -448,51 +449,6 @@ public struct SheetSegmented: View {
     }
 }
 
-/// a row whose value opens a menu of choices (Keys from MIDI: Any, Ch 1–16, Off)
-public struct SheetMenu: View {
-    let title: String
-    let options: [String]
-    let selected: Int
-    var divider = true
-    let pick: (Int) -> Void
-
-    public init(_ title: String, options: [String], selected: Int, divider: Bool = true, pick: @escaping (Int) -> Void) {
-        self.title = title
-        self.options = options
-        self.selected = selected
-        self.divider = divider
-        self.pick = pick
-    }
-
-    public var body: some View {
-        HStack(spacing: 8) {
-            Text(title).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
-            Spacer(minLength: 8)
-            Menu {
-                Picker(title, selection: Binding(get: { selected }, set: { pick($0) })) {
-                    ForEach(Array(options.enumerated()), id: \.offset) { i, o in Text(o).tag(i) }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(options.indices.contains(selected) ? options[selected] : "").font(RFMFonts.ui(14, 600))
-                        .lineLimit(1).monospacedDigit()
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
-                }
-                .foregroundStyle(Palette.sheetText)
-                .padding(.horizontal, 12).frame(height: 30)
-                .background(Capsule().fill(Palette.sheetRaised))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .accessibilityLabel(title)
-            .accessibilityValue(options.indices.contains(selected) ? options[selected] : "")
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 52)
-        .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
-    }
-}
-
 /// (M8) a row with a − value + stepper (Transpose, MIDI octave)
 public struct SheetStepper: View {
     let title: String
@@ -693,6 +649,38 @@ public struct SheetButton: View {
                 .background(Capsule().fill(accent ? Palette.sheetAccent : Palette.sheetRaised))
         }
         .buttonStyle(.plain)
+    }
+}
+/// a question asked again inline (no dialog: the extension can't present one safely): the question, Cancel and a red
+/// button (Delete, Clear all)
+public struct SheetConfirm: View {
+    let question: String
+    let action: String
+    let cancel: () -> Void
+    let confirm: () -> Void
+
+    public init(_ question: String, action: String, cancel: @escaping () -> Void, confirm: @escaping () -> Void) {
+        self.question = question
+        self.action = action
+        self.cancel = cancel
+        self.confirm = confirm
+    }
+
+    public static let red = Color(.sRGB, red: 0.82, green: 0.25, blue: 0.2, opacity: 1)
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            Text(question).font(RFMFonts.ui(13, 600)).foregroundStyle(Palette.sheetText)
+                .lineLimit(2).minimumScaleFactor(0.85)
+            Spacer(minLength: 4)
+            SheetButton("Cancel", action: cancel)
+            Button(action: confirm) {
+                Text(action).font(RFMFonts.ui(14, 700)).foregroundStyle(.white)
+                    .padding(.horizontal, 16).frame(height: 44)
+                    .background(Capsule().fill(Self.red))
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 #endif
