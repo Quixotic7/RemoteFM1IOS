@@ -174,6 +174,10 @@ struct AUSheet: View {
             }
             .padding(.top, 10)
             if let reason, p?.owner != true { SheetNote(reason) }
+            if let p, p.owner, p.hasUnit, !p.fake, p.link == .notFound {   // (the AU can't install: the app does)
+                SheetNote("An FM-1 is connected but isn't answering as RemoteFM1. Install RemoteFM1 from the "
+                          + "RemoteFM1 app (Settings › FM-1 firmware).", color: .orange)
+            }
             if p?.foreignSession == true { SheetNote("The FM-1 had a session from elsewhere.", color: .orange) }
             if let w = p?.leaseWarning { SheetNote(w, color: .orange) }
         }

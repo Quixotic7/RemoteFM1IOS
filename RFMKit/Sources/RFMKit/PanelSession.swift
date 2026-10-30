@@ -43,7 +43,7 @@ public struct PanelStatus: Sendable, Equatable {
     public var foreignSession = false       // the FM-1 had a session when found, and nobody here held it before
     public var notifications: UInt32 = 0
     public var hello: UnitHello?
-    public var hasUnit = true               // (device backend, not running) an FM-1 candidate is in CoreMIDI's list
+    public var hasUnit = true               // (device backend) an FM-1 candidate is in CoreMIDI's list
     public var fake = false                 // the link's unit is a fake (tests, the simulator)
 
     public init() {}
@@ -347,7 +347,7 @@ public final class PanelSession: @unchecked Sendable {
             // HELLO_R's session flag when this link found the unit, and nobody here held it in the last 6 s
             p.foreignSession = p.owner && h.session && !took
         }
-        if !config.fake && !p.owner { p.hasUnit = hasUnit() }
+        if !config.fake { p.hasUnit = hasUnit() }   // (also while owner: an FM-1 that doesn't answer, the AU's card)
         return p
     }
 

@@ -14,7 +14,9 @@
 // the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
 // Get firmware (GetFirmware.swift): a row on the Firmware page (its badge: the updates) opens the list of firmware to
 // download (RFMKit's FirmwareStore); a row there opens the firmware's page. The Firmware row shows the badge too.
-// Settings › Install RemoteFM1 on the FM-1 (RFMKit's Install/: FM1Kit over USB; -sheetpage install).
+// Settings › Install RemoteFM1 on the FM-1 (RFMKit's Install/: FM1Kit over USB; -sheetpage install). An FM-1 that isn't
+// running RemoteFM1, or an older RemoteFM1, gets a prompt over the faceplate (InstallPrompter; DEBUG: -fm1prompt
+// install | unanswered | bluetooth | update) whose Install opens that page.
 
 import UniformTypeIdentifiers
 
@@ -94,6 +96,7 @@ struct MainScreen: View {
     @State private var showBluetooth = false
     @State private var showAbout = false
     @State private var source: SoundSource
+    @State private var prompter: InstallPrompter
     @State private var launched = false
     @State private var turned = false                  // (-orientation landscape refused: drawn turned, for screenshots)
     private let store = ThemeStore.shared
@@ -106,6 +109,7 @@ struct MainScreen: View {
         self.catalog = catalog
         self.midi = midi
         _feed = State(initialValue: midi.feed)
+        _prompter = State(initialValue: InstallPrompter(controller: controller, installer: .shared(for: controller)))
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
         _source = State(initialValue: LaunchOptions().source ?? saved ?? .fm1)
     }
@@ -137,8 +141,15 @@ struct MainScreen: View {
                 .equatable()
                 .ignoresSafeArea()
             if !ui.sheetOpen && !ui.editorOpen {
-                VStack { Spacer(); PerfBanner(player.perfNote).padding(.bottom, 12) }
-                    .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
+                VStack(spacing: 10) {
+                    Spacer()
+                    if !midi.learn.active {
+                        InstallPromptView(prompt: prompter.prompt, install: openInstall) { prompter.notNow() }
+                    }
+                    PerfBanner(player.perfNote)
+                }
+                .padding(.bottom, 12)
+                .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
             }
             PullDownSheet(open: $ui.sheetOpen) { sheet }
             if ui.editorOpen {
@@ -177,6 +188,10 @@ struct MainScreen: View {
         .onChange(of: ui.sheetOpen) { _, open in
             if open { midi.learn.stop() } else { page = nil }
         }
+        .onChange(of: page) { _, p in
+            if p != .firmware { editingFirmware = false; confirmDelete = nil }
+            prompter.installPageOpen = p == .install
+        }
     }
 
     // MARK: launch, the view per source
@@ -185,6 +200,7 @@ struct MainScreen: View {
         guard !launched else { return }
         launched = true
         store.observe()
+        prompter.start()
         loadView(source)
         if let p = options.page { ui.page = p }
         if let d = options.deck { ui.deck = d }
@@ -192,6 +208,7 @@ struct MainScreen: View {
         if options.steps { ui.stepNumbers = true }
         if options.sheet || options.sheetPage != nil { ui.sheetOpen = true }
         page = options.sheetPage
+        prompter.installPageOpen = page == .install
         if let id = options.catalogItem {
             catalogItem = id
             page = .catalogItem
@@ -296,6 +313,12 @@ struct MainScreen: View {
     }
 
     private func close() { withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false } }
+
+    /// the prompt's Install: the sheet opens at the install page
+    private func openInstall() {
+        page = .install
+        withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+    }
 
     private var mainSheet: some View {
         VStack(spacing: 0) {
