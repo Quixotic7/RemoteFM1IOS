@@ -1,0 +1,83 @@
+{
+ "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/428467499",
+ "html_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/tag/2026-10-29",
+ "id": 428467499,
+ "tag_name": "2026-10-29",
+ "name": "16 firmwares (2026-10-29)",
+ "draft": false,
+ "prerelease": false,
+ "created_at": "2026-10-29T21:26:05Z",
+ "published_at": "2026-10-29T22:42:04Z",
+ "assets": [
+  {
+   "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/assets/690136931",
+   "id": 690136931,
+   "name": "amb-1.3.rfm1",
+   "label": "",
+   "content_type": "application/octet-stream",
+   "state": "uploaded",
+   "size": 214629,
+   "digest": "sha256:ccacdb2801a8ac39aa86128f1650b071775c4fa131446011189f77a34961f053",
+   "download_count": 3,
+   "created_at": "2026-10-29T22:41:59Z",
+   "updated_at": "2026-10-29T22:41:59Z",
+   "browser_download_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/download/2026-10-29/amb-1.3.rfm1"
+  },
+  {
+   "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/assets/690136934",
+   "id": 690136934,
+   "name": "choralroot-0.26.1.rfm1",
+   "label": "",
+   "content_type": "application/octet-stream",
+   "state": "uploaded",
+   "size": 1293111,
+   "digest": "sha256:3f76c499e9a7cb4646e36009572fecb6f2adbf99bb6c9845bf85377185fe41cb",
+   "download_count": 2,
+   "created_at": "2026-10-29T22:41:59Z",
+   "updated_at": "2026-10-29T22:42:01Z",
+   "browser_download_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/download/2026-10-29/choralroot-0.26.1.rfm1"
+  },
+  {
+   "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/assets/690136933",
+   "id": 690136933,
+   "name": "coralflower-0.5.rfm1",
+   "label": "",
+   "content_type": "application/octet-stream",
+   "state": "uploaded",
+   "size": 773163,
+   "digest": "sha256:59eef62fa27d32c77d8d4f30dbc544264bc6968b848eacdcd058bc92d04d9964",
+   "download_count": 2,
+   "created_at": "2026-10-29T22:41:59Z",
+   "updated_at": "2026-10-29T22:42:00Z",
+   "browser_download_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/download/2026-10-29/coralflower-0.5.rfm1"
+  },
+  {
+   "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/assets/690136926",
+   "id": 690136926,
+   "name": "felucca-1.6.1.rfm1",
+   "label": "",
+   "content_type": "application/octet-stream",
+   "state": "uploaded",
+   "size": 1072881,
+   "digest": "sha256:f946a4ffdcef93e52b39bb7fa1b6276745fb8d594eb1f0ade76133c70010bf8f",
+   "download_count": 2,
+   "created_at": "2026-10-29T22:41:59Z",
+   "updated_at": "2026-10-29T22:42:01Z",
+   "browser_download_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/download/2026-10-29/felucca-1.6.1.rfm1"
+  },
+  {
+   "url": "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/assets/690137047",
+   "id": 690137047,
+   "name": "s1vave-1.0.rfm1",
+   "label": "",
+   "content_type": "application/octet-stream",
+   "state": "uploaded",
+   "size": 289265,
+   "digest": "sha256:865417eb4df5616c4e24117788dfb7c395ce469fe3ad1f38544090d474d32887",
+   "download_count": 3,
+   "created_at": "2026-10-29T22:42:02Z",
+   "updated_at": "2026-10-29T22:42:02Z",
+   "browser_download_url": "https://github.com/Quixotic7/RemoteFM1FW/releases/download/2026-10-29/s1vave-1.0.rfm1"
+  }
+ ]
+}

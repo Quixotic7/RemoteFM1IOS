@@ -4,9 +4,10 @@
 # Screenshots of the on-screen FM-1 for comparing with design/canvas, headless (simctl only: Simulator.app stays
 # closed): builds, then on an iPhone and an iPad simulator launches the app once per state with its launch arguments
 # (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps; M8: -demomap,
-# -learn, -learnpick, -sheetscroll) and saves a PNG
-# per state. The core runs (ChoralRoot by default) so the real framebuffer shows; "-source fm1" uses the fake unit
-# (the simulator's default backend), whose demo input presses keys by itself. A simulator this script booted is shut
+# -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
+# -catalogget <id>, which download from the live list) and saves a PNG per state. The core runs (ChoralRoot by
+# default) so the real framebuffer shows; "-source fm1" uses the fake unit (the simulator's default backend), whose
+# demo input presses keys by itself. A simulator this script booted is shut
 # down again; one that was booted stays booted.
 #
 #   scripts/sim_shots.sh [OUT]          (default $TMPDIR/remotefm1-shots)
@@ -57,6 +58,12 @@ PHONE_SHOTS=(
     "phone-midi-learn-kn1|-source phone -view full -demomap -learnpick KN1 -orientation portrait"
     "phone-midi-learn-kn3-controls|-source phone -view controls -knobs kn -learnpick KN3 -orientation portrait"
     "phone-midi-learn-landscape|-source phone -view full -demomap -learnpick SEQ -orientation landscape"
+    # Get firmware (the live list; the last two after -catalogget has installed S1Vave)
+    "phone-getfw-list|-source phone -view full -sheetpage getfirmware -orientation portrait"
+    "phone-getfw-detail|-source phone -view full -catalogitem s1vave -orientation portrait"
+    "phone-getfw-footer|-source phone -view full -sheetpage getfirmware -sheetscroll footer -orientation portrait"
+    "phone-getfw-installed-firmware|-source phone -view full -sheetpage firmware -catalogget s1vave -orientation portrait"
+    "phone-getfw-installed-detail|-source phone -view full -catalogitem s1vave -orientation portrait"
 )
 PAD_SHOTS=(
     "pad-full-landscape|-source phone -view full -orientation landscape"

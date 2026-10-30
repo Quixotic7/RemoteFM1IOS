@@ -6,3 +6,7 @@
   (`build-rfm1/rfm1/amb-1.3.rfm1`, emcc 6.0.13), unchanged. Its licence sections carry the texts that apply to it:
   MPL-2.0 and AMB-1's LICENSING.md for the firmware, GPL-3.0-only for FM1VST's core glue, MIT for the Emscripten
   runtime and musl. WasmTests boots, plays and checks it.
+- `catalog-2026-10-29.json`: https://remotefm1.com/catalog.json as it was on 2026-10-29, trimmed to 7 of its 126
+  firmwares (two with an `rfm1` object: FIZZ, S1Vave) and a few top-level fields. FirmwareStoreTests reads it.
+- `releases-latest-2026-10-29.json`: https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/latest on the same
+  day, trimmed to 5 of its 16 assets and the fields shown. FirmwareStoreTests reads it.

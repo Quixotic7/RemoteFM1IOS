@@ -1,0 +1,302 @@
+{
+ "about": "Built by web/site/tools/build_catalog.mjs from the FM-1 Firmware Hub's catalog, FM1VST's cores, RemoteFM1's own release (web/installer/releases.json) and the site's .rfm1 files (data/site-rfm1.json). Edit those, not this file.",
+ "generated": "2026-10-29",
+ "hub": "https://thefirmwarehub.com/",
+ "categories": [
+  "All",
+  "Synth",
+  "Groovebox",
+  "Chords",
+  "Drums",
+  "Other"
+ ],
+ "firmwares": [
+  {
+   "id": "386dx",
+   "name": "386DX",
+   "version": "1.0.2",
+   "author": "seajaysec",
+   "authorFull": "seajaysec",
+   "category": "Other",
+   "categories": [
+    "Other"
+   ],
+   "tag": "Karaoke robot with a band",
+   "what": "A karaoke robot with a band: it sings songs from karaoke and MIDI files, or lines you type, to the notes you play. Its face is the voice. Keys, bass and drums play along, with a step sequencer and sixteen punch-in effects.",
+   "license": null,
+   "source": "https://github.com/seajaysec/386-DX-FM1-KaraokeBot/tree/v1.0.2",
+   "repo": "seajaysec/386-DX-FM1-KaraokeBot",
+   "release": "https://github.com/seajaysec/386-DX-FM1-KaraokeBot/releases/tag/v1.0.2",
+   "site": "https://386dx.linecross.ing/",
+   "play": null,
+   "editor": "https://386dx.linecross.ing/",
+   "beta": false,
+   "engines": [
+    "emu"
+   ],
+   "defaultEngine": "emu",
+   "native": null,
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/386dx-1.0.2.fwsc",
+    "sha256": "97dc787a7b5ef4052c6ab519e98a679274e1fd1c25ba46baa3a3d02901008028",
+    "size": 609406,
+    "product": "FM-1_386010002"
+   }
+  },
+  {
+   "id": "amb",
+   "name": "AMB-1",
+   "version": "1.3",
+   "author": "C. Vestal",
+   "authorFull": "Charles Vestal",
+   "category": "Other",
+   "categories": [
+    "Other",
+    "Synth"
+   ],
+   "tag": "Generative ambient",
+   "what": "A generative ambient machine after Music for Airports: it plays itself from the start, breathing voices, bells on tape loops of unequal length, a gliding bass. You do not perform it, you tend it.",
+   "license": "MPL-2.0",
+   "source": "https://github.com/charlesvestal/fm1-amb/tree/v1.3",
+   "repo": "charlesvestal/fm1-amb",
+   "release": "https://github.com/charlesvestal/fm1-amb/releases/tag/v1.3",
+   "site": "https://charlesvestal.github.io/fm1-amb/",
+   "play": "https://charlesvestal.github.io/fm1-amb/emu/",
+   "editor": null,
+   "beta": false,
+   "engines": [
+    "native",
+    "emu"
+   ],
+   "defaultEngine": "native",
+   "native": {
+    "core": "amb",
+    "version": "1.3",
+    "wasm": "engines/native/amb.wasm",
+    "repo": "https://github.com/charlesvestal/fm1-amb",
+    "commit": "188b0a42f20a547864e732ae5ea1339d0fbcf395",
+    "glue": "fm1base"
+   },
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/amb-1.3.fwsc",
+    "sha256": "59dbc6b688e3a64bb0da912c1e40890da7bc214b2a3269704627369b776707cb",
+    "size": 610108,
+    "product": "FM-1_7010300"
+   },
+   "nativeBehind": false
+  },
+  {
+   "id": "choralroot",
+   "name": "ChoralRoot",
+   "version": "0.27",
+   "author": "Quixotic7",
+   "authorFull": "Quixotic7",
+   "category": "Chords",
+   "categories": [
+    "Chords"
+   ],
+   "tag": "Chord instrument",
+   "what": "A Telepathic Orchid-style chord instrument: one hand plays roots, the other shapes chords; voicings, performance modes, bass and a looper.",
+   "license": "GPL-3.0",
+   "source": "https://github.com/Quixotic7/ChoralRootFM1/tree/v0.27",
+   "repo": "Quixotic7/ChoralRootFM1",
+   "release": "https://github.com/Quixotic7/ChoralRootFM1/releases/tag/v0.27",
+   "site": "https://github.com/Quixotic7/ChoralRootFM1",
+   "play": "https://quixotic7.github.io/ChoralRootFM1/emu/",
+   "editor": null,
+   "beta": true,
+   "engines": [
+    "native",
+    "emu"
+   ],
+   "defaultEngine": "emu",
+   "native": {
+    "core": "choralroot",
+    "version": "0.26.1",
+    "wasm": "engines/native/choralroot.wasm",
+    "repo": "https://github.com/Quixotic7/ChoralRootFM1",
+    "commit": "7d97982a7db3dad2da456a3e4d4478548b6571d9",
+    "glue": "choralroot"
+   },
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/choralroot-0.27.fwsc",
+    "sha256": "a09f9e19b66a91351de37c532e0d15cdc03ff9e9c82a0b152cdb66ca3fdc0326",
+    "size": 610313,
+    "product": "FM-1_920"
+   },
+   "nativeBehind": true
+  },
+  {
+   "id": "coralflower",
+   "name": "CoralFlower",
+   "version": "0.6",
+   "author": "FicusFicusov",
+   "authorFull": "FicusFicusov",
+   "category": "Chords",
+   "categories": [
+    "Chords"
+   ],
+   "tag": "Chords, a flower grows",
+   "what": "Chords after the Orchid, with controls made for the FM-1: one key plays a chord with a bass note. Also 27 scales, an arpeggiator, a sequencer with drums and a song mode, and a pixel flower that grows as you play.",
+   "license": "GPL-3.0",
+   "source": "https://github.com/FicusFicusov/CoralFlower/tree/v0.6",
+   "repo": "FicusFicusov/CoralFlower",
+   "release": "https://github.com/FicusFicusov/CoralFlower/releases/tag/v0.6",
+   "site": "https://ficusficusov.github.io/CoralFlower/",
+   "play": "https://ficusficusov.github.io/CoralFlower/play/",
+   "editor": null,
+   "beta": true,
+   "engines": [
+    "native",
+    "emu"
+   ],
+   "defaultEngine": "emu",
+   "native": {
+    "core": "coralflower",
+    "version": "0.5",
+    "wasm": "engines/native/coralflower.wasm",
+    "repo": "https://github.com/FicusFicusov/CoralFlower",
+    "commit": "b5ceb997be330c8a420958eb8f4e0f4b3ca084c2",
+    "glue": "choralroot"
+   },
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/coralflower-0.6.fwsc",
+    "sha256": "8cdc5ba6e0cce5a5c1e3a526d87ce0e55e02a9ae85bf2b4cb207dbb0dd461236",
+    "size": 610313,
+    "product": "FM-1_930"
+   },
+   "nativeBehind": true
+  },
+  {
+   "id": "felucca",
+   "name": "Felucca",
+   "version": "1.7.0",
+   "author": "Hügelton",
+   "authorFull": "Leo Kuroshita (Hügelton Instruments)",
+   "category": "Synth",
+   "categories": [
+    "Synth",
+    "Groovebox",
+    "Other"
+   ],
+   "tag": "Multi-engine synth",
+   "what": "The custom firmware the others build on: the FM-1's own synth engines, a sequencer, effects and a better panel, with an editor in the browser.",
+   "license": "GPL-3.0 (engines MIT)",
+   "source": "https://github.com/hugelton/Felucca/tree/v1.7.0",
+   "repo": "hugelton/Felucca",
+   "release": "https://github.com/hugelton/Felucca/releases/tag/v1.7.0",
+   "site": "https://github.com/hugelton/Felucca",
+   "play": "https://hugelton.github.io/Felucca/webapp/try/",
+   "editor": "https://hugelton.github.io/Felucca/webapp/editor/",
+   "beta": false,
+   "engines": [
+    "native",
+    "emu"
+   ],
+   "defaultEngine": "emu",
+   "native": {
+    "core": "felucca",
+    "version": "1.6.1",
+    "wasm": "engines/native/felucca.wasm",
+    "repo": "https://github.com/hugelton/Felucca",
+    "commit": "a53ecf428c29c780108fd70a31b71a32a6b5c313",
+    "glue": "felucca_web"
+   },
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/felucca-1.7.0.fwsc",
+    "sha256": "bff7c617cfb2c88e66b22aa691cb798dfa0d9cb12ff9a73deab51d404e82817c",
+    "size": 610286,
+    "product": "FM-1_917"
+   },
+   "nativeBehind": true
+  },
+  {
+   "id": "fizz",
+   "name": "FIZZ",
+   "version": "0.12.0-beta.12",
+   "author": "Quixotic7",
+   "authorFull": "Michael P Jones (Quixotic7)",
+   "category": "Groovebox",
+   "categories": [
+    "Groovebox"
+   ],
+   "tag": "FM TONE step sequencer",
+   "what": "A step sequencer for FM TONE, ChoralRoot's FM voice: eight tracks sharing 16 voices, p-locks, a pool of 128 sounds, pages with their own start and end, conditions, chance, ratchets and chords of up to six notes. Built by this site from FIZZ's release to WebAssembly (.rfm1) and run natively here; PLAY starts the demo pattern, REC turns the keys into a keyboard.",
+   "license": "MPL-2.0 AND GPL-3.0-only AND MIT AND FTL AND OFL-1.1",
+   "source": "https://github.com/Quixotic7/FIZZ/tree/v0.12.0-beta.12",
+   "repo": "Quixotic7/FIZZ",
+   "release": "https://github.com/Quixotic7/FIZZ/releases/tag/v0.12.0-beta.12",
+   "site": "https://quixotic7.github.io/FIZZ/",
+   "play": null,
+   "editor": null,
+   "beta": true,
+   "engines": [
+    "rfm1"
+   ],
+   "defaultEngine": "rfm1",
+   "native": null,
+   "emu": null,
+   "rfm1": {
+    "from": "site",
+    "file": "fw/fizz-0.12.0-beta.12.rfm1",
+    "sha256": "e511348e9716f3144e7e4b7679a2a563af093322c7b9d2ed043d03fd5508bd99",
+    "size": 1260254,
+    "fileName": "fizz-0.12.0-beta.12.rfm1",
+    "version": "0.12.0-beta.12",
+    "sourceUrl": "https://github.com/Quixotic7/FIZZ@1b7f8efbe6276a7f78c61da39ff45aee4d9b805e",
+    "glueUrl": "https://github.com/Quixotic7/FM1VST/tree/d5f8f64101b401abf6fd9aaa3f20c3c507e34d60",
+    "builtBy": "FM1VST 0.6.2 (d5f8f64101b4) fm1_add_rfm1, emcc 6.0.13",
+    "authors": [
+     "Michael P Jones (Quixotic7)"
+    ]
+   }
+  },
+  {
+   "id": "s1vave",
+   "name": "S1Vave",
+   "version": "1.0",
+   "author": "Andrew GG",
+   "authorFull": "Andrew GG",
+   "category": "Synth",
+   "categories": [
+    "Synth"
+   ],
+   "tag": "Synth after the Roland S-1…",
+   "what": "A synth after the Roland S-1 and the SH-101: a punchy sub-oscillator, a resonant filter, bass and lead sounds and hands-on controls for playing live. Built on OberVave.",
+   "license": "GPL-3.0-only",
+   "source": "https://github.com/AndrewGG88/S1Vave/tree/main",
+   "repo": "AndrewGG88/S1Vave",
+   "release": "https://andrewgg.one/s1vave/",
+   "site": "https://andrewgg.one/s1vave/",
+   "play": "https://andrewgg.one/s1vave/sim/",
+   "editor": null,
+   "beta": false,
+   "engines": [
+    "rfm1",
+    "emu"
+   ],
+   "defaultEngine": "rfm1",
+   "native": null,
+   "emu": {
+    "pkg": "https://thefirmwarehub.com/fw/s1vave-1.0.fwsc",
+    "sha256": "ebc7934ca658b347965d9c5bd0383b12dfe7cc04bc15ef189d37cefd0b74a4f9",
+    "size": 610110,
+    "product": "FM-1_950"
+   },
+   "rfm1": {
+    "from": "site",
+    "file": "fw/s1vave-1.0.rfm1",
+    "sha256": "865417eb4df5616c4e24117788dfb7c395ce469fe3ad1f38544090d474d32887",
+    "size": 289265,
+    "fileName": "s1vave-1.0.rfm1",
+    "version": "1.0",
+    "sourceUrl": "https://github.com/AndrewGG88/S1Vave@97303378678c247ca1d005ae641114f4544acf65",
+    "glueUrl": null,
+    "builtBy": "FM1VST 0.6.2 (13a66e2e0a06) fm1_add_rfm1, emcc 6.0.13",
+    "authors": [
+     "Andrew GG"
+    ]
+   }
+  }
+ ]
+}
