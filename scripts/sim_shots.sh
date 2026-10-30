@@ -5,9 +5,10 @@
 # closed): builds, then on an iPhone and an iPad simulator launches the app once per state with its launch arguments
 # (-view, -deck, -knobs, -source, -sheet, -sheetpage, -themeeditor, -theme, -orientation, -steps; M8: -demomap,
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
-# -catalogget <id>, which download from the live list) and saves a PNG per state. The core runs (ChoralRoot by
-# default) so the real framebuffer shows; "-source fm1" uses the fake unit (the simulator's default backend), whose
-# demo input presses keys by itself. A simulator this script booted is shut
+# -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo) and saves a PNG
+# per state ("name@s": that shot waits s seconds). The core runs (ChoralRoot by default) so the real framebuffer shows;
+# "-source fm1" uses the fake unit (the simulator's default backend), whose demo input presses keys by itself. A
+# simulator this script booted is shut
 # down again; one that was booted stays booted.
 #
 #   scripts/sim_shots.sh [OUT]          (default $TMPDIR/remotefm1-shots)
@@ -64,6 +65,13 @@ PHONE_SHOTS=(
     "phone-getfw-footer|-source phone -view full -sheetpage getfirmware -sheetscroll footer -orientation portrait"
     "phone-getfw-installed-firmware|-source phone -view full -sheetpage firmware -catalogget s1vave -orientation portrait"
     "phone-getfw-installed-detail|-source phone -view full -catalogitem s1vave -orientation portrait"
+    # Install RemoteFM1 on the FM-1 (DEBUG's -installdemo on FM1Kit's SimulatedFM1; the list and the package come
+    # from remotefm1.com); "@s": this shot's wait
+    "phone-install@4|-source fm1 -view full -sheetpage install -orientation portrait"
+    "phone-install-check@10|-source fm1 -view full -sheetpage install -installdemo check -orientation portrait"
+    "phone-install-writing@9|-source fm1 -view full -sheetpage install -installdemo writing -orientation portrait"
+    "phone-install-finished@45|-source fm1 -view full -sheetpage install -installdemo finished -orientation portrait"
+    "phone-install-cutoff@25|-source fm1 -view full -sheetpage install -installdemo cutoff -orientation portrait"
 )
 PAD_SHOTS=(
     "pad-full-landscape|-source phone -view full -orientation landscape"
@@ -93,12 +101,13 @@ run_device() {
     xcrun simctl uninstall "$udid" "$BUNDLE" >/dev/null 2>&1 || true
     xcrun simctl install "$udid" "$APP"
     for s in "${shots[@]}"; do
-        local name=${s%%|*} args=${s#*|}
+        local name=${s%%|*} args=${s#*|} wait=$WAIT
+        if [[ $name == *@* ]]; then wait=${name#*@}; name=${name%@*}; fi
         [[ -z ${MATCH:-} || $name == *"$MATCH"* ]] || continue
         xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
         # shellcheck disable=SC2086
         xcrun simctl launch "$udid" "$BUNDLE" $args >/dev/null
-        sleep "$WAIT"
+        sleep "$wait"
         xcrun simctl io "$udid" screenshot "$OUT/$name.png" >/dev/null 2>&1 || { echo "no screenshot: $name"; continue; }
         # an iPad refuses a programmatic rotation (its windowing mode): the app then draws the faceplate turned in
         # the portrait window, and the PNG is turned back here

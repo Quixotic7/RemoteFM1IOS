@@ -13,6 +13,7 @@
 // the toasts: FaceplateOverlay, over the sheet). Opening the sheet ends learn mode.
 // Get firmware (GetFirmware.swift): a row on the Firmware page (its badge: the updates) opens the list of firmware to
 // download (RFMKit's FirmwareStore); a row there opens the firmware's page. The Firmware row shows the badge too.
+// Settings › Install RemoteFM1 on the FM-1 (RFMKit's Install/: FM1Kit over USB; -sheetpage install).
 
 import UniformTypeIdentifiers
 
@@ -65,7 +66,7 @@ struct LaunchOptions {
 
 enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
-    case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings
+    case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install
 }
 
 struct MainScreen: View {
@@ -264,6 +265,7 @@ struct MainScreen: View {
         case .midi: midiPage
         case .midiInput: midiInputPage
         case .settings: settingsPage
+        case .install: InstallFirmwarePage(installer: .shared(for: controller)) { page = .settings }
         case nil: mainSheet
         }
     }
@@ -448,6 +450,8 @@ struct MainScreen: View {
                 SheetRow("AU test", divider: false) { showAUTest = true }
             }
             SheetNote("Diagnostics has the link, the core, the unit's HELLO_R and the test pattern mode.")
+            SheetSectionTitle("FM-1 firmware")
+            SheetList { InstallFirmwareRow(installer: .shared(for: controller)) { page = .install } }
         }
     }
 }

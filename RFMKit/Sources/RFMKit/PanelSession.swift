@@ -13,6 +13,8 @@
 //                          (re-checked then); (c) else wait for a tap. A running instance never claims by itself.
 //   gone                   the heartbeat stops; the owner field stays (pid 0), so a reload reconnects; others see
 //                          it stale after 3 s
+//   a firmware install     hold(as:): the link stopped, the lease claimed and heartbeaten with no session, no
+//                          automatic claim; endHold(restart:) claims again (Install/FirmwareInstaller.swift)
 //
 // The policy runs on a private serial queue; the claim blocks that queue (up to the ack wait), never the main thread.
 
@@ -99,6 +101,7 @@ public final class PanelSession: @unchecked Sendable {
     private var searchingSince: Date?
     private var hasUnitCache = (Date.distantPast, true)
     private var finished = false
+    private var hold: DispatchSourceTimer?          // (a firmware install) the lease held with the link stopped
     private let log = RFMShared.log("panel")
 
     // the identities of the live sessions in this process (duplicate detection)
@@ -126,6 +129,7 @@ public final class PanelSession: @unchecked Sendable {
     }
 
     deinit {
+        hold?.cancel()
         if !finished, let lease {               // (finish not called: let go of the lease here)
             rfmc_set_lease(link, nil)
             rfml_close(lease)
@@ -140,11 +144,15 @@ public final class PanelSession: @unchecked Sendable {
         let first = !finished
         finished = true
         let id = identity_
+        hold?.cancel()                          // (an install's heartbeat: the lease is closed below)
+        hold = nil
         lock.unlock()
         guard first else { return }
         Self.unregister(id)
         let ref = Refs(link: link, lease: lease)
+        let q = q
         DispatchQueue.global(qos: .utility).async {
+            q.sync {}                           // (a heartbeat under way ends first)
             if let l = ref.lease { rfml_detach(l) }
             rfmc_free(ref.link)
             if let l = ref.lease { rfml_close(l) }
@@ -219,6 +227,7 @@ public final class PanelSession: @unchecked Sendable {
     }
 
     private func claim(auto: Bool, why: String, done: (@Sendable (Bool) -> Void)? = nil) {
+        if auto && lock.withLock({ hold != nil }) { done?(false); return }   // (an install holds the FM-1)
         lock.withLock { autoGen += 1 }              // (a claim settles any pending check)
         let ref = Refs(link: link, lease: lease)
         let wait = config.claimWaitMs
@@ -238,6 +247,51 @@ public final class PanelSession: @unchecked Sendable {
             done?(ok)
         }
     }
+
+    // MARK: a firmware install (Install/): the FM-1 held with no session
+
+    /// Stops the link (SESSION 0 if it ran) and takes the lease as "Use this FM-1" does (another owner drops and closes
+    /// its CoreMIDI links), but starts no session: the lease is heartbeaten here, under `name`, until endHold(), so
+    /// other instances see the FM-1 in use and none claims it. Automatic claims wait meanwhile. done: claimed.
+    public func hold(as name: String, done: (@Sendable (Bool) -> Void)? = nil) {
+        let ref = Refs(link: link, lease: lease)
+        let wait = config.claimWaitMs
+        lock.withLock { autoGen += 1 }
+        q.async { [weak self] in
+            rfmc_stop(ref.link)
+            guard let self, let l = ref.lease else { done?(false); return }
+            var c = rfml_claim_t()
+            let ok = rfml_claim(l, wait, &c) != 0
+            rfml_set_name(l, name)
+            let t = DispatchSource.makeTimerSource(queue: self.q)
+            t.schedule(deadline: .now(), repeating: .milliseconds(500))
+            t.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.lock.withLock { if self.hold != nil && !self.finished { rfml_heartbeat(l) } }
+            }
+            self.lock.withLock {
+                self.hold?.cancel()
+                self.hold = t
+            }
+            t.resume()
+            self.log.info("hold for an install: epoch \(c.epoch), waited \(c.waited) acked \(c.acked) in \(c.wait_ms) ms")
+            done?(ok)
+        }
+    }
+
+    /// The install is over: the heartbeat stops, the name is the instance's again; restart: claim and start the link
+    /// (the lease is still this instance's, so nobody is waited for), else release the lease.
+    public func endHold(restart: Bool) {
+        let t: DispatchSourceTimer? = lock.withLock {
+            defer { hold = nil }
+            return hold
+        }
+        t?.cancel()
+        if let lease { rfml_set_name(lease, lock.withLock { name_ }) }
+        if restart { claim(auto: false, why: "after an install") } else if let lease { rfml_release(lease) }
+    }
+
+    public var holding: Bool { lock.withLock { hold != nil } }
 
     private func scheduleAutoCheck() {
         let gen = lock.withLock { () -> Int in

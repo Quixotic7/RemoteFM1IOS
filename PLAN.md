@@ -25,6 +25,7 @@ One app, two forms: a standalone app and an AUv3 instrument (AUM, Logic for iPad
 | The cores (`core-glue/`, `cores/` submodules, `cmake/FM1Cores.cmake`) | FM1VST | cross-compiled for iOS (arm64 device, arm64 simulator) |
 | Test pattern (`host/tools/fm1remote/patterns.cpp`) | RemoteFM1 | M1's screen, before any core |
 | Bluetooth sheet (`CABTMIDICentralViewController`), Xcode setup | FIZZ iOS (`FMToneSeq` branch `ios-app`) | same approach |
+| Installing RemoteFM1 on the FM-1 (the FM-1's USB-MIDI update protocol, `.fwsc` checks, resume) | FM1Kit 0.4.x (Drew Robinson, MIT, `github.com/ocean/FM1Kit`), a Swift package | as is, through SwiftPM (`.upToNextMinor(from: "0.4.5")`); section 13. It replaces the website's installer, whose code is GPL |
 
 FM1VST goes in as a git submodule at `v0.6.2` (it pins RemoteFM1 at exactly v0.2.2, `59a5b52`, and the cores).
 Nothing in either repo is edited from here; a change they need is reported to them.
@@ -215,6 +216,9 @@ So:
 - To get a core into the App Store build, the owner asks its authors for an extra permission (GPLv3 section 7).
   There is a precedent: Leo Kuroshita let fm1-base take his Felucca code under MPL-2.0 (felucca-bsp#4). ChoralRoot in
   the App Store would also need the Casio and Sequential sound data left out or cleared.
+- **Other people's libraries in both builds:** wasm3 (MIT, `RFMKit/Sources/CWasm3`), the four UI fonts (OFL) and
+  FM1Kit (MIT, a SwiftPM dependency of RFMKit: the installer of section 13; its licence text is shown on the install
+  page). MIT and OFL allow the App Store.
 - **Contributions:** for the owner to keep shipping this repo on the App Store after others contribute, the repo
   needs either a section 7 permission for app stores in its licence, or a contributor agreement. Recommended: the
   permission, in `LICENSE`, before the first outside contribution. The owner decides.
@@ -437,3 +441,51 @@ firmware's engine parameters too. A host maps its MIDI to an AU's parameters (AU
   jumps after each spring back, as in FM1VST), Logic's and Cubasis' automation (read and touch: whether they show
   the value texts, and how they record the firmware's own changes, which come as plain value changes, no touch
   gestures), a host restoring parameter values later than 1 s after the state, many instances' 30 Hz sync.
+
+## 13. Installing RemoteFM1 from the app
+
+The owner's wish: the app also puts RemoteFM1 on the FM-1, so nobody has to go to the website to do it. The website's
+installer is GPL JavaScript; the app uses **FM1Kit** instead (Swift, MIT, `github.com/ocean/FM1Kit`, 0.4.x: it speaks
+the FM-1's USB-MIDI update protocol, checks `.fwsc` packages, resumes a cut-off install, and has a `SimulatedFM1`).
+Nothing of the website's installer was read or copied.
+
+- **Where.** Controls › Settings › FM-1 firmware › Install RemoteFM1 on the FM-1 (value: "0.2.3 available" when the
+  FM-1's RemoteFM1 is older), and Diagnostics' unit card (the RemoteFM1 version from HELLO_R, "Update available",
+  the same page). Code: `RFMKit/Sources/RFMKit/Install/` (the logic and the page), `PanelSession.hold(as:)` /
+  `endHold(restart:)`; the app adds a row and the page (`MainScreen`), and the card's lines (`DiagnosticsScreen`).
+- **Releases.** `https://remotefm1.com/installer/releases.json` (newest first: version, identity, licence, SHA-256 of
+  `firmware/remote-<version>.fwsc`, an optional USB-only package, notes), the last good copy in Caches. The newest
+  release's Bluetooth package is the default; its USB-only package and older releases (under a disclosure) can be
+  picked. 0.1.x is not offered: it answers as M-VAVE's V15 (`FM-1_015`), so the result can't be checked. RemoteFM1's
+  identity carries its version (`FM-1_52XXYYZZ` = XX.YY.ZZ).
+- **Checks before anything reaches the FM-1** (`FirmwarePackages`): the download's SHA-256 is releases.json's (else
+  refused and not kept), FM1Kit reads it (`FwscPackage`: header, chip, every part's checksum, a firmware and a loader),
+  and its identity is releases.json's.
+- **The panel lets go** (`PanelLinkPausing`, `RemoteController`): before FM1Kit's first message the app's link stops
+  (its session ends, its CoreMIDI links close) and the app takes the lease as "Use this FM-1" does, then holds it
+  with no session (heartbeaten, named "RemoteFM1 app / installing firmware"), so an AU instance in another app drops
+  and none claims the FM-1 meanwhile; the page says so when another app holds it. After the install, or on leaving
+  the page, the link claims again and starts if it was running. While the FM-1 waits in its loader (a cut-off
+  install) the panel stays off it.
+- **The flow** (`FirmwareInstaller`): Check the FM-1 (FM1Kit's `identify`: a unit in its loader is offered "Finish
+  the install"; `check`: what it runs and what the install does), then confirm (FM1Kit counts any change between
+  custom firmwares, RemoteFM1 0.2.2 → 0.2.3 too, as a firmware switch, which can erase projects and samples; a
+  reinstall is confirmed too), then the install in a full-screen cover that can't be dismissed (FM1Kit's
+  `InstallProgress`: getting ready, installing, checking, restarting), the screen kept awake (`isIdleTimerDisabled`)
+  and a background task's grace period. Errors in FM1Kit's words (`FM1Advice`), "Finish the install" (`resume`, the
+  same package) when it was cut off.
+- **USB only.** On a device the transport is FM1Kit's `CoreMIDITransport` less the Bluetooth MIDI ports (their
+  device's driver owner names Bluetooth). FM1Kit refuses to start when more than one FM-1 answers; the page then asks
+  to leave only one connected (the unit can't be followed through its restarts by a serial number: FM1Kit notes that Felucca's USB device reports
+  none, and RemoteFM1 0.2 uses felucca-bsp's).
+- **Simulated.** In the simulator, with the fake unit, and with DEBUG's `-installdemo check|writing|finished|cutoff`
+  the FM-1 is FM1Kit's `SimulatedFM1` running RemoteFM1 0.2.2; nothing there makes a CoreMIDI client.
+- **Tested.** `swift test` (`FirmwareInstallTests`): releases.json and its cache, the package checks with RemoteFM1
+  0.2.3's real package (`Fixtures/RemoteFM1`), a full install 0.2.2 → 0.2.3 on the SimulatedFM1 with the loader's
+  second read, a tampered download and a wrong identity refused (the panel never paused), a cut-off install resumed,
+  a unit waiting in its loader, a switch from another firmware, no FM-1, and the app's link and lease held and
+  released around an install on a fake link. Screenshots: `MATCH=install ONLY=phone scripts/sim_shots.sh`.
+- **Device only, not tested yet.** A real FM-1 over USB from an iPhone or iPad: the handshake with RemoteFM1 0.2.x,
+  its felucca-bsp loader (`ota-FM-1_900`, "Felucca Update") through FM1Kit's write and check, the identity after
+  the restart, the Bluetooth filter, the panel reconnecting afterwards, an AU in another app yielding, the screen
+  staying on, and a cable pulled mid-write then resumed.
