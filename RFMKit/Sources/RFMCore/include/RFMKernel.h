@@ -39,6 +39,7 @@ typedef struct {
     int host_clock;
     double host_tempo, host_beat;
     uint32_t clock_msgs, clock_dropped;
+    uint32_t param_events;      // the host's parameter changes seen in renders (AURenderEventParameter, ...Ramp)
 } rfmk_stats_t;
 void rfmk_reset_level(rfmk_t *k);
 void rfmk_stats(rfmk_t *k, rfmk_stats_t *out);

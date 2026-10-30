@@ -108,7 +108,7 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
                                                      const AURenderEvent *events, AURenderPullInputBlock) {
         if (frameCount > k->maxFrames)
             return kAudioUnitErr_TooManyFramesToProcess;
-        k->nev = 0;
+        k->nev = k->npev = 0;
         const bool clockOn = k->hostClockOn.load(std::memory_order_relaxed);
         rfmhc_input_t host{};
         if (clockOn)
@@ -119,6 +119,9 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
                 k->midi(e->MIDI.data, e->MIDI.length, offsetOf(e->head.eventSampleTime, ts, frameCount));
             else if (e->head.eventType == AURenderEventMIDIEventList)
                 umpWords(k, &e->MIDIEventsList.eventList, offsetOf(e->head.eventSampleTime, ts, frameCount));
+            else if (e->head.eventType == AURenderEventParameter || e->head.eventType == AURenderEventParameterRamp)
+                k->param(e->parameter.parameterAddress, e->parameter.value,
+                         offsetOf(e->head.eventSampleTime, ts, frameCount));
         }
         k->hostClock(host, clockOn);                // (the host's clock and transport, merged by frame)
         for (UInt32 i = 0; i < outputData->mNumberBuffers; i++) {

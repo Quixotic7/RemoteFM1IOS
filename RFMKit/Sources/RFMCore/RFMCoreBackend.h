@@ -57,6 +57,13 @@ struct CoreParam {
     bool readable = false, writable = false;
 };
 
+// the same, as plain data read on the clock's thread (param_desc)
+struct ParamDesc {
+    char name[24];
+    int32_t min, max, def;
+    uint32_t flags;
+};
+
 class CoreBackend {
 public:
     virtual ~CoreBackend() = default;
@@ -93,13 +100,22 @@ public:
     virtual uint32_t param_epoch() { return 0; }
     virtual int32_t knob_target(int /*role*/) { return -1; }
 
-    // ---- the Tier 2 parameter map (the clock's thread; a Wasm core: none in .rfm1 version 1)
+    // ---- the Tier 2 parameter map (the clock's thread; a Wasm core: none in .rfm1 version 1, nor knob_target or
+    // param_epoch: its knobs are relative host parameters and its Tier 2 slots unused)
     virtual uint32_t param_count() const { return 0; }
     virtual const CoreParam *param(uint32_t /*i*/) const { return nullptr; }
     virtual bool param_get(uint32_t /*i*/, int32_t * /*v*/) { return false; }
     virtual bool param_set(uint32_t /*i*/, int32_t /*v*/) { return false; }
     // the index of the parameter named `name`, -1 none
     int param_find(const char *name) const;
+    // (the clock's thread) entry i as the firmware has it now: a meta entry's target is rewritten (name, range)
+    // when param_epoch moves, so param()'s copy from the load may be old. No allocation. false: none
+    virtual bool param_desc(uint32_t /*i*/, ParamDesc * /*out*/) { return false; }
+    // (the clock's thread) a meta entry's target() now, -1 none
+    virtual int32_t param_target(uint32_t /*i*/) { return -1; }
+    // (any thread: fm1core.h lets text() be called from any) v as the firmware writes it ("1/8", "120 ms");
+    // false: no entry i
+    virtual bool param_text(uint32_t /*i*/, int32_t /*v*/, char * /*buf*/, uint32_t /*n*/) { return false; }
 };
 
 // makes a backend (the control thread); nullptr with a message in *err when it can't

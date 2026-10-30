@@ -76,6 +76,7 @@ void rfmk_stats(rfmk_t *k, rfmk_stats_t *out)
     out->host_beat = k->hostBeat.load(std::memory_order_relaxed);
     out->clock_msgs = k->clockMsgs.load(std::memory_order_relaxed);
     out->clock_dropped = k->clockDropped.load(std::memory_order_relaxed);
+    out->param_events = k->paramEvents.load(std::memory_order_relaxed);
 }
 
 void rfmk_set_host_clock(rfmk_t *k, int on) { k->hostClockOn.store(on != 0, std::memory_order_relaxed); }
@@ -86,12 +87,12 @@ int rfmk::process(float *L, float *R, uint32_t n)
 {
     int played = 0;
     if (engine) {
-        played = rfme_render_midi(engine, L, R, n, sampleRate, ev, nev);
+        played = rfme_render_events(engine, L, R, n, sampleRate, ev, nev, pev, npev);
     } else {
         std::memset(L, 0, n * sizeof *L);
         std::memset(R, 0, n * sizeof *R);
     }
-    nev = 0;
+    nev = npev = 0;
     if (played)
         sounding.fetch_add(1, std::memory_order_relaxed);
     if (levelReset.exchange(false, std::memory_order_relaxed)) {

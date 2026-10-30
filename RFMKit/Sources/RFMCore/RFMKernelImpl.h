@@ -15,6 +15,7 @@ struct rfmk {
     static constexpr uint32_t kMaxEvents = 512;
     static constexpr uint32_t kSysExMax = 4096;
     static constexpr uint32_t kMaxClock = 128;      // the host clock's messages in one buffer
+    static constexpr uint32_t kMaxParams = 256;     // the host's parameter changes in one buffer
 
     // set by allocate / deallocate / set_* (never while rendering)
     double sampleRate = 44100;
@@ -34,6 +35,8 @@ struct rfmk {
     bool sysexOverflow = false;
     rfmhc_t hc{};                               // the host's clock as MIDI (RFMHostClock.h)
     rfme_midi_t clk[kMaxClock] = {};
+    rfme_param_ev_t pev[kMaxParams] = {};       // the host's parameter changes (the AU's tree), in order
+    uint32_t npev = 0;
     bool dropClock = false;                     // this buffer: the host's own clock bytes dropped (ours replace them)
 
     // read by any thread
@@ -47,6 +50,7 @@ struct rfmk {
     std::atomic<uint32_t> clockMsgs{0}, clockDropped{0};
     std::atomic<int> hostState{0};              // rfmk_stats_t.host_clock
     std::atomic<double> hostTempo{0}, hostBeat{0};
+    std::atomic<uint32_t> paramEvents{0};       // the host's parameter changes seen in renders
 
     // the session thread's stand-in (M2's probe)
     rfmp_ticker_t *ticker = nullptr;
@@ -100,6 +104,15 @@ struct rfmk {
         }
         nev += nc;
         clockMsgs.fetch_add(nc, std::memory_order_relaxed);
+    }
+
+    // one host parameter change (a render event; a ramp's end value at its start). Lock-free and allocation-free.
+    void param(uint64_t address, float value, uint32_t offset)
+    {
+        paramEvents.fetch_add(1, std::memory_order_relaxed);
+        if (address >= RFME_HP_COUNT || npev >= kMaxParams)
+            return;
+        pev[npev++] = rfme_param_ev_t{offset, (uint32_t)address, value};
     }
 
     void counted(uint32_t n)

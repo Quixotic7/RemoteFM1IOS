@@ -24,6 +24,8 @@
 //   core -> host    (M4) the core's midi_out_take packets, to the AU's MIDI output (rfme_midi_out_take)
 //   controller      (M8) a MIDI controller's messages (rfme_midi_in) take host MIDI's path on the core thread; learn
 //                   and the learned map (rfme_set_midi_map) come first there, for host MIDI too
+//   host params     the AU's parameter tree (rfme_hp_*, RFMHostParams.h): host values in as panel events and map
+//                   writes on the core thread, what the host should show back in a published state
 // Load, boot, unload and power cycle run on one control thread (the main thread) with the clock stopped
 // (rfme_set_clock(NONE) waits until the clock is out). Nothing in rfme_render allocates or locks.
 //
@@ -253,6 +255,65 @@ int rfme_take_flash(rfme_t *e, uint8_t *out, uint32_t n);
 void rfme_request_flash(rfme_t *e);
 // stops the clock, flash_sync, the image now into out, the clock given back; 1: ok
 int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n);
+
+// ---- host parameters (the AU's parameter tree, PLAN.md section 12): FM1VST v0.6.2's knob, panel and Tier 2
+// parameters, run on the core thread (RFMHostParams.h). Indices are the AU's parameter addresses: fixed, never
+// renumbered (new ones go at the end). Values: MASTER 0..1023; a button or key 0 / 1 (held from 0.5); a knob or a
+// Tier 2 slot 0..1. A host value goes in with rfme_hp_set (the host's or UI thread) or as a render event
+// (rfme_render_events, sample-accurate like MIDI); what the host should show comes back in the state (rfme_hp_poll).
+#define RFME_HP_T2_SLOTS 80
+enum {
+    RFME_HP_MASTER = 0,         // "Knob Master"
+    RFME_HP_KNOB = 1,           // + 0..6: Knob Select, Presets, Algo, Knob 1..4 (FM1VST's order; rfme_hp_knob_role)
+    RFME_HP_BUTTON = 8,         // + label (RFME_B_*)
+    RFME_HP_KEY = 22,           // + key 0..26
+    RFME_HP_T2 = 49,            // + slot 0..RFME_HP_T2_SLOTS-1: the core's map entries in map order (not FM1P_HIDDEN)
+    RFME_HP_COUNT = RFME_HP_T2 + RFME_HP_T2_SLOTS
+};
+enum { RFME_HP_UNBOUND = 0, RFME_HP_ABS = 1, RFME_HP_REL = 2 };
+typedef struct {
+    float value;                // what the host should show
+    uint32_t seq;               // the host writes to it applied (or dropped) so far; == rfme_hp_writes: none in flight
+    int32_t entry;              // a bound knob or slot: the map entry it shows (a meta slot: its target); -1 none
+    int32_t min, max;           // that entry's range (MASTER 0..1023, a button or key 0..1)
+    int32_t plain;              // the value in that range
+    uint8_t mode;               // RFME_HP_*: a knob ABS (bound) or REL (turns), a slot ABS or UNBOUND; the rest ABS
+    char name[24];              // the entry's name, a button's firmware label, a key's note; "" none
+    char text[48];              // the value text now ("Strum Rate: 120 ms", "turn", "+2", "–")
+} rfme_hp_param_t;
+typedef struct {
+    uint32_t seq;               // moves with every state the core thread published (0: none yet)
+    uint32_t gen;               // moves with every boot and unload (a new binding)
+    uint32_t t2_bound;          // Tier 2 slots bound to a map entry
+    uint32_t t2_visible;        // the map's entries that want a slot (more than RFME_HP_T2_SLOTS: the rest have none)
+    uint32_t knobs_bound;       // knobs bound to a map entry now (the rest turn)
+    uint32_t dropped;           // host writes dropped (just after a boot, or a knob's retarget)
+    uint32_t applied;           // host writes applied
+} rfme_hp_info_t;
+// the knob role (RFME_E_*) of knob parameter k (0..6), -1 none
+int rfme_hp_knob_role(int k);
+// (any thread but the audio thread; serialised inside) a host value; 0: dropped (the queue is full, a bad index)
+int rfme_hp_set(rfme_t *e, uint32_t index, float value);
+// (any thread) the host writes made to index so far (rfme_hp_set and render events)
+uint32_t rfme_hp_writes(rfme_t *e, uint32_t index);
+// (one reader, not the audio thread) takes the newest state the core thread published; returns its seq
+uint32_t rfme_hp_poll(rfme_t *e);
+// (any thread but the audio thread) one parameter, and the totals, as of the last rfme_hp_poll; 1: filled
+int rfme_hp_param(rfme_t *e, uint32_t index, rfme_hp_param_t *out);
+void rfme_hp_info(rfme_t *e, rfme_hp_info_t *out);
+// (any thread but the audio thread) the text for `value` of index as the last poll binds it; returns its length
+uint32_t rfme_hp_text(rfme_t *e, uint32_t index, float value, char *buf, uint32_t n);
+// the value for a text ("Voicing: -1", "-1", "Up", "+2"); 1: understood
+int rfme_hp_value(rfme_t *e, uint32_t index, const char *text, float *value);
+// a host parameter change in a render, at its frame (RFME_CLOCK_AUDIO; events in order)
+typedef struct {
+    uint32_t offset;
+    uint32_t index;
+    float value;
+} rfme_param_ev_t;
+// rfme_render_midi with parameter changes too, each applied at its frame (+ the latency) in order with the MIDI
+int rfme_render_events(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
+                       const rfme_param_ev_t *pev, uint32_t npev);
 
 // ---- the parameter map (RFME_CLOCK_CALLER or NONE: tests)
 int rfme_param_get(rfme_t *e, const char *name, int32_t *value);    // 1: found

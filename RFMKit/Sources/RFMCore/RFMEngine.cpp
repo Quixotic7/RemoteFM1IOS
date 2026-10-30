@@ -10,7 +10,8 @@
 // pushKeys, forwardMidi and toUsbPackets) and the core's MIDI out kept for the AU's MIDI output. M7: the core behind
 // a backend (RFMCoreBackend.h), and one core thread per engine that renders ahead of the audio callback (the ring,
 // below) and also runs the timer clock. M8: a controller's MIDI (rfme_midi_in) on host MIDI's path, MIDI learn and the
-// learned map (RFMMidiMap.h) ahead of it, on the core thread.
+// learned map (RFMMidiMap.h) ahead of it, on the core thread. The host's parameters (RFMHostParams.h): render events
+// on hostQ with the MIDI, rfme_hp_set's on hpQ, the read-back in the between hook.
 #include "RFMEngine.h"
 
 #include <AudioToolbox/AudioToolbox.h>
@@ -29,6 +30,7 @@
 
 #include "RFMCoreBackend.h"
 #include "RFMDevice.h"
+#include "RFMHostParams.h"
 #include "RFMInternal.h"
 #include "RFMMidiMap.h"
 #include "RFMRealtime.h"
@@ -58,11 +60,20 @@ constexpr uint32_t kDefaultHeadroomUs = 6000;            // the ring's target be
 constexpr uint32_t kOfflineWaitUs = 2000000;             // offline: how long a render waits for the core at most
 static_assert((kRingFrames & (kRingFrames - 1)) == 0, "the ring's size is a power of two");
 
-// a host MIDI message on its way to the core thread: `at` is its ring position (the frame it applies before)
+// a host MIDI message on its way to the core thread: `at` is its ring position (the frame it applies before).
+// len 0: a host parameter change instead (data[0..1]: its index, little-endian; value; seq: its write number)
 struct HostEvent {
     uint64_t at;
     uint8_t len;
     uint8_t data[3];
+    float value;
+    uint32_t seq;
+};
+// a host parameter change from a thread that isn't the audio thread (rfme_hp_set)
+struct HpEvent {
+    uint32_t index;
+    float value;
+    uint32_t seq;
 };
 // (M8) a controller's message on its way to the core thread (rfme_midi_in)
 struct CtlEvent {
@@ -154,7 +165,7 @@ void putErr(char *err, uint32_t n, const std::string &s)
 
 } // namespace
 
-struct rfme {
+struct rfme final : rfm::HostParams::Panel {
     rfmc_t *owner = nullptr;            // the link's handle (NULL: headless)
     RemoteLink *link = nullptr;
 
@@ -197,6 +208,19 @@ struct rfme {
     int16_t masterPot = -1;                 // (the core thread's) rfme_panel_t.master_pot, pickup_seq
     uint16_t pickupSeq = 0;
     std::atomic<uint32_t> midiMapped{0}, midiLearned{0}, midiToCore{0};
+    // host parameters (RFMHostParams.h): the core thread's; writes come in on hostQ (the render thread's, stamped)
+    // and hpQ (rfme_hp_set's callers, serialised by hpLock); the state goes out through hpOut to one reader, whose
+    // copy (hpView, under hpViewLock) any thread reads. hpViewLock also guards `core` against an unload while a
+    // host thread formats a value with it (rfme_hp_text)
+    rfm::HostParams hp;
+    std::atomic<uint32_t> hpWrites[RFME_HP_COUNT] = {};
+    rfm::Spsc<HpEvent, 1024> hpQ;
+    std::mutex hpLock;
+    rfm::Triple<rfm::HostParamState> hpOut;
+    std::mutex hpViewLock;
+    std::unique_ptr<rfm::HostParamState> hpView{new rfm::HostParamState()};
+    uint32_t hpSeq = 0, hpSeen = 0;
+    uint32_t hpLabels = 0, hpKeysHeld = 0;  // (the core thread's) the buttons and keys the host holds
     int32_t masterV = -1;
     uint32_t lastPub = 0, lastWrites = 0, linkPubs = 0, pubSeq = 0;
     uint32_t lastLinkPub = 0, lastLinkWrites = 0;
@@ -312,6 +336,8 @@ struct rfme {
 
     rfme()
     {
+        hp.reset(nullptr, nullptr, nullptr, 0);
+        hp.fill(*hpView);
         std::memset(noteKey, -1, sizeof noteKey);
         std::memset(ledCol, -1, sizeof ledCol);
         std::memset(ledLine, -1, sizeof ledLine);
@@ -338,7 +364,7 @@ struct rfme {
     // (Processor.cpp pushKeys)
     void pushKeys()
     {
-        const uint32_t m = noteKeys | midiKeys;
+        const uint32_t m = noteKeys | midiKeys | hpKeysHeld;
         if (m == appliedKeys)
             return;
         const uint32_t down = m & ~appliedKeys;
@@ -450,6 +476,7 @@ struct rfme {
     // the controller's messages (rfme_midi_in), before the next chunk
     void controllerMidi()
     {
+        hostParamsIn();                                 // (the host's parameter changes from its own threads)
         for (CtlEvent c; ctlQ.pop(c);) {
             if (c.toFirmware)
                 toFirmware(c.data, c.len);
@@ -510,6 +537,58 @@ struct rfme {
             toFirmware(d, n);
     }
 
+    // ---- host parameters (the clock's thread)
+    void hpButtons(uint32_t l) override
+    {
+        hpLabels = l;
+        dev->buttons(labels | hpLabels);
+    }
+    void hpKeys(uint32_t k) override
+    {
+        hpKeysHeld = k;
+        pushKeys();
+    }
+    void hpTurn(int role, int32_t detents) override       // (as the unit's turn: the mirror and the stats see it)
+    {
+        const fm1panel_t *h = dev->panel();
+        const uint8_t id = h->enc_id[role];
+        if (id < FM1P_NENC)
+            apply(panelEvent(RFM_EV_ENC, id, (int16_t)(detents * (h->enc_dir[role] < 0 ? -1 : 1))));
+    }
+    void hpMaster(int32_t v) override
+    {
+        masterPot = -1;
+        apply(panelEvent(RFM_EV_MASTER, 0, (int16_t)v));
+    }
+    void hostParam(uint32_t index, float value, uint32_t seq) { hp.write(index, value, seq, dev->ms(), *this); }
+    // rfme_hp_set's changes, before the next chunk
+    void hostParamsIn()
+    {
+        for (HpEvent h; hpQ.pop(h);)
+            hostParam(h.index, h.value, h.seq);
+    }
+    // the state, when it changed (the core thread, or the control thread with the clock stopped)
+    void hpPublish()
+    {
+        if (!hp.takeDirty())
+            return;
+        rfm::HostParamState &s = hpOut.back();
+        hp.fill(s);
+        s.info.seq = ++hpSeq;
+        hpOut.publish();
+    }
+    void hpReset(bool booted)
+    {
+        uint32_t seqs[RFME_HP_COUNT];
+        for (uint32_t i = 0; i < RFME_HP_COUNT; i++)
+            seqs[i] = hpWrites[i].load(std::memory_order_acquire);   // (whatever is in flight: dropped)
+        for (HpEvent h; hpQ.pop(h);) {               // (the clock stopped: this thread is the consumer now)
+        }
+        hpLabels = hpKeysHeld = 0;
+        hp.reset(booted ? core.get() : nullptr, booted ? dev.get() : nullptr, seqs, booted ? dev->ms() : 0);
+        hpPublish();
+    }
+
     // ---- the between hook (the clock thread)
     void apply(const rfm_event_t &e)
     {
@@ -537,7 +616,7 @@ struct rfme {
                         label = l;
                 if (label >= 0) {
                     labels = e.value ? labels | 1u << label : labels & ~(1u << label);
-                    dev->buttons(labels);
+                    dev->buttons(labels | hpLabels);
                 }
             }
             break;
@@ -560,7 +639,7 @@ struct rfme {
         case RemoteLink::kEvRelease:                         // the session ended: nothing is held any more
             noteKeys = labels = matrixButtons = 0;
             pushKeys();                                      // (the host's notes stay down)
-            dev->buttons(0);
+            dev->buttons(hpLabels);                          // (and its parameters' buttons)
             break;
         default:
             return;
@@ -625,7 +704,7 @@ struct rfme {
         rfme_panel_t p{};
         p.booted = 1;
         p.keys = appliedKeys;
-        p.labels = labels;
+        p.labels = labels | hpLabels;
         for (int r = 0; r < FM1P_NE - 1; r++)
             p.enc[r] = dev->enc_total(r) * (h->enc_dir[r] < 0 ? -1 : 1);   // (enc_total counts in enc_dir's sense)
         p.master = h->master;
@@ -677,6 +756,10 @@ struct rfme {
                 haveStats.store(1, std::memory_order_relaxed);
             }
             flashDirty.store(dev->flash_dirty(), std::memory_order_relaxed);
+        }
+        if (hp.due(ms)) {
+            hp.readBack(ms);
+            hpPublish();
         }
         publish(ms);
         publishPanel(ms);
@@ -849,7 +932,10 @@ struct rfme {
         while (pos < end) {
             while (hostQ.peek(he) && he.at <= pos) {
                 hostQ.pop(he);
-                hostMidi(he.data, he.len);
+                if (he.len)
+                    hostMidi(he.data, he.len);
+                else
+                    hostParam((uint32_t)he.data[0] | (uint32_t)he.data[1] << 8, he.value, he.seq);
             }
             const uint64_t next = hostQ.peek(he) && he.at < end ? he.at : end;
             outAt = pos;
@@ -894,7 +980,8 @@ struct rfme {
         offlineWaiting.store(false, std::memory_order_relaxed);
     }
 
-    int consume(float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev)
+    int consume(float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
+                const rfme_param_ev_t *pev, uint32_t npev)
     {
         const bool off = offline.load(std::memory_order_relaxed);
         bool changed = false;
@@ -934,17 +1021,28 @@ struct rfme {
                 outBase = outEnd = r;
             }
         }
-        if (live) {                                     // host MIDI, stamped with its ring position
+        if (live) {                                     // host MIDI and parameters, stamped with their ring position
             const uint64_t lat = latency.load(std::memory_order_relaxed);
-            for (uint32_t i = 0; i < nev; i++) {
-                if (ev[i].len == 0 || !(ev[i].data[0] & 0x80))
-                    continue;
-                HostEvent he{r + (ev[i].offset < n ? ev[i].offset : (n ? n - 1 : 0)) + lat,
-                             (uint8_t)(ev[i].len > 3 ? 3 : ev[i].len), {ev[i].data[0], ev[i].data[1], ev[i].data[2]}};
-                if (hostQ.push(he))
-                    midiInCount.fetch_add(1, std::memory_order_relaxed);
-                else
-                    midiInDropped.fetch_add(1, std::memory_order_relaxed);
+            auto at = [&](uint32_t off) { return r + (off < n ? off : (n ? n - 1 : 0)) + lat; };
+            uint32_t i = 0, j = 0;
+            while (i < nev || j < npev) {               // (both in frame order: merged, MIDI first at a frame)
+                if (i < nev && (j >= npev || ev[i].offset <= pev[j].offset)) {
+                    const rfme_midi_t &m = ev[i++];
+                    if (m.len == 0 || !(m.data[0] & 0x80))
+                        continue;
+                    HostEvent he{at(m.offset), (uint8_t)(m.len > 3 ? 3 : m.len), {m.data[0], m.data[1], m.data[2]}, 0, 0};
+                    if (hostQ.push(he))
+                        midiInCount.fetch_add(1, std::memory_order_relaxed);
+                    else
+                        midiInDropped.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    const rfme_param_ev_t &q = pev[j++];
+                    if (q.index >= RFME_HP_COUNT)
+                        continue;
+                    const uint32_t seq = hpWrites[q.index].fetch_add(1, std::memory_order_acq_rel) + 1;
+                    HostEvent he{at(q.offset), 0, {(uint8_t)q.index, (uint8_t)(q.index >> 8), 0}, q.value, seq};
+                    (void)hostQ.push(he);
+                }
             }
         }
         const uint32_t tgt = target.load(std::memory_order_relaxed);
@@ -1009,21 +1107,30 @@ struct rfme {
     // ---- the control thread, the clock stopped
     void unloadStopped()
     {
-        dev.reset();
-        booted = false;
-        halted.store(false);
-        haltCode.store(0);
-        core.reset();                                   // (shutdown(); a native slot: dlclose, given back)
+        hpReset(false);
+        {
+            std::lock_guard<std::mutex> g(hpViewLock);   // (no host thread formats a value with this core any more)
+            hpView->info.gen = 0;
+            for (rfme_hp_param_t &p : hpView->p)
+                p.entry = -1;
+            dev.reset();
+            booted = false;
+            halted.store(false);
+            haltCode.store(0);
+            core.reset();                               // (shutdown(); a native slot: dlclose, given back)
+        }
     }
 
     // a new backend from the factory, and its device; false with a message
     bool makeStopped(std::string *msg)
     {
-        core = factory ? factory(msg) : nullptr;
-        if (!core)
+        std::unique_ptr<rfm::CoreBackend> c = factory ? factory(msg) : nullptr;
+        if (!c)
             return false;
         if (stallUs)
-            core = rfm::stallingCore(std::move(core), stallUs);
+            c = rfm::stallingCore(std::move(c), stallUs);
+        std::lock_guard<std::mutex> g(hpViewLock);
+        core = std::move(c);
         dev = std::make_unique<rfm::CoreDevice>(*core);
         return true;
     }
@@ -1054,6 +1161,7 @@ struct rfme {
         haltCode.store(0);
         dev->set_between([this](uint32_t ms, bool frame) { between(ms, frame); });
         booted = true;
+        hpReset(true);                                  // (the new map bound; host writes dropped for a while)
         if (link)
             link->invalidateScreen();                   // (a new device: the unit's screen resent whole)
     }
@@ -1178,8 +1286,14 @@ void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate) { rfme_
 
 int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev)
 {
+    return rfme_render_events(e, L, R, n, rate, ev, nev, nullptr, 0);
+}
+
+int rfme_render_events(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
+                       const rfme_param_ev_t *pev, uint32_t npev)
+{
     const uint64_t t0 = mach_absolute_time();
-    const int ok = e->consume(L, R, n, rate, ev, nev);
+    const int ok = e->consume(L, R, n, rate, ev, nev, pev, npev);
     const uint64_t dt = mach_absolute_time() - t0;
     const uint32_t us = (uint32_t)((double)dt * e->usPerTick);
     e->renders.fetch_add(1, std::memory_order_relaxed);
@@ -1478,6 +1592,75 @@ int rfme_final_flash(rfme_t *e, uint8_t *out, uint32_t n)
     }
     e->resume(prev, false);
     return ok;
+}
+
+int rfme_hp_set(rfme_t *e, uint32_t index, float value)
+{
+    if (index >= RFME_HP_COUNT)
+        return 0;
+    bool ok;
+    {
+        std::lock_guard<std::mutex> g(e->hpLock);
+        const uint32_t seq = e->hpWrites[index].fetch_add(1, std::memory_order_acq_rel) + 1;
+        ok = e->hpQ.push(HpEvent{index, value, seq});
+    }
+    if (ok)
+        e->wake.signal();                               // (the timer clock takes it at its next step)
+    return ok ? 1 : 0;
+}
+
+uint32_t rfme_hp_writes(rfme_t *e, uint32_t index)
+{
+    return index < RFME_HP_COUNT ? e->hpWrites[index].load(std::memory_order_acquire) : 0;
+}
+
+uint32_t rfme_hp_poll(rfme_t *e)
+{
+    if (const rfm::HostParamState *s = e->hpOut.take()) {
+        std::lock_guard<std::mutex> g(e->hpViewLock);
+        *e->hpView = *s;
+        e->hpSeen = s->info.seq;
+    }
+    return e->hpSeen;
+}
+
+int rfme_hp_param(rfme_t *e, uint32_t index, rfme_hp_param_t *out)
+{
+    if (index >= RFME_HP_COUNT || !out)
+        return 0;
+    std::lock_guard<std::mutex> g(e->hpViewLock);
+    *out = e->hpView->p[index];
+    return 1;
+}
+
+void rfme_hp_info(rfme_t *e, rfme_hp_info_t *out)
+{
+    if (!out)
+        return;
+    std::lock_guard<std::mutex> g(e->hpViewLock);
+    *out = e->hpView->info;
+}
+
+uint32_t rfme_hp_text(rfme_t *e, uint32_t index, float value, char *buf, uint32_t n)
+{
+    if (!buf || !n)
+        return 0;
+    buf[0] = 0;
+    if (index >= RFME_HP_COUNT)
+        return 0;
+    std::lock_guard<std::mutex> g(e->hpViewLock);
+    const rfme_hp_param_t &p = e->hpView->p[index];
+    rfm::HostParams::formatText(p, index, value, p.entry >= 0 ? e->core.get() : nullptr, buf, n);
+    return (uint32_t)std::strlen(buf);
+}
+
+int rfme_hp_value(rfme_t *e, uint32_t index, const char *text, float *value)
+{
+    if (index >= RFME_HP_COUNT)
+        return 0;
+    std::lock_guard<std::mutex> g(e->hpViewLock);
+    const rfme_hp_param_t &p = e->hpView->p[index];
+    return rfm::HostParams::parseText(p, index, text, p.entry >= 0 ? e->core.get() : nullptr, value) ? 1 : 0;
 }
 
 // the parameter named `name` of the booted core, -1 none

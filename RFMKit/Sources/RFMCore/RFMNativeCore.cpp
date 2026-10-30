@@ -6,6 +6,7 @@
 
 #include <mach/mach_time.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "RFMSlots.h"
@@ -135,6 +136,37 @@ public:
         c_->params[i].set(v);
         return true;
     }
+    bool param_desc(uint32_t i, ParamDesc *o) override
+    {
+        if (i >= params_.size() || !o)
+            return false;
+        const fm1param_t &p = c_->params[i];
+        std::snprintf(o->name, sizeof o->name, "%s", p.name ? p.name : "");
+        o->min = p.min;
+        o->max = p.max;
+        o->def = p.def;
+        o->flags = p.flags;
+        return true;
+    }
+    int32_t param_target(uint32_t i) override
+    {
+        return i < params_.size() && c_->params[i].target ? c_->params[i].target() : -1;
+    }
+    bool param_text(uint32_t i, int32_t v, char *b, uint32_t n) override
+    {
+        if (i >= params_.size() || !b || !n)
+            return false;
+        const fm1param_t &p = c_->params[i];
+        b[0] = 0;
+        if (p.text)
+            p.text(v, b, n);
+        else if (p.names && v >= p.min && v <= p.max && p.names[v - p.min])
+            std::snprintf(b, n, "%s", p.names[v - p.min]);
+        else
+            std::snprintf(b, n, "%d", (int)v);
+        b[n - 1] = 0;
+        return true;
+    }
 
 private:
     SlotLoader::Slot *slot_;
@@ -187,6 +219,9 @@ public:
     const CoreParam *param(uint32_t i) const override { return in_->param(i); }
     bool param_get(uint32_t i, int32_t *v) override { return in_->param_get(i, v); }
     bool param_set(uint32_t i, int32_t v) override { return in_->param_set(i, v); }
+    bool param_desc(uint32_t i, ParamDesc *o) override { return in_->param_desc(i, o); }
+    int32_t param_target(uint32_t i) override { return in_->param_target(i); }
+    bool param_text(uint32_t i, int32_t v, char *b, uint32_t n) override { return in_->param_text(i, v, b, n); }
 
 private:
     std::unique_ptr<CoreBackend> in_;
