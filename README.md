@@ -267,6 +267,8 @@ or AirDrop) to an FM-1 running RemoteFM1 0.3.0 or later, which keeps each as a u
 replaces the oldest). The page shows the voice names and fixes a wrong checksum or channel; the panel lets go of the
 FM-1 while it sends. USB is preferred; Bluetooth MIDI is paced. Screenshot: `MATCH=cart scripts/sim_shots.sh`
 (`-sheetpage cart -cartdemo`). PLAN.md section 14.
+With RemoteFM1 0.3.1 the page lists the FM-1's user banks (up to 16) and replaces, removes or renames each; 0.3.0
+(no reply) gets the plain send.
 
 ## Launch arguments
 

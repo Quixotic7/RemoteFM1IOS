@@ -554,4 +554,15 @@ an install (the session ended, the lease held as "sending a cartridge"), waits 4
 asks), 1 s between dumps, Bluetooth in 512-byte parts 100 ms apart, then restarts the panel. 0.3.0 sends no reply:
 "Sent: the FM-1 should now show the new USER bank". App only (not the AU). The simulator, the fake link and DEBUG's
 `-cartdemo` use `FakeCartTransport`, which sends nothing. An .syx opened from Files or AirDrop lands on the page
-(imported UTI `com.quixotic7.remotefm1.syx`). Tests: CartTests. Later: 0.3.1's bank query after sending.
+(imported UTI `com.quixotic7.remotefm1.syx`). Tests: CartTests.
+
+RemoteFM1 0.3.1 (16 slots; `docs/CART-UPLOAD.md` "0.3.1" and PROTOCOL.md section 8 on the standalone branch):
+`CartBanks.swift` has the SA_INFO (0x0B) / SA_INFO_R (0x4B) codec in Swift (rf_pack7's 7-in-8, little endian; the
+vendored libremotefm1 has no SA_INFO) and `FakeFM1`, a pretend 0.3.1 (or silent 0.3.0) behind FakeCartTransport.
+The transport also listens: CoreMIDI's input port on the FM-1's sources (RemoteMidi.c's rule), SysEx7 UMP put back
+together. BANKS and NAME go raw on the FM-1's port at any time, the panel's session left alone (BANKS on the page's
+appearance); TARGET, DELETE and the dumps go while the panel is paused, as before, and the list is read again before it
+starts. Each dump waits for STORED (2 s) instead of the 1 s; no reply to BANKS within 1 s is 0.3.0: the plain send, "up
+to 3 banks, sending only". The page: "Banks on the FM-1: n of 16", each bank's Replace (an .syx with one cartridge),
+Remove (an inline confirm) and Rename (10 characters); statuses in plain words. The simulator and `-cartdemo` use a
+FakeFM1 (the demo with 4 banks).
