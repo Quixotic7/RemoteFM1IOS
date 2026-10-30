@@ -350,3 +350,62 @@ extension RFMShared {
     /// the App Group's Firmware folder (the mirror the extension reads), nil without an App Group
     public static func firmwareMirror() -> URL? { groupContainer()?.appendingPathComponent("Firmware") }
 }
+
+extension RFMShared {
+    /// the App Group's CoreSlots folder (CoreSlotMirror: Mac only), nil without an App Group
+    public static func coreSlotsMirror() -> URL? { groupContainer()?.appendingPathComponent("CoreSlots") }
+}
+
+/// (Mac only, build 7) the app's core slots copied into the App Group's CoreSlots, beside the firmware mirror: on a Mac
+/// ("Designed for iPad") the AU extension's sandbox denies it the app's Frameworks folder, and when its FM1CoreSlots.txt
+/// doesn't get it the slots either (rfms_scan), it scans this copy. Never on iOS: loading code from a writable
+/// container is forbidden there. The AU sees the copy only once the app has been opened after an install or update.
+public enum CoreSlotMirror {
+    public static let manifestName = "manifest.txt"
+
+    /// (the app, off the main thread) on a Mac only: the copy brought up to date
+    public static func syncOnMac() {
+        guard ProcessInfo.processInfo.isiOSAppOnMac, let from = Bundle.main.privateFrameworksURL,
+              let to = RFMShared.coreSlotsMirror() else { return }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        sync(from: from, to: to, build: build)
+    }
+
+    /// the slots in `from` copied into `to` when the manifest (the build, each slot's name and binary size) changed;
+    /// slots no longer in `from` removed. Returns how many were copied
+    @discardableResult
+    static func sync(from: URL, to: URL, build: String) -> Int {
+        let fm = FileManager.default, log = RFMShared.log("slots")
+        let names = ((try? fm.contentsOfDirectory(atPath: from.path)) ?? [])
+            .filter { $0.hasPrefix("FM1Core_") && $0.hasSuffix(".framework") }.sorted()
+        func size(_ name: String) -> Int {
+            let bin = from.appendingPathComponent(name).appendingPathComponent(String(name.dropLast(10))).path
+            return (try? fm.attributesOfItem(atPath: bin)[.size] as? Int) ?? -1
+        }
+        let manifest = (["build \(build)"] + names.map { "\($0) \(size($0))" }).joined(separator: "\n") + "\n"
+        let mURL = to.appendingPathComponent(manifestName)
+        if (try? String(contentsOf: mURL, encoding: .utf8)) == manifest { return 0 }
+        try? fm.createDirectory(at: to, withIntermediateDirectories: true)
+        try? fm.removeItem(at: mURL)                    // (written last: an interrupted copy is redone)
+        for n in (try? fm.contentsOfDirectory(atPath: to.path)) ?? [] where n.hasPrefix("FM1Core_") && !names.contains(n) {
+            try? fm.removeItem(at: to.appendingPathComponent(n))
+        }
+        var copied = 0
+        for n in names {
+            let tmp = to.appendingPathComponent(".\(n).tmp"), dst = to.appendingPathComponent(n)
+            do {
+                try? fm.removeItem(at: tmp)
+                try fm.copyItem(at: from.appendingPathComponent(n), to: tmp)
+                try? fm.removeItem(at: dst)
+                try fm.moveItem(at: tmp, to: dst)
+                copied += 1
+            } catch {
+                log.error("copy \(n, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                return copied
+            }
+        }
+        try? Data(manifest.utf8).write(to: mURL, options: .atomic)
+        log.info("copied \(copied) core slot(s) into \(to.path, privacy: .public)")
+        return copied
+    }
+}

@@ -77,6 +77,19 @@ final class AUv3Tests: XCTestCase {
         XCTAssertEqual(b.state.instance, a.state.instance)
     }
 
+    /// (build 7) the view's size from the resize corner (a Mac) is kept per instance
+    func testFullStateCarriesTheViewSize() throws {
+        let a = try makeAU(), b = try makeAU()
+        XCTAssertNil(a.viewSize)
+        XCTAssertNil(a.fullState?[RFMAudioUnit.viewSizeKey], "a size saved that nobody set")
+        a.viewSize = CGSize(width: 1100, height: 480)
+        b.fullState = a.fullState
+        XCTAssertEqual(b.viewSize, CGSize(width: 1100, height: 480))
+        let c = try makeAU()
+        c.fullState = try makeAU().fullState            // (a state without one)
+        XCTAssertNil(c.viewSize)
+    }
+
     func testBussesAndMIDI() throws {
         let au = try makeAU()
         XCTAssertEqual(au.outputBusses.count, 1)

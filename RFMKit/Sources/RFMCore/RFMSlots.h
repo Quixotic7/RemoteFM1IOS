@@ -5,6 +5,7 @@
 // as FM1Core_<id>_1 .. _4.framework, and an instance takes a slot of its core that nobody in this process holds.
 // The descriptor probe and the ABI check are cores.cpp's (open_core).
 #pragma once
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -33,12 +34,14 @@ public:
     };
 
     int scan(const std::string &dir);   // "" = the bundle's Frameworks (see rfms_scan)
+    int scanList(const std::string &dir, const std::string &list);   // the slots `list` names, in dir (rfms_scan_list)
     std::vector<CoreSlotInfo> cores() const;
     bool find(const std::string &id, CoreSlotInfo &out) const;
     int inUse(const std::string &id) const;
     int retired(const std::string &id) const;
     std::string dirs() const;
     std::string errors() const;
+    std::string source() const;         // how the last scan found its slots (rfms_source)
 
     // the first slot of the core that is neither held nor retired; nullptr with a message otherwise
     Slot *acquire(const std::string &id, std::string *err);
@@ -50,7 +53,9 @@ private:
     std::vector<CoreSlotInfo> cores_;
     std::vector<std::string> held_, retired_;   // slot paths
     std::vector<std::string> dirs_;
-    std::string errors_;
+    std::string errors_, source_;
+
+    int probeLocked(const std::map<std::string, std::vector<std::string>> &found);
 };
 
 } // namespace rfm

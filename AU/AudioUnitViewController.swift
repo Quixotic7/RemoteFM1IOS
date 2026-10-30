@@ -3,7 +3,9 @@
 // The extension's principal class: the AU's view controller and its factory, as in Apple's AUv3 template. The audio
 // unit itself (RFMAudioUnit) and the probes are in RFMKit. Sheets (Bluetooth, About this firmware) are presented with
 // UIKit: SwiftUI's .sheet crashed inside the extension (M2). M8: MIDI learn on this instance's host MIDI (MidiLearnMode on
-// the faceplate's feed); the learned map is global (MidiMapStore, observed here).
+// the faceplate's feed); the learned map is global (MidiMapStore, observed here). On a Mac (a host's window sized to
+// preferredContentSize, which it never changes) a resize corner sets that size; it is kept in the instance's state and
+// as new instances' default. iOS hosts size the view themselves.
 
 import CoreAudioKit
 import RFMKit
@@ -14,6 +16,10 @@ import UIKit
 public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory {
     private let model = AUViewModel()
     private let log = RFMShared.log("auview")
+    private static let isMac = ProcessInfo.processInfo.isiOSAppOnMac
+    private static let defaultSize = CGSize(width: 760, height: 352)     // (the iPhone-landscape faceplate's shape)
+    private static let sizeKey = "rfm1.auViewSize"                      // (new instances' size on a Mac)
+    private var dragFrom = CGSize.zero
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -35,8 +41,47 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
         hosting.didMove(toParent: self)
         let body = ThemeStore.shared.current.body
         view.backgroundColor = UIColor(red: body.r, green: body.g, blue: body.b, alpha: 1)
-        preferredContentSize = CGSize(width: 760, height: 352)      // (the iPhone-landscape faceplate's shape)
-        log.info("view loaded, pid \(getpid())")
+        preferredContentSize = Self.defaultSize
+        if Self.isMac {
+            let wh = UserDefaults.standard.array(forKey: Self.sizeKey) as? [Double] ?? []
+            if wh.count == 2 { preferredContentSize = Self.clamp(CGSize(width: wh[0], height: wh[1])) }
+            if let s = model.viewSize { preferredContentSize = Self.clamp(s) }
+            model.onViewSize = { [weak self] s in self?.preferredContentSize = Self.clamp(s) }
+            let grip = ResizeGrip()
+            grip.translatesAutoresizingMaskIntoConstraints = false
+            grip.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(dragGrip)))
+            view.addSubview(grip)
+            NSLayoutConstraint.activate([
+                grip.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                grip.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                grip.widthAnchor.constraint(equalToConstant: 22),
+                grip.heightAnchor.constraint(equalToConstant: 22),
+            ])
+        }
+        log.info("view loaded, pid \(getpid()), \(Int(self.preferredContentSize.width))x\(Int(self.preferredContentSize.height))")
+    }
+
+    private static func clamp(_ s: CGSize) -> CGSize {
+        CGSize(width: min(max(s.width.rounded(), 380), 2400), height: min(max(s.height.rounded(), 200), 1400))
+    }
+
+    /// the resize corner: the size follows the drag (window coordinates: the window grows from its top left)
+    @objc private func dragGrip(_ g: UIPanGestureRecognizer) {
+        switch g.state {
+        case .began:
+            dragFrom = view.bounds.width > 0 ? view.bounds.size : preferredContentSize
+        case .changed, .ended:
+            let t = g.translation(in: nil)
+            let s = Self.clamp(CGSize(width: dragFrom.width + t.x, height: dragFrom.height + t.y))
+            if s != preferredContentSize { preferredContentSize = s }
+            if g.state == .ended {
+                model.viewSize = s
+                UserDefaults.standard.set([Double(s.width), Double(s.height)], forKey: Self.sizeKey)
+                log.info("resized to \(Int(s.width))x\(Int(s.height))")
+            }
+        default:
+            break
+        }
     }
 
     /// iOS's Bluetooth MIDI panel over the AU's view (UIKit presentation; see bluetoothPanelController)
@@ -80,6 +125,40 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
 
 private struct UnitRef: @unchecked Sendable { let au: RFMAudioUnit }
 
+/// (a Mac) the resize corner's grip: three diagonal lines, dark under light so they show on any theme. Only its
+/// bottom-right half takes touches, so the faceplate's controls beside it keep theirs.
+private final class ResizeGrip: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isAccessibilityElement = true
+        accessibilityLabel = "Resize"
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func draw(_ rect: CGRect) {
+        let w = bounds.width, h = bounds.height
+        for (color, d) in [(UIColor(white: 0, alpha: 0.5), 1.0), (UIColor(white: 1, alpha: 0.7), 0.0)] {
+            let p = UIBezierPath()
+            for i in 0..<3 {
+                let k = 6 + CGFloat(i) * 5
+                p.move(to: CGPoint(x: w - k + d, y: h - 3 + d))
+                p.addLine(to: CGPoint(x: w - 3 + d, y: h - k + d))
+            }
+            p.lineWidth = 1.5
+            p.lineCapStyle = .round
+            color.setStroke()
+            p.stroke()
+        }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.contains(point) && point.x / bounds.width + point.y / bounds.height >= 1
+    }
+}
+
 @MainActor
 @Observable
 final class AUViewModel {
@@ -97,6 +176,7 @@ final class AUViewModel {
     @ObservationIgnored var userPicked = false          // (a view picked in the sheet: no more fitting to the size)
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
     @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
+    @ObservationIgnored var onViewSize: (@MainActor (CGSize) -> Void)?    // (a Mac) an instance's own size
     @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var ticks = 0
@@ -105,14 +185,23 @@ final class AUViewModel {
     var perfNote = ""                                   // (M7) a Wasm core that can't keep up
     @ObservationIgnored private var perf = PerfGuard()
 
+    /// the instance's own view size (the resize corner's, kept in its state)
+    var viewSize: CGSize? {
+        get { au?.viewSize }
+        set { au?.viewSize = newValue }
+    }
+
     func attach(_ au: RFMAudioUnit) {
         self.au = au
         feed.attach(au)
         learn.attach(au)
+        if let s = au.viewSize { onViewSize?(s) }
         au.onEvent = { [weak self] e in
             Task { @MainActor in
                 switch e {
-                case .stateRestored: self?.refresh()
+                case .stateRestored:
+                    self?.refresh()
+                    if let s = self?.au?.viewSize { self?.onViewSize?(s) }
                 case .bluetoothRequested: self?.onBluetooth?()
                 case .show(let what): self?.show(what)
                 }

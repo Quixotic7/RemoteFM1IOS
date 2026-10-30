@@ -16,7 +16,14 @@
 #
 # M4: the AUv3 extension loads the same frameworks from the app (<app>/PlugIns/RemoteFM1AU.appex/../../Frameworks;
 # RFMCore's rfms_scan looks there from inside an appex). Nothing is embedded in the extension itself.
+#
+#   embed_cores.sh --list     (the extension target's "Core slot list" phase) only writes the names of the slots this
+#                             build embeds (the same choice) into the extension's own FM1CoreSlots.txt, which Xcode
+#                             then signs with the extension. On a Mac the sandbox denies the extension listing the
+#                             app's Frameworks; rfms_scan then opens the slots by these names.
 set -euo pipefail
+LIST=0
+[ "${1:-}" = --list ] && LIST=1
 
 case "${PLATFORM_NAME:-}" in
     iphoneos) P=ios ;;
@@ -27,14 +34,14 @@ ROOT=${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 STORE_LIST=$ROOT/cores/store-cores.txt
 NSLOTS=4
 
-env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+# (locked: both targets' phases run it)
+mkdir -p "$ROOT/build/cores"
+/usr/bin/lockf -k "$ROOT/build/cores/.build-$P.lock" \
+    env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
     ${CR_PYTHON:+CR_PYTHON="$CR_PYTHON"} "$ROOT/scripts/build_cores.sh" "$P"
 
 SRC=$ROOT/build/cores/$P/frameworks
 SRC_STORE=$ROOT/build/cores/$P/frameworks-store
-DST=$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH
-STAMPS=$DERIVED_FILE_DIR/core-slots
-IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY:--}
 
 built=$(awk '$1 !~ /_store$/ {print $1}' "$ROOT/build/cores/$P/cores.txt")   # (<id>_store: a variant, not a core)
 if [ "${RFM_STORE_BUILD:-NO}" = YES ]; then
@@ -50,6 +57,35 @@ else
     want=$built
 fi
 in_set() { printf '%s\n' "$want" | grep -qxF "$1"; }
+# where a core's slots come from: its store variant in a store build, if it has one
+from_dir() {
+    if [ $mode = store ] && [ -f "$SRC_STORE/FM1Core_$1_1.framework/FM1Core_$1_1" ]; then echo "$SRC_STORE"; else echo "$SRC"; fi
+}
+
+if [ $LIST = 1 ]; then
+    OUTF=$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/FM1CoreSlots.txt
+    names=""
+    for id in $want; do
+        from=$(from_dir "$id")
+        for s in $(seq 1 $NSLOTS); do
+            name=FM1Core_${id}_$s
+            [ -f "$from/$name.framework/$name" ] || { echo "error: embed_cores.sh: $from/$name.framework is missing"; exit 1; }
+            names="$names$name.framework
+"
+        done
+    done
+    text="# the core slots the app embeds ($mode build), scripts/embed_cores.sh --list
+$names"
+    mkdir -p "$(dirname "$OUTF")"
+    if [ "$(cat "$OUTF" 2>/dev/null || true)" != "${text%
+}" ]; then printf '%s' "$text" >"$OUTF"; fi
+    echo "embed_cores: $P, $mode build: $(printf '%s' "$names" | grep -c .) slot names in $OUTF"
+    exit 0
+fi
+
+DST=$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH
+STAMPS=$DERIVED_FILE_DIR/core-slots
+IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY:--}
 
 mkdir -p "$DST" "$STAMPS"
 removed=0
@@ -71,9 +107,9 @@ done
 n=0
 variants=""
 for id in $want; do
-    from=$SRC variant=full
-    if [ $mode = store ] && [ -f "$SRC_STORE/FM1Core_${id}_1.framework/FM1Core_${id}_1" ]; then
-        from=$SRC_STORE variant=store
+    from=$(from_dir "$id") variant=full
+    if [ "$from" = "$SRC_STORE" ]; then
+        variant=store
         variants="$variants $id"
     fi
     for s in $(seq 1 $NSLOTS); do

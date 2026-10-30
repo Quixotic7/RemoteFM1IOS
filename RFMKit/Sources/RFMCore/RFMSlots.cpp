@@ -6,10 +6,12 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <dirent.h>
+#include <errno.h>
 #include <dlfcn.h>
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <map>
 
@@ -33,6 +35,11 @@ static std::string cfPath(CFURLRef u)
     return ok ? buf : "";
 }
 
+static bool inAppex(const std::string &bundle)
+{
+    return bundle.size() > 6 && bundle.compare(bundle.size() - 6, 6, ".appex") == 0;
+}
+
 // the main bundle's Frameworks; inside an app extension (<app>/PlugIns/<x>.appex) also the containing app's
 static std::vector<std::string> bundleDirs()
 {
@@ -44,9 +51,34 @@ static std::vector<std::string> bundleDirs()
     if (!own.empty())
         d.push_back(own);
     const std::string path = cfPath(CFBundleCopyBundleURL(b));
-    if (path.size() > 6 && path.compare(path.size() - 6, 6, ".appex") == 0)
-        d.push_back(path + "/../../Frameworks");
+    if (inAppex(path)) {
+        // <app>/PlugIns/<x>.appex -> <app>/Frameworks, without ".." (the Mac's sandbox may match the path as written)
+        std::string app = path;
+        for (int up = 0; up < 2; up++) {
+            const size_t s = app.find_last_of('/');
+            app = s == std::string::npos ? std::string() : app.substr(0, s);
+        }
+        d.push_back(app.empty() ? path + "/../../Frameworks" : app + "/Frameworks");
+    }
     return d;
+}
+
+// an appex's FM1CoreSlots.txt (its own resource, written by scripts/embed_cores.sh --list), "" none
+static std::string slotListFile()
+{
+    CFBundleRef b = CFBundleGetMainBundle();
+    if (!b || !inAppex(cfPath(CFBundleCopyBundleURL(b))))
+        return "";
+    const std::string p = cfPath(CFBundleCopyResourceURL(b, CFSTR("FM1CoreSlots"), CFSTR("txt"), nullptr));
+    FILE *f = p.empty() ? nullptr : fopen(p.c_str(), "r");
+    if (!f)
+        return "";
+    std::string s;
+    char buf[4096];
+    for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;)
+        s.append(buf, n);
+    fclose(f);
+    return s;
 }
 
 // FM1Core_<id>_<n>.framework -> id, n
@@ -129,36 +161,116 @@ SlotLoader &SlotLoader::shared()
     return l;
 }
 
+using Found = std::map<std::string, std::vector<std::string>>;   // id -> paths by slot
+
+static void addSlot(Found &found, const std::string &id, int n, const std::string &p)
+{
+    auto &v = found[id];
+    if ((int)v.size() < n)
+        v.resize((size_t)n);
+    if (v[(size_t)n - 1].empty())                    // (the first directory wins)
+        v[(size_t)n - 1] = p;
+}
+
+// a slot's binary in d: <entry>/<bin>, else <entry>/Versions/Current/<bin>; "" neither is a file
+static std::string slotBinary(const std::string &d, const std::string &entry)
+{
+    const std::string bin = entry.substr(0, entry.size() - 10);   // (".framework")
+    std::string p = d + "/" + entry + "/" + bin;
+    if (isFile(p))
+        return p;
+    p = d + "/" + entry + "/Versions/Current/" + bin;
+    return isFile(p) ? p : "";
+}
+
+// the slots in d's listing; errno when d can't be listed (else 0)
+static int listDir(const std::string &d, Found &found)
+{
+    DIR *dp = opendir(d.c_str());
+    if (!dp)
+        return errno ? errno : ENOENT;
+    while (struct dirent *de = readdir(dp)) {
+        std::string id;
+        int n = 0;
+        const std::string entry = de->d_name;
+        if (!slotName(entry, id, n))
+            continue;
+        const std::string p = slotBinary(d, entry);
+        if (!p.empty())
+            addSlot(found, id, n, p);
+    }
+    closedir(dp);
+    return 0;
+}
+
+// the slots a list names (one FM1Core_<id>_<n>.framework a line; # comments), looked for in d by path: d itself is
+// never listed. A slot whose binary can't be stat'ed is kept anyway (the sandbox may deny that and still allow the
+// dlopen); the probe then says what failed
+static void fromList(const std::string &d, const std::string &list, Found &found)
+{
+    size_t i = 0;
+    while (i < list.size()) {
+        size_t e = list.find('\n', i);
+        if (e == std::string::npos)
+            e = list.size();
+        std::string line = list.substr(i, e - i);
+        i = e + 1;
+        const size_t hash = line.find('#');
+        if (hash != std::string::npos)
+            line.erase(hash);
+        const size_t a = line.find_first_not_of(" \t\r"), b = line.find_last_not_of(" \t\r");
+        if (a == std::string::npos)
+            continue;
+        line = line.substr(a, b - a + 1);
+        std::string id;
+        int n = 0;
+        if (!slotName(line, id, n))
+            continue;
+        std::string p = slotBinary(d, line);
+        if (p.empty())
+            p = d + "/" + line + "/" + line.substr(0, line.size() - 10);
+        addSlot(found, id, n, p);
+    }
+}
+
 int SlotLoader::scan(const std::string &dir)
 {
     std::lock_guard<std::mutex> g(mu_);
     dirs_ = dir.empty() ? bundleDirs() : std::vector<std::string>{dir};
     errors_.clear();
-    std::map<std::string, std::vector<std::string>> found;   // id -> paths by slot
-    for (const std::string &d : dirs_) {
-        DIR *dp = opendir(d.c_str());
-        if (!dp)
-            continue;
-        while (struct dirent *de = readdir(dp)) {
-            std::string id;
-            int n = 0;
-            const std::string entry = de->d_name;
-            if (!slotName(entry, id, n))
-                continue;
-            const std::string bin = entry.substr(0, entry.size() - 10);   // (".framework")
-            std::string p = d + "/" + entry + "/" + bin;
-            if (!isFile(p))
-                p = d + "/" + entry + "/Versions/Current/" + bin;
-            if (!isFile(p))
-                continue;
-            auto &v = found[id];
-            if ((int)v.size() < n)
-                v.resize((size_t)n);
-            if (v[(size_t)n - 1].empty())            // (the first directory wins)
-                v[(size_t)n - 1] = p;
-        }
-        closedir(dp);
+    Found found;
+    int unlisted = 0;                                // (errno: the containing app's Frameworks couldn't be listed)
+    for (size_t i = 0; i < dirs_.size(); i++) {
+        const int e = listDir(dirs_[i], found);
+        if (i + 1 == dirs_.size())
+            unlisted = e;
     }
+    source_ = found.empty() ? "" : "dir listing";
+    // (an appex on a Mac: the sandbox denies listing the containing app's folder) the slots its list names, by path
+    if (found.empty() && dir.empty() && !dirs_.empty()) {
+        const std::string list = slotListFile();     // ("" outside an appex)
+        if (!list.empty()) {
+            fromList(dirs_.back(), list, found);
+            source_ = std::string("list file (") + (unlisted ? "opendir: " + std::string(strerror(unlisted))
+                                                              : std::string("no slots in the folder")) + ")";
+        }
+    }
+    return probeLocked(found);
+}
+
+int SlotLoader::scanList(const std::string &dir, const std::string &list)
+{
+    std::lock_guard<std::mutex> g(mu_);
+    dirs_ = {dir};
+    errors_.clear();
+    Found found;
+    fromList(dir, list, found);
+    source_ = "list file";
+    return probeLocked(found);
+}
+
+int SlotLoader::probeLocked(const std::map<std::string, std::vector<std::string>> &found)
+{
     std::vector<CoreSlotInfo> next;
     for (auto &kv : found) {
         CoreSlotInfo info;
@@ -251,6 +363,12 @@ std::string SlotLoader::errors() const
 {
     std::lock_guard<std::mutex> g(mu_);
     return errors_;
+}
+
+std::string SlotLoader::source() const
+{
+    std::lock_guard<std::mutex> g(mu_);
+    return source_;
 }
 
 SlotLoader::Slot *SlotLoader::acquire(const std::string &id, std::string *err)
@@ -359,6 +477,11 @@ extern "C" {
 
 int rfms_scan(const char *dir) { return SlotLoader::shared().scan(dir ? dir : ""); }
 
+int rfms_scan_list(const char *dir, const char *list)
+{
+    return SlotLoader::shared().scanList(dir ? dir : "", list ? list : "");
+}
+
 int rfms_count(void) { return (int)SlotLoader::shared().cores().size(); }
 
 int rfms_info(int i, rfms_info_t *out)
@@ -390,5 +513,7 @@ uint32_t rfms_credits(const char *id, char *buf, uint32_t n)
 uint32_t rfms_dirs(char *buf, uint32_t n) { return putAll(buf, n, SlotLoader::shared().dirs()); }
 
 uint32_t rfms_errors(char *buf, uint32_t n) { return putAll(buf, n, SlotLoader::shared().errors()); }
+
+uint32_t rfms_source(char *buf, uint32_t n) { return putAll(buf, n, SlotLoader::shared().source()); }
 
 } // extern "C"

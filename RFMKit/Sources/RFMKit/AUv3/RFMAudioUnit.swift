@@ -29,6 +29,7 @@ import AudioToolbox
 import CoreGraphics
 import Foundation
 import RFMCore
+import os
 
 public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     public struct Config: Sendable {
@@ -76,6 +77,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     private var lastLatency: UInt32 = 0
     private let log = RFMShared.log("au")
     private var channel: DiagnosticsChannel?
+    private var viewSize_: CGSize?
 
     public let probe: Probe
     /// Called (on any thread) when the instance's identity changed (a restored state) or a host asked for the
@@ -154,7 +156,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         Self.register(self)
 
         // the core (a new instance: the default firmware, a fresh flash; a restored state replaces it)
-        if let d = config.slotsDir { rfms_scan(d) } else if rfms_count() == 0 { rfms_scan(nil) }
+        if let d = config.slotsDir { rfms_scan(d) } else if rfms_count() == 0 { Self.scanSlots(log) }
         if link != nil { rfme_attach(e, 1) }
         if let want = config.defaultCore,
            let id = want.isEmpty ? CorePlayer.pick(nil, in: CorePlayer.catalog()) : want {
@@ -205,6 +207,13 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 
     public var state: InstanceState { lock.withLock { instanceState } }
 
+    /// (a Mac) the size the user gave the view with its resize corner, kept in fullState; nil: none (the default's)
+    public static let viewSizeKey = "rfm1.viewSize"
+    public var viewSize: CGSize? {
+        get { lock.withLock { viewSize_ } }
+        set { lock.withLock { viewSize_ = newValue } }
+    }
+
     // MARK: AUAudioUnit
 
     public override var outputBusses: AUAudioUnitBusArray { outputs }
@@ -251,6 +260,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             var s = super.fullState ?? [:]
             state.encode(into: &s)
             if let c = coreStateForSave() { c.encode(into: &s) }
+            if let v = viewSize { s[Self.viewSizeKey] = [Double(v.width), Double(v.height)] }
             return s
         }
         set {
@@ -279,7 +289,12 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
                 }
             }
             let id = session?.restore(restored.instance) ?? restored.instance
-            lock.withLock { instanceState = InstanceState(instance: id) }
+            let wh = newValue?[Self.viewSizeKey] as? [NSNumber] ?? []
+            let size = wh.count == 2 ? CGSize(width: wh[0].doubleValue, height: wh[1].doubleValue) : nil
+            lock.withLock {
+                instanceState = InstanceState(instance: id)
+                viewSize_ = size
+            }
             probe.setInstance(id.uuidString)
             updateName()
             log.info("instance \(restored.short, privacy: .public) restored from state, format \(restored.format)\(id == restored.instance ? "" : ": a duplicate, now \(String(id.uuidString.prefix(8)))", privacy: .public)")
@@ -541,6 +556,42 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         timer = t
     }
 
+    // MARK: the native cores of this process
+
+    private static let slotsLock = NSLock()
+    nonisolated(unsafe) private static var slotsLine_ = ""
+    /// how the last bundle scan found the native cores, e.g. "4 cores via list file (opendir: ...)" (the log, Diagnostics)
+    public static var slotsLine: String { slotsLock.withLock { slotsLine_ } }
+
+    /// the bundle's slots (rfms_scan: the app's Frameworks listed, else the extension's FM1CoreSlots.txt); on a Mac,
+    /// with none found that way, the app's copy in the App Group (CoreSlotMirror). Logged
+    static func scanSlots(_ log: Logger) {
+        rfms_scan(nil)
+        var how = slotsText(rfms_source), errors = slotsText(rfms_errors)
+        if rfms_count() == 0, ProcessInfo.processInfo.isiOSAppOnMac, let d = RFMShared.coreSlotsMirror() {
+            let before = how.isEmpty ? "nothing" : how
+            if FileManager.default.fileExists(atPath: d.path) {
+                rfms_scan(d.path)
+                how = "App Group CoreSlots (after \(before))"
+                let e = slotsText(rfms_errors)
+                if !e.isEmpty { errors += (errors.isEmpty ? "" : "; ") + e }
+            } else {
+                how = before + "; no App Group CoreSlots (open the app once)"
+            }
+        }
+        let n = rfms_count()
+        let line = n == 0 ? "no cores (\(how.isEmpty ? "none found" : how))" : "\(n) cores via \(how)"
+        slotsLock.withLock { slotsLine_ = line }
+        let dirs = slotsText(rfms_dirs), problems = errors.isEmpty ? "" : "; errors: " + errors
+        log.info("slots: \(line, privacy: .public); dirs \(dirs, privacy: .public)\(problems, privacy: .public)")
+    }
+
+    private static func slotsText(_ f: (UnsafeMutablePointer<CChar>?, UInt32) -> UInt32) -> String {
+        var b = [CChar](repeating: 0, count: 16384)
+        _ = f(&b, 16384)
+        return CorePlayer.string(b)
+    }
+
     // MARK: the instances in this process (the AU test's view of the shared fake)
 
     private static let liveLock = NSLock()
@@ -684,6 +735,7 @@ public struct AUReport: Codable, Sendable {
     public var leaseWarning: String?
     public var foreignSession = false
     public var transpose = 0
+    public var slots = ""                       // how the native cores were found (RFMAudioUnit.slotsLine)
 
     public init() {}
 
@@ -698,6 +750,7 @@ public struct AUReport: Codable, Sendable {
         coreError = s.coreError
         coreNote = s.coreNote
         bootedFrom = s.bootedFrom
+        slots = RFMAudioUnit.slotsLine
         coreKey = s.coreKey
         kind = s.coreKind
         coreLoadPct = Int(s.core.coreLoadPct)

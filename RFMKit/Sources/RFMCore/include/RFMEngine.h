@@ -53,8 +53,13 @@ typedef struct {
 } rfms_info_t;
 // finds the slots in dir, or (NULL / "") in the main bundle's Frameworks, and from inside an app extension also the
 // containing app's (<appex>/../../Frameworks); probes each core's descriptor (ABI 5..6). Returns how many cores.
-// A core with a slot in use keeps its registry entry.
+// A core with a slot in use keeps its registry entry. An appex that finds no slots that way (on a Mac the sandbox
+// denies listing the containing app's folder) takes the slots its FM1CoreSlots.txt names, by path in the app's
+// Frameworks (scripts/embed_cores.sh --list).
 int rfms_scan(const char *dir);
+// the same with the slots `list` names (FM1CoreSlots.txt's text: one FM1Core_<id>_<n>.framework a line, # comments)
+// looked for in dir by path, without listing it
+int rfms_scan_list(const char *dir, const char *list);
 int rfms_count(void);
 int rfms_info(int i, rfms_info_t *out);             // 1: filled
 int rfms_find(const char *id, rfms_info_t *out);    // 1: found
@@ -64,6 +69,8 @@ uint32_t rfms_credits(const char *id, char *buf, uint32_t n);
 // where the slots were found (the last scan's directories, "; "-separated) and the scan's problems ("" none)
 uint32_t rfms_dirs(char *buf, uint32_t n);
 uint32_t rfms_errors(char *buf, uint32_t n);
+// how the last scan found its slots: "dir listing", "list file" (with why the folder couldn't be listed), "" none
+uint32_t rfms_source(char *buf, uint32_t n);
 
 // ---- the engine
 typedef struct rfmc rfmc_t;

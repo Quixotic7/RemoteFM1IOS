@@ -32,6 +32,7 @@ struct RemoteFM1App: App {
         let args = ProcessInfo.processInfo.arguments
         coreTest = args.contains("-coretest")
         RFMFonts.register()
+        DispatchQueue.global(qos: .utility).async { CoreSlotMirror.syncOnMac() }   // (a Mac only: the AU's way to the cores)
         guard !args.contains("-autest") && !args.contains("-aucoretest") else { return }
         let backend = Self.backend(args)
         let d = UserDefaults.standard
