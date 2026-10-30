@@ -270,6 +270,8 @@ void rfme_test_frame_stall(rfme_t *e, uint32_t us);
 int rfme_test_core_threads(void);
 // the calling thread as a real-time thread with this period (a test's stand-in for an audio callback); 1: done
 int rfme_test_realtime(double period_s);
+// loads a core that echoes its MIDI in to its MIDI out and plays silence (RFMEchoCore.cpp; rfme_boot next); 1: done
+int rfme_test_load_echo(rfme_t *e);
 
 #ifdef __cplusplus
 }

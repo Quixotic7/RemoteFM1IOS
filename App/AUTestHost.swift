@@ -141,6 +141,11 @@ final class AUTestHost {
         } catch {
             step("engine", false, Self.describe(error))
         }
+        // (PLAN.md section 11) AVAudioEngine gives no musical context or transport: no clock may be made from it
+        if let st = statusReport(units[0]) {
+            step("host clock", st.clockMsgs == 0,
+                 "\(st.clockMsgs) clock messages sent, state \(st.hostClock) (1: the host gives no tempo or transport)")
+        }
 
         // 5: the other process's side of the App Group checks: ask each instance to ping, then read both sides
         probe.ping()
@@ -314,6 +319,15 @@ final class AUTestHost {
         if let j = m["json"] as? String { r.report = ProbeReport.decode(Data(j.utf8)) }
         if r.instance == nil && m["ok"] == nil { r.error = "empty reply: \(m)" }
         return r
+    }
+
+    /// the instance's AUReport ("status")
+    private func statusReport(_ u: AVAudioUnit) -> AUReport? {
+        let sel = NSSelectorFromString("messageChannelFor:")
+        guard let obj = u.auAudioUnit.perform(sel, with: RFMShared.diagnosticsChannel)?.takeUnretainedValue(),
+              let ch = obj as? AUMessageChannel, let call = ch.callAudioUnit
+        else { return nil }
+        return (call(["cmd": "status"])["json"] as? String).flatMap(AUReport.decode)
     }
 
     static func brief(_ r: ProbeReport) -> String {

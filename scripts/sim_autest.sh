@@ -7,8 +7,8 @@
 #
 #   scripts/sim_autest.sh [UDID]        (default: RFM iPhone 17, CEB2B846-...)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-autest); NOBUILD=1 reuses the last build
-#   AUPAGE=midi | learn | learn:KN1 | window   (M8) the second screenshot is that page of the AU's view (au-page.png),
-#             not the Bluetooth panel (window: the sheet's Mac-only Window section, shown in a Debug build)
+#   AUPAGE=midi | learn | learn:KN1 | window | sheet:midi   (M8) the second screenshot is that page of the AU's view
+#             (au-page.png), not the Bluetooth panel (window: the sheet's Mac-only Window section, in a Debug build)
 #
 # The app's -autest never starts the FM-1 link; its probes never send MIDI or connect to an endpoint.
 set -euo pipefail

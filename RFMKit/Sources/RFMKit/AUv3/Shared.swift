@@ -103,21 +103,24 @@ public struct InstanceState: Equatable, Sendable {
     public var short: String { String(instance.uuidString.prefix(8)) }
 }
 
-/// The instance's per-instance settings (FM1VST's MIDI options)
+/// The instance's per-instance settings (FM1VST's MIDI options; the host's clock, PLAN.md section 11)
 public struct AUSettings: Equatable, Sendable {
     public var notesPlayKeys = true             // MIDI notes 53.. play the FM-1's keys
     public var transpose = 0                    // octaves, -2..2
     public var keyNotesToFirmware = false       // the notes that played a key also go to the firmware's MIDI in
+    public var hostClock = true                 // the host's tempo and transport as MIDI clock to the firmware
     public init() {}
 
     init(_ d: [String: Any]?) {
         notesPlayKeys = (d?["notesPlayKeys"] as? NSNumber)?.boolValue ?? true
         transpose = max(-2, min(2, (d?["transpose"] as? NSNumber)?.intValue ?? 0))
         keyNotesToFirmware = (d?["keyNotesToFirmware"] as? NSNumber)?.boolValue ?? false
+        hostClock = (d?["hostClock"] as? NSNumber)?.boolValue ?? true
     }
 
     var dict: [String: Any] {
-        ["notesPlayKeys": notesPlayKeys, "transpose": transpose, "keyNotesToFirmware": keyNotesToFirmware]
+        ["notesPlayKeys": notesPlayKeys, "transpose": transpose, "keyNotesToFirmware": keyNotesToFirmware,
+         "hostClock": hostClock]
     }
 }
 

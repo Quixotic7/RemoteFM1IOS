@@ -8,7 +8,8 @@
 // and Diagnostics (the instance's numbers and M2's probes). M7: the firmware page lists the imported .rfm1 files too
 // (the app's mirror in the App Group); a Wasm core that can't keep up shows a note over the faceplate. M8: Knobs from
 // MIDI (MIDI learn on the host's MIDI, the knob speed, the mappings: global, shared with the app); learn mode on the
-// faceplate, its bar and the toasts over the sheet (FaceplateOverlay). On a Mac: the window's size (Window).
+// faceplate, its bar and the toasts over the sheet (FaceplateOverlay). The MIDI section: notes play keys, ...and reach
+// the firmware, the octave, the host's clock (PLAN.md section 11). On a Mac: the window's size (Window).
 
 import RFMKit
 import SwiftUI
@@ -80,10 +81,6 @@ struct AUSheet: View {
                             SheetRow("Firmware", value: model.status.coreName.isEmpty ? "–" : model.status.coreName) {
                                 model.page = .firmware
                             }
-                            SheetStepper("MIDI octave", value: Binding(get: { model.status.settings.transpose },
-                                                                       set: { model.setTranspose($0) }), in: -2...2)
-                            SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
-                                     : "\(MidiMapStore.shared.mappings.count) learned") { model.page = .midi }
                             SheetRow("Diagnostics", divider: false) {
                                 model.page = .diagnostics
                                 model.diagnosticsOpen = true
@@ -92,6 +89,7 @@ struct AUSheet: View {
                         .padding(.top, 20)
                         if !model.status.coreError.isEmpty { SheetNote(model.status.coreError, color: .orange) }
                         else if !model.status.coreNote.isEmpty { SheetNote(model.status.coreNote, color: .orange) }
+                        midiSection
                     }
                     .padding(.bottom, 8)
                 }
@@ -118,6 +116,32 @@ struct AUSheet: View {
                 }
             }
             SheetNote("Ableton: close and reopen the plugin window to apply.")
+        }
+    }
+
+    /// the host's MIDI to the firmware (PLAN.md section 11): the keys, the octave, the host's clock, learn
+    private var midiSection: some View {
+        let s = model.status.settings
+        let set = { (change: @escaping (inout AUSettings) -> Void) in model.changeSettings(change) }
+        return VStack(spacing: 0) {
+            SheetSectionTitle("MIDI").id("midi")
+            SheetList {
+                SheetToggle("MIDI notes play keys", on: Binding(get: { s.notesPlayKeys },
+                                                                set: { v in set { $0.notesPlayKeys = v } }))
+                SheetToggle("...and reach the firmware's MIDI in", on: Binding(get: { s.keyNotesToFirmware },
+                                                                              set: { v in set { $0.keyNotesToFirmware = v } }))
+                    .disabled(!s.notesPlayKeys)
+                    .opacity(s.notesPlayKeys ? 1 : 0.45)
+                SheetStepper("MIDI octave", value: Binding(get: { s.transpose }, set: { v in set { $0.transpose = v } }),
+                             in: -2...2)
+                SheetToggle("Send the host's clock and transport", on: Binding(get: { s.hostClock },
+                                                                              set: { v in set { $0.hostClock = v } }))
+                SheetRow("Knobs from MIDI", value: MidiMapStore.shared.mappings.isEmpty ? nil
+                         : "\(MidiMapStore.shared.mappings.count) learned", divider: false) { model.page = .midi }
+            }
+            SheetNote("Off: every note goes to the firmware's MIDI in (FIZZ's tracks). The host's clock: its tempo, "
+                      + "start, stop and position as MIDI clock (clock in the host's MIDI is then dropped). The "
+                      + "firmware's MIDI out is this instrument's MIDI output.")
         }
     }
 
@@ -212,6 +236,7 @@ struct AUSheet: View {
             ("ahead", c.aheadText),
             ("clock", ["stopped", "audio", "timer (no sound)", "caller"][min(max(c.clock, 0), 3)]),
             ("MIDI", "in \(s.midiIn) (\(s.midiNotes) notes), out \(s.midiOutMsgs)"),
+            ("host clock", s.hostClockText),
             ("flash", "\(c.flashSize / 1024) KiB, from \(s.bootedFrom.isEmpty ? "–" : s.bootedFrom)"),
             ("cores", RFMAudioUnit.slotsLine.isEmpty ? "–" : RFMAudioUnit.slotsLine),
         ]

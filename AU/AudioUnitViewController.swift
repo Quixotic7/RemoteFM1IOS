@@ -220,6 +220,7 @@ final class AUViewModel {
     var report: ProbeReport?
     var diagnosticsOpen = false
     var page: Page?
+    @ObservationIgnored var sheetScroll: String?        // (the AU test) a section of the sheet shown at the top
     var chip = PanelChip.emulator                       // (set only when it changes: the faceplate reads it)
     let ui = FaceplateUI()
     let feed = PanelFeed(host: nil)
@@ -231,7 +232,6 @@ final class AUViewModel {
     @ObservationIgnored var onPickSize: (@MainActor (CGSize) -> Void)?    // (a Mac) the sheet's Window size
     var macWindow = false                               // (a Mac) the sheet's Window section
     var windowSize = CGSize.zero                        // the view's preferredContentSize
-    @ObservationIgnored var sheetScroll: String?        // (the AU test) an id in the sheet shown at its top
     @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var ticks = 0
@@ -326,6 +326,9 @@ final class AUViewModel {
             macWindow = true                            // (a screenshot of the Mac-only section on iOS)
             #endif
             sheetScroll = "window"
+        } else if what.hasPrefix("sheet") {             // "sheet:midi": the sheet scrolled to its MIDI section
+            sheetScroll = what.split(separator: ":").dropFirst().first.map(String.init)
+            page = nil
             ui.sheetOpen = true
         } else if what.hasPrefix("learn") {
             learn.start(ui)
@@ -336,5 +339,12 @@ final class AUViewModel {
     func select(_ id: String) { au?.selectCore(id) }
     func claim() { au?.claimPanel() }
     func restart() { au?.restartCore() }
-    func setTranspose(_ t: Int) { au?.settings.transpose = t }
+    /// the instance's MIDI settings (shown at once; the status catches up on its next poll)
+    func changeSettings(_ change: (inout AUSettings) -> Void) {
+        guard let au else { return }
+        var s = au.settings
+        change(&s)
+        au.settings = s
+        status.settings = s
+    }
 }

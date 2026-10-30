@@ -77,6 +77,29 @@ static void emitOut(void *ctx, const uint8_t *msg, uint32_t len, uint32_t offset
         b(o->t + (AUEventSampleTime)offset, 0, (NSInteger)len, msg);
 }
 
+// the host's tempo, beat and transport for this buffer (RFMHostClock.h); what it doesn't answer stays 0
+static void hostInput(rfmk *k, rfmhc_input_t *in, uint32_t frames)
+{
+#if __has_feature(objc_arc)
+    AUHostMusicalContextBlock mc = (__bridge AUHostMusicalContextBlock)k->musical;
+    AUHostTransportStateBlock tr = (__bridge AUHostTransportStateBlock)k->transport;
+#else
+    AUHostMusicalContextBlock mc = (AUHostMusicalContextBlock)k->musical;
+    AUHostTransportStateBlock tr = (AUHostTransportStateBlock)k->transport;
+#endif
+    *in = rfmhc_input_t{};
+    in->sample_rate = k->sampleRate;
+    in->frames = frames;
+    if (mc)
+        in->has_context = mc(&in->tempo, nullptr, nullptr, &in->beat, nullptr, nullptr) ? 1 : 0;
+    AUHostTransportStateFlags f = 0;
+    double pos = 0;
+    if (tr)
+        in->has_transport = tr(&f, &pos, &in->cycle_start, &in->cycle_end) ? 1 : 0;
+    in->moving = (f & AUHostTransportStateMoving) ? 1 : 0;
+    in->cycling = (f & AUHostTransportStateCycling) ? 1 : 0;
+}
+
 AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
 {
     AUInternalRenderBlock block = ^AUAudioUnitStatus(AudioUnitRenderActionFlags *actionFlags,
@@ -86,12 +109,18 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
         if (frameCount > k->maxFrames)
             return kAudioUnitErr_TooManyFramesToProcess;
         k->nev = 0;
+        const bool clockOn = k->hostClockOn.load(std::memory_order_relaxed);
+        rfmhc_input_t host{};
+        if (clockOn)
+            hostInput(k, &host, frameCount);
+        k->dropClock = clockOn && host.has_context && host.has_transport;
         for (const AURenderEvent *e = events; e; e = e->head.next) {
             if (e->head.eventType == AURenderEventMIDI || e->head.eventType == AURenderEventMIDISysEx)
                 k->midi(e->MIDI.data, e->MIDI.length, offsetOf(e->head.eventSampleTime, ts, frameCount));
             else if (e->head.eventType == AURenderEventMIDIEventList)
                 umpWords(k, &e->MIDIEventsList.eventList, offsetOf(e->head.eventSampleTime, ts, frameCount));
         }
+        k->hostClock(host, clockOn);                // (the host's clock and transport, merged by frame)
         for (UInt32 i = 0; i < outputData->mNumberBuffers; i++) {
             AudioBuffer &b = outputData->mBuffers[i];
             if (!b.mData)                           // the host wants our buffers
@@ -134,6 +163,43 @@ void rfmk_set_midi_out(rfmk_t *k, AUMIDIOutputEventBlock block)
     }
     if (k->engine)
         rfme_midi_out_enable(k->engine, block ? 1 : 0);
+}
+
+static void *retainBlock(id b)
+{
+    if (!b)
+        return nullptr;
+#if __has_feature(objc_arc)
+    return (__bridge_retained void *)[b copy];
+#else
+    return (void *)[b copy];
+#endif
+}
+
+static void releaseBlock(void *&p)
+{
+    if (!p)
+        return;
+#if __has_feature(objc_arc)
+    id b = (__bridge_transfer id)p;
+    b = nil;
+#else
+    [(id)p release];
+#endif
+    p = nullptr;
+}
+
+void rfmk_set_host_blocks(rfmk_t *k, AUHostMusicalContextBlock musical, AUHostTransportStateBlock transport)
+{
+    rfmk_drop_host_blocks(k);
+    k->musical = retainBlock(musical);
+    k->transport = retainBlock(transport);
+}
+
+void rfmk_drop_host_blocks(rfmk *k)
+{
+    releaseBlock(k->musical);
+    releaseBlock(k->transport);
 }
 
 void rfmk_drop_midi_out(rfmk *k)

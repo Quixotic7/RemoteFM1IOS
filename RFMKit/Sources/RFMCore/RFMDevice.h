@@ -60,6 +60,9 @@ public:
     void discard() { ring_r_ = ring_w_; }   // drop what nobody took (the timer clock)
     // n host frames at host_rate (the device runs as far as needed; bypassed at exactly 44100)
     void render(float *L, float *R, uint32_t n, double host_rate);
+    // inside render (`between`): the host frame of this render the device clock is running for (its audio from then
+    // on starts there), so what the core does in that millisecond can be placed at that frame
+    uint32_t render_frame() const { return at_; }
     static uint32_t latency_frames(double host_rate);
 
     // frame()'s time: the longest since reset_frame_stats, and the last (mach ticks)
@@ -82,6 +85,7 @@ private:
     Lagrange4 rs_;
     double rs_rate_ = 0;
     uint64_t frame_max_ = 0, frame_last_ = 0;
+    uint32_t at_ = 0;
     Between between_;
 };
 

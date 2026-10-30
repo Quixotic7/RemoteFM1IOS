@@ -10,7 +10,8 @@
 //                (RFME_CLOCK_AUDIO), the engine's timer otherwise (the panel keeps working, no sound). A core this
 //                build doesn't have (a default, a restored state): the first it has, with a note (Status.coreNote)
 //   MIDI         the host's MIDI to the core at its frame (FM1VST's mapping); the core's MIDI out to the host's
-//                MIDI output (midiOutputNames, MIDIOutputEventBlock)
+//                MIDI output (midiOutputNames, MIDIOutputEventBlock); the host's tempo and transport as MIDI clock
+//                (musicalContextBlock, transportStateBlock: RFMHostClock.h, PLAN.md section 11)
 //   M8           the global learned map (MidiMapFollower: midi-map.json in the App Group), applied in the engine,
 //                so a learned knob works with the AU's window closed
 //   fullState    the instance UUID and format (InstanceState), the core, its version, its flash (flash_sync first,
@@ -231,6 +232,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FormatNotSupported))
         }
         rfmk_set_midi_out(kernel, midiOutputEventBlock)
+        rfmk_set_host_blocks(kernel, musicalContextBlock, transportStateBlock)
         rfme_set_clock(e, Int32(RFME_CLOCK_AUDIO))     // (the core thread renders ahead of the host's callback)
     }
 
@@ -253,6 +255,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         guard !tornDown else { return super.deallocateRenderResources() }
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))     // (the core thread runs by the wall clock again)
         rfmk_set_midi_out(kernel, nil)
+        rfmk_set_host_blocks(kernel, nil, nil)
         rfmk_deallocate(kernel)
         super.deallocateRenderResources()
     }
@@ -357,6 +360,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 
     private func applySettingsLocked() {
         rfme_set_midi(e, settings_.notesPlayKeys ? 1 : 0, Int32(settings_.transpose), settings_.keyNotesToFirmware ? 1 : 0)
+        rfmk_set_host_clock(kernel, settings_.hostClock ? 1 : 0)
     }
 
     /// (ctl held) the core loaded into a free slot and booted; the clock given back to its owner
@@ -440,7 +444,22 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         public var levelRMS = 0.0
         public var midiIn: UInt32 = 0, midiNotes: UInt32 = 0
         public var powerCycles = 0
+        /// the host's clock: 0 off, 1 the host gives no tempo or transport, 2 stopped, 3 moving (rfmk_stats_t)
+        public var hostClock = 0
+        public var hostTempo = 0.0, hostBeat = 0.0
+        public var clockMsgs: UInt32 = 0, clockDropped: UInt32 = 0
         public init() {}
+
+        public var hostClockText: String {
+            switch hostClock {
+            case 0: return "off"
+            case 1: return "the host gives no tempo or transport"
+            default:
+                let dropped = clockDropped > 0 ? ", \(clockDropped) of the host's dropped" : ""
+                return String(format: "%.1f BPM, %@, beat %.2f; %u sent", hostTempo, hostClock == 3 ? "playing" : "stopped",
+                              hostBeat, clockMsgs) + dropped
+            }
+        }
     }
 
     public func status() -> Status {
@@ -468,6 +487,11 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         s.midiEvents = k.midi_events
         s.midiOutMsgs = k.midi_out_msgs
         s.levelRMS = k.level_rms
+        s.hostClock = Int(k.host_clock)
+        s.hostTempo = k.host_tempo
+        s.hostBeat = k.host_beat
+        s.clockMsgs = k.clock_msgs
+        s.clockDropped = k.clock_dropped
         var r = rfme_status_t()
         rfme_status(e, &r)
         s.midiIn = r.midi_in
@@ -740,6 +764,7 @@ public struct AUReport: Codable, Sendable {
     public var foreignSession = false
     public var transpose = 0
     public var slots = ""                       // how the native cores were found (RFMAudioUnit.slotsLine)
+    public var hostClock = 0, clockMsgs = 0, clockDropped = 0
 
     public init() {}
 
@@ -786,6 +811,9 @@ public struct AUReport: Codable, Sendable {
         keysPressed = Int(s.core.keysPressed)
         devMs = Int(s.core.devMs)
         transpose = s.settings.transpose
+        hostClock = s.hostClock
+        clockMsgs = Int(s.clockMsgs)
+        clockDropped = Int(s.clockDropped)
         if let p = s.panel {
             owner = p.owner
             ownerName = p.ownerName

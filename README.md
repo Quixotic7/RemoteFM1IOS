@@ -28,7 +28,7 @@ screen, the test pattern and the AU test).
   a small AUv3 host for its own extension.
 - `AU/`: the AUv3 extension `RemoteFM1AU` (aumu `Rfm1` `Qx7u`, "Quixotic7: RemoteFM1"): its view controller, which is
   also the AU factory, and its SwiftUI view (the faceplate; its sheet: Use this FM-1, Bluetooth, view, theme,
-  firmware and About, MIDI octave, Diagnostics).
+  firmware and About, Diagnostics, MIDI: notes play keys, the octave, the host's clock, Knobs from MIDI).
 - `RemoteFM1.xcodeproj`: the app and extension targets; both use `RFMKit` as a local package and share the App Group
   `group.com.quixotic7.remotefm1`. The app's "Embed core slots" phase (`scripts/embed_cores.sh`) builds the cores if
   needed and puts their slot frameworks in `RemoteFM1.app/Frameworks`, signed.
@@ -103,6 +103,8 @@ sounds), Boardwalk's descriptor, attract tune and cabinets, LOOM-8's descriptor,
 preferred one is missing. M4 adds `LeaseTests` (the lease with two clients and with
 a forked second process, a takeover on the shared fake that never sends SESSION 0, and `PanelSession`'s rules) and
 `AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence, a missing core's fallback).
+`HostClockTests` (the host's clock as MIDI, buffer by buffer) and `AUMidiTests` (the AU's MIDI switches, the clock and
+the MIDI out through the render block, with a test core that echoes its MIDI; no core builds needed).
 
 FM1VST's own conformance test against the macOS builds of our libraries:
 
@@ -192,6 +194,21 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
   Its keys, encoder and pots play the FM-1; K1 picks the view, K2 the colours, K5 is MASTER. It connects by itself
   next time. To leave remote mode, hold AUX and the encoder on the OMX-27.
 
+## The AUv3's MIDI in a host (AUM and others)
+
+The instrument's sheet › MIDI (each instance its own, saved with the host's project):
+
+- **MIDI notes play keys** (on): notes 53 and up play the FM-1's 27 keys (MIDI octave shifts them). Off: every note
+  goes to the firmware's MIDI in, for firmware with MIDI of its own (FIZZ: notes for its tracks, CCs for parameters).
+  The other messages (CCs, pitch bend, notes outside the keys) always go there.
+- **...and reach the firmware's MIDI in** (off): the notes that play keys also go to the firmware.
+- **Send the host's clock and transport** (on): the host's tempo and transport as MIDI clock (24 per beat), Start,
+  Stop, Continue and Song Position, so a firmware's sequencer follows the host. Only hosts that give their tempo and
+  transport to plug-ins (AUM, Logic, ...) get it. While on, clock and transport in the MIDI the host routes to the
+  instrument are dropped (one clock, not two).
+- **MIDI out**: what the firmware sends is the instrument's MIDI output ("RemoteFM1"); route it in the host. It keeps
+  its place against the firmware's sound (both a latency, `latency`, behind the host).
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).
@@ -219,7 +236,8 @@ ChoralRoot .rfm1 from `$RFM1_DIR`, default FM1VST's rfm1 worktree, skipped witho
   - `-steps`: the step numbers 1–16 on the lower keys.
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices); without it the MIDI input starts with no source connected. On a device CoreMIDI is the default.
-- `-autest -aupage midi|learn|learn:KN1`: the AU test, then that page of the AU's view (`AUPAGE=... scripts/sim_autest.sh`).
+- `-autest -aupage midi|learn|learn:KN1|sheet:midi`: the AU test, then that page of the AU's view (`AUPAGE=...
+  scripts/sim_autest.sh`; `sheet:midi`: the sheet at its MIDI section).
 
 ## Licence
 
