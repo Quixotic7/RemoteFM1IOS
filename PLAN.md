@@ -338,3 +338,35 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
   guess on its knobs, a learned control in an AU host (AUM) routing MIDI to the instance, a real OMX-27 (its REMOTE
   firmware, the handshake, LEDs and screen pacing over USB on iOS, auto-reconnect on plugging in), the OMX in the
   background, `willClose()` on termination.
+
+## 11. AU MIDI: the firmware's MIDI in and out, the host's clock
+
+The owner's wish: in an AU host the firmware gets the MIDI (FIZZ drives each track from notes and takes CCs for its
+parameters), follows the host's clock and transport, and its MIDI out reaches the host.
+
+- **The switches** (the AU's sheet, MIDI; per instance in `AUSettings`, so in `fullState`): MIDI notes play keys (on),
+  ...and reach the firmware's MIDI in (off), MIDI octave (0), Send the host's clock and transport (on). The first
+  three as the app's; off, every note goes to the core's `midi_in` (RFMEngine's host MIDI path, section 10).
+- **The host's clock.** Hosts don't send MIDI clock to instruments, so the render block reads `musicalContextBlock`
+  (tempo, beat) and `transportStateBlock` (moving, cycling, the cycle) every buffer and `RFMHostClock` (plain C++,
+  `rfmhc_run`) makes the messages with their frames: 0xF8 every 1/24 beat while moving; Start at beat 0, else Song
+  Position (the next sixteenth) and Continue; a negative beat (count-in) waits for beat 0; Stop; a jump (a relocate,
+  a loop the host wrapped, or a cycle ending inside the buffer, at its frame) is Stop, Song Position, Continue. The beat
+  is the host's each buffer: a tick is never sent twice, one a jitter skipped goes at frame 0, a position more than a
+  tick off is a jump. They join the host's MIDI in frame order (RFMKernelImpl.h `hostClock`), on the same stamped
+  path, so they reach the core a latency later like a note. Without both blocks (AVAudioEngine, the AU test host)
+  nothing is sent. While on, 0xF8 FA FB FC F2 in the host's MIDI are dropped; turned off while playing: a Stop.
+- **MIDI out.** The core's packets are stamped with the frame its clock ran that millisecond at (`render_frame()`, not
+  the start of the 64-frame chunk), decoded into whole messages (1-3 bytes, SysEx up to 4 KiB) and given to
+  `MIDIOutputEventBlock` at the render's sample time + their frame: a latency behind the host, with the core's sound.
+- **Tested** (Mac): `HostClockTests` (start at 0, mid-song, 24 per beat over 64/512/4096-frame buffers at 44.1 and
+  48 kHz, a tempo change, stop and continue, a relocate, loops wrapped at and inside a buffer, a count-in, jittered
+  positions, no context); `AUMidiTests` through the real render block with a test core that echoes its MIDI in
+  (`rfme_test_load_echo`): the switches, the clock arriving a latency (+ at most a device block) after its frame,
+  the setting and the host's own clock, no context no clock, and channel, realtime, Song Position and SysEx coming out
+  of the MIDI output block. The simulator's AU test checks nothing is sent without a context
+  (`AUPAGE=sheet:midi scripts/sim_autest.sh` shows the switches).
+- **Device and host only, not tested yet.** AUM (or another host) with its transport running: FIZZ or another
+  firmware following tempo, start, stop and loops; a host that wraps its cycle differently from either case here; the
+  MIDI output routed to a MIDI monitor or another instrument (timing against the sound, the latency the host applies
+  to it, SysEx); the host's own MIDI clock routed in with the setting off.
