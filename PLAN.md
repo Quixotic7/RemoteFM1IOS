@@ -385,3 +385,55 @@ parameters), follows the host's clock and transport, and its MIDI out reaches th
   firmware following tempo, start, stop and loops; a host that wraps its cycle differently from either case here; the
   MIDI output routed to a MIDI monitor or another instrument (timing against the sound, the latency the host applies
   to it, SysEx); the host's own MIDI clock routed in with the setting off.
+
+## 12. AU parameters: the panel and the firmware's own parameters for the host
+
+The owner's wish: MIDI-mappable parameters for the AU, as FM1VST has them for the knobs and buttons, and the
+firmware's engine parameters too. A host maps its MIDI to an AU's parameters (AUM's MIDI control) and automates them
+(Logic, Cubasis); MIDI learn (section 10) stays the AU's own way, and both work side by side.
+
+- **The tree** (`HostParameters.swift`): 129 parameters, fixed for the AU's life. Addresses 0..128 are the engine's
+  indices (`RFME_HP_*`: never renumbered; new ones go at the end); identifiers are FM1VST's, so its mappings read the
+  same: `knob_master` (0..1023), `knob_select`, `knob_presets`, `knob_algo`, `knob_1`..`knob_4` (0..1), `btn_fx`..
+  `btn_octup`, `key_00`..`key_26` (0 / 1, held from 0.5), `t2_00`..`t2_79` ("P01".."P80", 0..1); groups Knobs,
+  Buttons, Keys, Firmware. Overview: Knob 1–4, Master, Select, Presets, Algo.
+- **The knobs** (FM1VST's `KnobParameter`, without Stepped and without the nudge on a device turn): the core's
+  `knob_target(role)` binds a knob to a map entry (0..1 is its range) or to nothing: then it is relative, centred
+  0.5, a host change becomes detents (24 per travel, the remainder kept), and 400 device ms after the host's last
+  change it springs back to 0.5. The value text says what the knob does now ("Voicing: +3", "Strum Rate: 40 ms",
+  "turn", "+2").
+- **Tier 2**: 80 slots bound in map order to the entries without `FM1P_HIDDEN` (every built-in map fits: ChoralRoot
+  77, Felucca 73, Melodee 78); a meta entry's slot shows its target, re-read when `param_epoch` moves; unused slots
+  say "–" and do nothing. FIZZ, Saadet, Boardwalk and LOOM-8 publish no map yet: their slots are unused and their
+  knobs relative. .rfm1 version 1 doesn't reach the map or `knob_target` (section 9): the same.
+- **Names don't change.** `AUParameter`'s name and range are fixed once a host has the tree. Apple allows a new tree
+  with KVO on `parameterTree`, but a meta slot's target moves with every screen and part (Felucca's E1..E8), each
+  rebuild is an XPC round for an out-of-process AU, and whether a host keeps its mappings and automation across it
+  (AUM, GarageBand, Cubasis) is unknown. So the names stay generic ("Knob 1", "P01") and the firmware's name is in
+  the value text, as FM1VST does for its knobs: a mapping never breaks.
+- **Host -> core.** The tree's implementor observer (`rfme_hp_set`, a queue the core thread takes at each chunk)
+  and the render block's `AURenderEventParameter` / `...Ramp` (a ramp's end value at its start), queued with the
+  host's MIDI, stamped, so they apply at their frame a latency later. On the core thread (`RFMHostParams.cpp`) a
+  button or key is merged with the panel's own holds, a turn is the unit's encoder event, MASTER the pot's, a bound
+  knob or slot the entry's `set()`. Nothing locks or allocates on the render thread.
+- **Core -> host.** Every 33 device ms the core thread reads MASTER, the epoch and the bound entries' values and
+  publishes what the host should show (a triple buffer); the main queue reads it 30 times a second and calls
+  `setValue` for each value that differs from the parameter's, unless the host still has a write to it in flight
+  (write counters). A value after the host's own write isn't told back (two read-backs held off, and the same step
+  is left alone); our own `setValue` isn't sent back to the core.
+- **Restoring a project.** The firmware's flash holds its state (`fullState`, section 5); MASTER, which isn't in the
+  flash, is now in `fullState` too (`rfm1.master`). For 1 s of device time after a boot every host write is dropped
+  and the host is told the firmware's values instead, so a host restoring parameter values after `fullState`
+  presses no button, turns no knob and leaves MASTER alone. Writes are also dropped for 150 ms after a knob's
+  retarget (they were meant for the old target).
+- **Tested** (Mac): `AUParamTests` through the real render block with the echo test core's small map: the tree's
+  shape and identifiers, buttons and keys (a press and release inside one buffer still presses), Knob Master, an
+  absolute knob and its retarget (CC from the firmware's side), a relative knob's detents, remainder and spring
+  back, render events, Tier 2 binding, a meta slot's relabel, unused slots, the firmware's change reaching the
+  host's observers without an echo, writes dropped after a boot; ChoralRoot's, Felucca's and Melodee's real maps on
+  the engine. The simulator's AU test (`scripts/sim_autest.sh`): the tree out of process (129, the identifiers) and
+  P01's texts and a write to it reaching ChoralRoot's Voicing.
+- **Host only, not tested yet.** AUM's MIDI control of the parameters (a CC on a relative knob: a pot turned slowly
+  jumps after each spring back, as in FM1VST), Logic's and Cubasis' automation (read and touch: whether they show
+  the value texts, and how they record the firmware's own changes, which come as plain value changes, no touch
+  gestures), a host restoring parameter values later than 1 s after the state, many instances' 30 Hz sync.

@@ -105,6 +105,9 @@ a forked second process, a takeover on the shared fake that never sends SESSION 
 `AUCoreTests` (the AU playing ChoralRoot from host MIDI, `fullState` with the flash, a fifth instance's silence, a missing core's fallback).
 `HostClockTests` (the host's clock as MIDI, buffer by buffer) and `AUMidiTests` (the AU's MIDI switches, the clock and
 the MIDI out through the render block, with a test core that echoes its MIDI; no core builds needed).
+`AUParamTests` (the parameter tree: host values to the core as panel events and map writes, render events, Tier 2
+binding and relabelling, the firmware's changes back to the host, writes after a boot dropped; with the echo core's
+small map, and ChoralRoot's, Felucca's and Melodee's real maps when the core builds are there).
 
 FM1VST's own conformance test against the macOS builds of our libraries:
 
@@ -124,6 +127,8 @@ The AU test on a simulator, headless (Simulator.app stays closed):
 
 It builds, boots the simulator if needed, installs, launches with `-autest`, prints the summary, saves `autest.json`,
 the log and two screenshots under `$OUT` (default `$TMPDIR/remotefm1-autest`), and shuts down a simulator it booted.
+Its steps include the AU's parameter tree as the host sees it (129 parameters) and a write to P01 reaching the
+firmware.
 
 M4's AU core test on a simulator, headless, the same way:
 
@@ -208,6 +213,23 @@ The instrument's sheet › MIDI (each instance its own, saved with the host's pr
   instrument are dropped (one clock, not two).
 - **MIDI out**: what the firmware sends is the instrument's MIDI output ("RemoteFM1"); route it in the host. It keeps
   its place against the firmware's sound (both a latency, `latency`, behind the host).
+
+## The AUv3's parameters (MIDI control and automation in a host)
+
+The instrument has 129 parameters a host can map MIDI to (AUM's MIDI control) or automate (Logic, Cubasis), with
+FM1VST's identifiers (PLAN.md section 12):
+
+- **Knob Master** (0..1023) and **Knob Select, Presets, Algo, Knob 1–4**: when the firmware's screen puts a value on
+  a knob, the parameter is that value (its text says which: "Voicing: +3"); otherwise it turns the knob (centred,
+  24 steps per full travel, back to the centre after 0.4 s).
+- **Button FX .. OCT+** and **Key F3 .. G5**: held while on.
+- **P01 .. P80**: the firmware's own parameters in its map's order (ChoralRoot, Felucca and Melodee have them; the
+  text says which: "Strum Rate: 40 ms"; "–" unused).
+
+The names stay the same whatever the firmware shows, so mappings and automation keep working. The firmware's own
+changes (a knob turned on the FM-1 or on screen, a sound loaded) move the parameters in the host. For a second after
+a project loads, the host's parameter values are ignored (the firmware's saved state wins). MIDI learn works next to
+them. Diagnostics shows how many slots the firmware uses.
 
 ## Launch arguments
 
