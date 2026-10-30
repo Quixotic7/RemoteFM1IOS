@@ -61,13 +61,15 @@ constexpr uint32_t kOfflineWaitUs = 2000000;             // offline: how long a 
 static_assert((kRingFrames & (kRingFrames - 1)) == 0, "the ring's size is a power of two");
 
 // a host MIDI message on its way to the core thread: `at` is its ring position (the frame it applies before).
-// len 0: a host parameter change instead (data[0..1]: its index, little-endian; value; seq: its write number)
+// len 0: a host parameter change instead (data[0..1]: its index, little-endian; value; seq: its write number).
+// epoch: the stream the render that made it played (a stale one is dropped by the core thread, a current one never)
 struct HostEvent {
     uint64_t at;
     uint8_t len;
     uint8_t data[3];
     float value;
     uint32_t seq;
+    uint32_t epoch;
 };
 // a host parameter change from a thread that isn't the audio thread (rfme_hp_set)
 struct HpEvent {
@@ -286,6 +288,7 @@ struct rfme final : rfm::HostParams::Panel {
     uint32_t pEpoch = ~0u;                  // (the producer's) the epoch it renders
     // (the consumer's)
     uint32_t cEpoch = ~0u, cMaxN = 0;
+    uint64_t cLastAt = 0;                   // the last host event's ring position this epoch (stamps never go back)
     double cRate = 0;
     bool primed = false;
     uint64_t outBase = 0, outEnd = 0;       // the ring span the last render played (for rfme_midi_out_take_at)
@@ -896,10 +899,9 @@ struct rfme final : rfm::HostParams::Panel {
         if (!cs.ok)
             return;
         const uint32_t ep = epoch.load(std::memory_order_acquire);
-        if (ep != pEpoch) {                             // a new stream: from here; what the old one queued goes
+        if (ep != pEpoch) {                             // a new stream: from here
             pEpoch = ep;
-            for (HostEvent he; hostQ.pop(he);) {
-            }
+            dropStale();                                // (what the old one queued goes; this one's own stays)
             epochStart.store(posW.load(std::memory_order_relaxed), std::memory_order_relaxed);
             prodEpoch.store(ep, std::memory_order_release);
         }
@@ -933,7 +935,23 @@ struct rfme final : rfm::HostParams::Panel {
         noteFrameStats();
     }
 
-    // n frames at ring position w (the device's render split at each host event due inside)
+    // host events stamped in an earlier stream (a render that began before the core or the clock changed) are
+    // dropped: they were meant for the core that is gone. The current stream's are kept, also those the consumer
+    // queued before this thread noticed the new epoch (the very first renders: never dropped). (The consumer's
+    // epochs only grow, so the stale ones are at the front)
+    void dropStale()
+    {
+        for (HostEvent he; hostQ.peek(he) && he.epoch != pEpoch;)
+            hostQ.pop(he);
+    }
+    bool nextHost(HostEvent &he)
+    {
+        dropStale();
+        return hostQ.peek(he);
+    }
+
+    // n frames at ring position w (the device's render split at each host event due inside). An event whose
+    // position is already past (stamped before the stream started) is applied at once, in order
     void renderChunk(uint64_t w, uint32_t n, double rate)
     {
         uint64_t pos = w;
@@ -941,14 +959,14 @@ struct rfme final : rfm::HostParams::Panel {
         HostEvent he;
         controllerMidi();                               // (M8: a controller's MIDI, at the chunk's start)
         while (pos < end) {
-            while (hostQ.peek(he) && he.at <= pos) {
+            while (nextHost(he) && he.at <= pos) {
                 hostQ.pop(he);
                 if (he.len)
                     hostMidi(he.data, he.len);
                 else
                     hostParam((uint32_t)he.data[0] | (uint32_t)he.data[1] << 8, he.value, he.seq);
             }
-            const uint64_t next = hostQ.peek(he) && he.at < end ? he.at : end;
+            const uint64_t next = nextHost(he) && he.at < end ? he.at : end;
             outAt = pos;
             const uint32_t k = (uint32_t)(next - pos);
             const uint32_t i = (uint32_t)(pos & (kRingFrames - 1));
@@ -1001,6 +1019,7 @@ struct rfme final : rfm::HostParams::Panel {
             cEpoch = ep;
             primed = false;
             cMaxN = 0;
+            cLastAt = 0;
             changed = true;
         }
         if (rate != cRate) {                            // (a new rate: what was rendered at the old one goes)
@@ -1033,15 +1052,20 @@ struct rfme final : rfm::HostParams::Panel {
             }
         }
         if (live) {                                     // host MIDI and parameters, stamped with their ring position
+            // (and this stream's epoch. Before the ring is primed r stands still: a later render's event is never
+            // stamped before an earlier one's)
             const uint64_t lat = latency.load(std::memory_order_relaxed);
-            auto at = [&](uint32_t off) { return r + (off < n ? off : (n ? n - 1 : 0)) + lat; };
+            auto at = [&](uint32_t off) {
+                const uint64_t a = r + (off < n ? off : (n ? n - 1 : 0)) + lat;
+                return cLastAt = a > cLastAt ? a : cLastAt;
+            };
             uint32_t i = 0, j = 0;
             while (i < nev || j < npev) {               // (both in frame order: merged, MIDI first at a frame)
                 if (i < nev && (j >= npev || ev[i].offset <= pev[j].offset)) {
                     const rfme_midi_t &m = ev[i++];
                     if (m.len == 0 || !(m.data[0] & 0x80))
                         continue;
-                    HostEvent he{at(m.offset), (uint8_t)(m.len > 3 ? 3 : m.len), {m.data[0], m.data[1], m.data[2]}, 0, 0};
+                    HostEvent he{at(m.offset), (uint8_t)(m.len > 3 ? 3 : m.len), {m.data[0], m.data[1], m.data[2]}, 0, 0, ep};
                     if (hostQ.push(he))
                         midiInCount.fetch_add(1, std::memory_order_relaxed);
                     else
@@ -1051,7 +1075,7 @@ struct rfme final : rfm::HostParams::Panel {
                     if (q.index >= RFME_HP_COUNT)
                         continue;
                     const uint32_t seq = hpWrites[q.index].fetch_add(1, std::memory_order_acq_rel) + 1;
-                    HostEvent he{at(q.offset), 0, {(uint8_t)q.index, (uint8_t)(q.index >> 8), 0}, q.value, seq};
+                    HostEvent he{at(q.offset), 0, {(uint8_t)q.index, (uint8_t)(q.index >> 8), 0}, q.value, seq, ep};
                     (void)hostQ.push(he);
                 }
             }
@@ -1292,6 +1316,11 @@ void rfme_set_clock(rfme_t *e, int owner)
 }
 
 int rfme_clock(rfme_t *e) { return e->clock.load(); }
+
+uint32_t rfme_stream(rfme_t *e)
+{
+    return e->audioLive.load(std::memory_order_acquire) ? e->epoch.load(std::memory_order_acquire) << 1 | 1u : 0;
+}
 
 void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate) { rfme_render_midi(e, L, R, n, rate, nullptr, 0); }
 

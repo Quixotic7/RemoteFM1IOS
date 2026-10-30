@@ -38,6 +38,7 @@ struct rfmk {
     rfme_param_ev_t pev[kMaxParams] = {};       // the host's parameter changes (the AU's tree), in order
     uint32_t npev = 0;
     bool dropClock = false;                     // this buffer: the host's own clock bytes dropped (ours replace them)
+    uint32_t stream = 0;                        // the engine's stream the last buffer played to (rfme_stream)
 
     // read by any thread
     std::atomic<uint64_t> renders{0}, frames{0}, midiEvents{0}, sounding{0};
@@ -79,8 +80,15 @@ struct rfmk {
 
     // the host clock's messages for this buffer (in) merged into the queued MIDI by frame (the clock first at a
     // frame); off: a Stop if it was running. Render thread.
+    // A new stream (a core booted or changed, the audio clock back): the clock starts again for it, so the core
+    // gets a Start or a Song Position and Continue rather than clocks alone (what the old stream queued is dropped)
     void hostClock(const rfmhc_input_t &in, bool on)
     {
+        const uint32_t st = engine ? rfme_stream(engine) : 0;
+        if (st != stream) {
+            stream = st;
+            rfmhc_reset(&hc);
+        }
         uint32_t nc = 0;
         if (on) {
             nc = rfmhc_run(&hc, &in, clk, kMaxClock);

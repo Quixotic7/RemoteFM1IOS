@@ -101,6 +101,11 @@ void rfme_attach(rfme_t *e, int on);
 // who runs the clock; waits until the previous owner has left it
 void rfme_set_clock(rfme_t *e, int owner);
 int rfme_clock(rfme_t *e);
+// (real-time safe) the audio stream rfme_render plays now: a new value whenever one starts (a core loaded, booted,
+// unloaded or power cycled, the clock changing hands), 0 while none does (no core booted, not RFME_CLOCK_AUDIO). Host
+// MIDI a render queued for an earlier stream is dropped (it was meant for the core before); the current stream's
+// never is, also in its first renders. The AU starts its host clock again on a new stream (Start or Song Position)
+uint32_t rfme_stream(rfme_t *e);
 
 // RFME_CLOCK_AUDIO: n frames at `rate` into L and R (silence while not booted or not the owner). Real-time safe.
 void rfme_render(rfme_t *e, float *L, float *R, uint32_t n, double rate);

@@ -398,6 +398,14 @@ parameters), follows the host's clock and transport, and its MIDI out reaches th
 - **MIDI out.** The core's packets are stamped with the frame its clock ran that millisecond at (`render_frame()`, not
   the start of the 64-frame chunk), decoded into whole messages (1-3 bytes, SysEx up to 4 KiB) and given to
   `MIDIOutputEventBlock` at the render's sample time + their frame: a latency behind the host, with the core's sound.
+- **A stream's first buffers (fixed 2026-10-30).** Each host event is stamped with the engine's stream (its epoch);
+  when the core thread sees a new stream it drops only the earlier streams' events, never the current one's, so MIDI,
+  clock and parameter events in the AU's first renders (queued before the core thread noticed the boot) reach the core,
+  in order, any already past at the first chunk. Before, it emptied the queue: in a Release build Start and clock 0
+  were lost about 1 run in 3. A core change mid-stream (load, boot, power cycle, the clock changing hands) still drops
+  what the old stream queued, and the render block starts its host clock again for the new stream (`rfme_stream`):
+  Start, or Song Position and Continue. A controller's MIDI (`rfme_midi_in`) was never affected: it is dropped only
+  at a boot. Tested: `testMIDIInTheFirstRenderReachesTheCore` (20 fresh AUs), `testHostClockStartsAgainForANewCore`.
 - **Tested** (Mac): `HostClockTests` (start at 0, mid-song, 24 per beat over 64/512/4096-frame buffers at 44.1 and
   48 kHz, a tempo change, stop and continue, a relocate, loops wrapped at and inside a buffer, a count-in, jittered
   positions, no context); `AUMidiTests` through the real render block with a test core that echoes its MIDI in

@@ -203,6 +203,44 @@ final class AUMidiTests: XCTestCase {
         XCTAssertEqual(other, [[0xFC], [0xF2, 32, 0], [0xFB]])
     }
 
+    /// MIDI in the AU's very first render reaches the core, at its frame + the latency: the render queues it before
+    /// the core thread has seen the new stream (it used to drop the queue then: Start and clock 0 lost in a Release
+    /// build about 1 run in 3). A fresh AU each time, so the race is run 20 times
+    func testMIDIInTheFirstRenderReachesTheCore() throws {
+        var s = AUSettings()
+        s.keyChannel = .off
+        for k in 0..<20 {
+            let (au, log) = try makeAU(host: nil, settings: s)
+            render(au, count: 8, events: [(5, [0xB0, 7, 99]), (300, [0x90, 30, 100]), (700, [0x80, 30, 0])])
+            let lat = latency(au)
+            let got = log.items
+            XCTAssertEqual(got.map(\.bytes), [[0xB0, 7, 99], [0x90, 30, 100], [0x80, 30, 0]], "AU \(k)")
+            for (t, g) in zip([5, 300, 700], got) where !((t + lat)...(t + lat + block)).contains(g.time) {
+                XCTFail("AU \(k): \(g.bytes) at \(t): out at \(g.time), latency \(lat)")
+            }
+            XCTAssertEqual(au.status().midiEvents, 3)
+            if got.count != 3 { break }
+        }
+    }
+
+    /// a new core mid-song (a power cycle): what the old stream had queued goes, and the host clock starts again for
+    /// the new one: Song Position and Continue, then the clock
+    func testHostClockStartsAgainForANewCore() throws {
+        let host = HostSim()
+        let (au, log) = try makeAU(host: host)
+        render(au, host: host, count: 100)
+        XCTAssertEqual(log.items.first?.bytes, [0xFA])
+        var err = [CChar](repeating: 0, count: 256)
+        XCTAssertEqual(rfme_power_cycle(au.e, &err, 256), 1)
+        log.clear()
+        render(au, host: host, count: 40, from: 100 * frames)
+        let other = log.items.map(\.bytes).filter { $0 != [0xF8] }
+        XCTAssertEqual(other.count, 2, "\(other)")
+        XCTAssertEqual(other.first?.first, 0xF2)
+        XCTAssertEqual(other.last, [0xFB])
+        XCTAssertGreaterThan(log.items.filter { $0.bytes == [0xF8] }.count, 15)
+    }
+
     /// the setting off: no clock of ours; the host's own clock bytes pass. On: the host's are dropped
     func testHostClockSettingAndTheHostsOwnClock() throws {
         let host = HostSim()
