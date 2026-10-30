@@ -2,7 +2,8 @@
 // Copied from FM1VST v0.6.2 plugin/RemoteLink.h. Changed for RemoteFM1 iOS: Status also carries the unit's HELLO_R,
 // the session state and more of rfm_session_stats_t (budget, bytes, ACK times); requestRescan() (CoreMIDI's setup
 // changed). M4: the unit lock is optional (an empty lockPath: none; the lease of PLAN.md section 4 decides instead,
-// through a gate: below); drop(); a process-wide fake unit shared by several links (tests). Everything else as there.
+// through a gate: below); drop(); a process-wide fake unit shared by several links (tests); the unit's TRS MIDI in (MIDI_IN, popMidi).
+// Everything else as there.
 // Remote FM-1 (RemoteFM1 M3): a real M-VAVE FM-1 running the RemoteFM1 firmware as the panel of the core inside the
 // plugin. The protocol and the host library are RemoteFM1's (remote/RemoteFM1: docs/PROTOCOL.md, host/include/rfm);
 // this is fm1remote's design (host/tools/fm1remote/engine.h, main.cpp) inside a plugin instance.
@@ -127,6 +128,8 @@ public:
         uint32_t budget = 0, wireBytes = 0, bodyBytes = 0, ackMsLast = 0, ackMsAvg = 0, ackMsMax = 0;
         uint32_t ackTimeouts = 0, discoveries = 0, hold = 0, wireCap = 0, frameMs = 0;
         uint32_t drops = 0, gateBlocked = 0;        // (M4) runs dropped; shared-fake writes the gate refused
+        // (RemoteFM1 0.3, RFM_CAP_MIDI_IN) the unit's TRS MIDI in: messages queued for the core, lost (queue full)
+        uint32_t trsMidiIn = 0, trsMidiDropped = 0;
     };
     Status status() const;
     static const char *stateName(State s);
@@ -138,6 +141,13 @@ public:
     // unit held is up (the session ended or the unit was lost)
     static constexpr uint8_t kEvRelease = 0x80;
     bool popEvent(rfm_event_t &e) { return q_.pop(e); }
+    // (RemoteFM1 iOS, RFM_CAP_MIDI_IN) one MIDI message from the unit's TRS jack (MIDI_IN, split by status: a channel
+    // message or real time F8 FA FB FC), in order, for the core's MIDI in. Popped where the panel events are
+    struct MidiMsg {
+        uint8_t len = 0;
+        uint8_t data[3] = {0, 0, 0};
+    };
+    bool popMidi(MidiMsg &m) { return midiQ_.pop(m); }
     // true once after a run started or invalidateScreen(): publish now, whatever changed
     bool takeFullRequest() { return fullReq_.exchange(false, std::memory_order_acq_rel); }
     void requestFull() { fullReq_.store(true, std::memory_order_release); }   // (any thread: the next block publishes)
@@ -168,9 +178,9 @@ public:
 
 private:
     // single producer (the session thread), single consumer (the audio thread)
-    template <uint32_t N> class EventQueue {
+    template <uint32_t N, typename T = rfm_event_t> class EventQueue {
     public:
-        bool push(const rfm_event_t &e)
+        bool push(const T &e)
         {
             const uint32_t w = w_.load(std::memory_order_relaxed);
             if (w - r_.load(std::memory_order_acquire) >= N)
@@ -179,7 +189,7 @@ private:
             w_.store(w + 1, std::memory_order_release);
             return true;
         }
-        bool pop(rfm_event_t &e)
+        bool pop(T &e)
         {
             const uint32_t r = r_.load(std::memory_order_relaxed);
             if (r == w_.load(std::memory_order_acquire))
@@ -190,7 +200,7 @@ private:
         }
 
     private:
-        std::array<rfm_event_t, N> buf_{};
+        std::array<T, N> buf_{};
         std::atomic<uint32_t> w_{0}, r_{0};
     };
     // one writer (the audio thread), one reader (the session thread); the reader gets the newest published buffer
@@ -238,6 +248,7 @@ private:
     static void cbState(void *ctx, int st, const char *why);
     static void cbRescan(void *ctx);
     static void cbLog(void *ctx, const char *m);
+    static void cbMidiIn(void *ctx, const uint8_t *msgs, uint32_t n);
     static int loopWrite(void *ctx, const uint8_t *p, uint32_t n);
 
     Options opt_;
@@ -246,6 +257,7 @@ private:
     std::condition_variable cv_;
     std::atomic<bool> want_{false}, quit_{false}, engaged_{false}, fullReq_{false}, invalidate_{false}, rescan_{false};
     EventQueue<4096> q_;
+    EventQueue<1024, MidiMsg> midiQ_;                // (TRS MIDI in) the session thread -> the panel's consumer
     TripleBuffer tb_;
     // the session thread's own
     rfm_session *s_ = nullptr;
@@ -268,5 +280,6 @@ private:
     // the status (the session thread writes, anyone reads)
     mutable std::mutex stMu_;
     Status st_;
+    std::atomic<uint32_t> trsMidiIn_{0}, trsMidiDropped_{0};
     std::atomic<uint32_t> eventsIn_{0}, eventsDropped_{0}, snapshotsTaken_{0}, fullResends_{0}, runs_{0};
 };

@@ -744,9 +744,14 @@ struct rfme final : rfm::HostParams::Panel {
     void between(uint32_t ms, bool)
     {
         rfm_event_t ev;
-        if (link && attached.load(std::memory_order_relaxed))
+        if (link && attached.load(std::memory_order_relaxed)) {
             while (link->popEvent(ev))
                 apply(ev);
+            // the unit's TRS MIDI in (MIDI_IN): straight to the core's midi_in, as the website's site.midiIn (not
+            // learnt, not mapped, no keys: it is the firmware's own MIDI in)
+            for (RemoteLink::MidiMsg m; link->popMidi(m);)
+                toFirmware(m.data, m.len);
+        }
         while (in.pop(ev))
             apply(ev);
         syncMap();                                       // (M8: a new map lets go of what the old one held)

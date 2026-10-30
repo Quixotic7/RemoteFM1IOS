@@ -140,6 +140,8 @@ RemoteLink::Status RemoteLink::status() const
         s = st_;
     }
     s.eventsIn = eventsIn_.load();
+    s.trsMidiIn = trsMidiIn_.load();
+    s.trsMidiDropped = trsMidiDropped_.load();
     s.eventsDropped = eventsDropped_.load();
     s.snapshotsTaken = snapshotsTaken_.load();
     s.fullResends = fullResends_.load();
@@ -264,7 +266,7 @@ void RemoteLink::runOnce()
     sc.fps = opt_.fps;
     sc.host_name = opt_.hostName.c_str();
     sc.transport = RFM_T_AUTO;
-    const rfm_session_cb_t cb{this, cbEvent, cbState, cbRescan, cbLog};
+    const rfm_session_cb_t cb{this, cbEvent, cbState, cbRescan, cbLog, cbMidiIn};
     lastState_ = -1;
     wasConnected_ = false;
     statFrames_ = 0;
@@ -532,6 +534,23 @@ void RemoteLink::cbEvent(void *ctx, const rfm_event_t *e)
     self->eventsIn_.fetch_add(1);
     if (!self->q_.push(*e))
         self->eventsDropped_.fetch_add(1);
+}
+
+// the unit's TRS MIDI in (MIDI_IN; libremotefm1 checked the body: whole messages, each with its status): one queue
+// entry per message, for the core's MIDI in (the engine's toFirmware, as the website's site.midiIn)
+void RemoteLink::cbMidiIn(void *ctx, const uint8_t *msgs, uint32_t n)
+{
+    RemoteLink *self = static_cast<RemoteLink *>(ctx);
+    for (uint32_t k = 0; k < n;) {
+        const uint32_t m = rfm_midi_msg_len(msgs[k]);
+        if (!m || k + m > n)
+            break;
+        MidiMsg e;
+        e.len = (uint8_t)m;
+        std::memcpy(e.data, msgs + k, m);
+        (self->midiQ_.push(e) ? self->trsMidiIn_ : self->trsMidiDropped_).fetch_add(1);
+        k += m;
+    }
 }
 
 void RemoteLink::cbState(void *ctx, int st, const char *why)

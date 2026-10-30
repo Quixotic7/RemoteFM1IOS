@@ -314,6 +314,8 @@ public final class RemoteController {
         s.colors = st.colors
         s.eventsIn = st.events_in
         s.eventsDropped = st.events_dropped
+        s.trsMidiIn = st.trs_midi_in
+        s.trsMidiDropped = st.trs_midi_dropped
         s.snapshots = st.snapshots
         return s
     }

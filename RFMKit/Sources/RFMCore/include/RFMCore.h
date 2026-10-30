@@ -71,6 +71,9 @@ typedef struct {
     uint8_t proto, transports, usb_mode, session, max_in_flight;
     uint16_t caps, sxq, sx_body_max, bk_body_max, screen_w, screen_h;
     uint32_t drops, gate_blocked;   // (M4) runs dropped (the lease moved); writes the gate refused (shared fake)
+    // the unit's TRS MIDI in (RemoteFM1 0.3: caps RFM_CAP_MIDI_IN, MIDI_IN in a session): messages queued for the
+    // attached engine's core (its MIDI in, as the website's), lost (queue full)
+    uint32_t trs_midi_in, trs_midi_dropped;
 } rfmc_status_t;
 void rfmc_status(rfmc_t *c, rfmc_status_t *st);
 
@@ -93,6 +96,8 @@ void rfmc_fake_key(rfmc_t *c, uint32_t k, int down);
 void rfmc_fake_button(rfmc_t *c, uint32_t b, int down);
 void rfmc_fake_enc(rfmc_t *c, uint32_t e, int32_t detents);
 void rfmc_fake_master(rfmc_t *c, uint32_t adc);
+// MIDI into the fake's TRS jack (whole messages with their status): MIDI_IN to the host while a session runs
+void rfmc_fake_trs(rfmc_t *c, const uint8_t *msgs, uint32_t n);
 typedef struct {
     int session;                // 0 none, 1 SysEx, 2 bulk
     uint32_t frames, acks, held_frames, hellos;

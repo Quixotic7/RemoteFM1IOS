@@ -155,6 +155,7 @@ struct rfmc {
             }
             note(e);
         }
+        for (RemoteLink::MidiMsg m; link.popMidi(m);) {}   // (TRS MIDI in: no core here, dropped)
         aKeys.store(keys);
         aButtons.store(buttons);
         aMaster.store(master);
@@ -402,6 +403,8 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
     st->pending = s.pending;
     st->in_flight = s.inFlight;
     st->events_in = s.eventsIn;
+    st->trs_midi_in = s.trsMidiIn;
+    st->trs_midi_dropped = s.trsMidiDropped;
     st->events_dropped = s.eventsDropped;
     st->snapshots = s.snapshotsTaken;
     st->colors = s.colors;
@@ -506,6 +509,11 @@ void rfmc_fake_enc(rfmc_t *c, uint32_t e, int32_t detents)
 void rfmc_fake_master(rfmc_t *c, uint32_t adc)
 {
     c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_master(f, adc); });
+}
+
+void rfmc_fake_trs(rfmc_t *c, const uint8_t *msgs, uint32_t n)
+{
+    c->link.withFake([&](rfm_fake *f) { if (f && msgs) rfm_fake_trs(f, msgs, n); });
 }
 
 int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out)

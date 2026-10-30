@@ -79,6 +79,7 @@ public struct LinkStats: Sendable, Equatable {
     public var ble = false, hold = false
     public var held: UInt32 = 0, reduced: UInt32 = 0, refined: UInt32 = 0, colors: UInt32 = 0
     public var eventsIn: UInt32 = 0, eventsDropped: UInt32 = 0, snapshots: UInt32 = 0
+    public var trsMidiIn: UInt32 = 0, trsMidiDropped: UInt32 = 0   // the unit's TRS MIDI in (RFM_CAP_MIDI_IN) to the core
     public init() {}
 }
 

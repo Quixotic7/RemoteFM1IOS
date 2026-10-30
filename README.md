@@ -41,7 +41,7 @@ screen, the test pattern and the AU test).
   build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
   profiler).
 - `RFMKit/`: a Swift package.
-  - `CRemoteFM1`: libremotefm1 (RemoteFM1 v0.2.2), its macOS glue `host.c` and FM1VST's CoreMIDI back end
+  - `CRemoteFM1`: libremotefm1 (`vendor/RemoteFM1`: RemoteFM1's `standalone` branch at fa97a90, with MIDI_IN, the TRS jack's MIDI), its macOS glue `host.c` and FM1VST's CoreMIDI back end
     `RemoteMidi.c`, compiled in place from `vendor/` through the `RFMKit/vendor` symlink. Built with `RFM_NO_LIBUSB`.
   - `CWasm3`: wasm3 v0.5.0 (MIT, unchanged; its README says from where), the interpreter for imported firmware.
   - `RFMCore`: a copy of FM1VST's `RemoteLink` (its header says what changed), fm1remote's test patterns, and a C API
@@ -58,7 +58,9 @@ screen, the test pattern and the AU test).
     `CoreState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel, About this firmware and the
     Diagnostics view; `Install/`: installing RemoteFM1 on the FM-1 with FM1Kit (the releases, the package checks,
     `FirmwareInstaller`, its page; tested by `FirmwareInstallTests` on FM1Kit's SimulatedFM1).
-- `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`remote/RemoteFM1` and `cores/ChoralRootFM1`, `cores/Felucca`
+- `vendor/RemoteFM1`: RemoteFM1 (host library MPL-2.0) at fa97a90 (`standalone`: MIDI_IN) as a git submodule, for
+  libremotefm1 and fm1remote's patterns. Read-only.
+- `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`plugin/RemoteMidi.c` and `cores/ChoralRootFM1`, `cores/Felucca`
   with its `firmware/engines`, `cores/melodee`). Read-only.
 - `vendor/FIZZ`: FIZZ v0.12.0-beta.12 (MPL-2.0) as a git submodule (its own submodule, fm1-base, is not needed).
   Read-only.
@@ -71,10 +73,10 @@ screen, the test pattern and the AU test).
 
 ## Build
 
-    git submodule update --init vendor/FM1VST vendor/FIZZ vendor/saadet vendor/fm1-base vendor/boardwalk
+    git submodule update --init vendor/RemoteFM1 vendor/FM1VST vendor/FIZZ vendor/saadet vendor/fm1-base vendor/boardwalk
     git -C vendor/boardwalk submodule update --init base
     git submodule update --init vendor/loom && git -C vendor/loom submodule update --init base
-    git -C vendor/FM1VST submodule update --init remote/RemoteFM1 cores/ChoralRootFM1 cores/melodee
+    git -C vendor/FM1VST submodule update --init cores/ChoralRootFM1 cores/melodee
     git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
 
 The cores need CMake and a python3 with Pillow and fontTools (`CR_PYTHON=...`; the default is python.org's 3.11):
@@ -153,7 +155,7 @@ PNG back.
 
 libremotefm1's own tests, built outside the source tree:
 
-    cmake -S vendor/FM1VST/remote/RemoteFM1/host -B /tmp/rfm-host -DRFM_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
+    cmake -S vendor/RemoteFM1/host -B /tmp/rfm-host -DRFM_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
     cmake --build /tmp/rfm-host -j 8 && (cd /tmp/rfm-host && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure)
 
 ## Imported firmware (.rfm1)

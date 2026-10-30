@@ -1,13 +1,13 @@
 // swift-tools-version: 6.0
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// RFMKit: libremotefm1 and FM1VST's CoreMIDI back end (in place, from vendor/FM1VST, through the vendor symlink),
+// RFMKit: libremotefm1 (vendor/RemoteFM1) and FM1VST's CoreMIDI back end (vendor/FM1VST), in place through the vendor symlink,
 // RemoteLink (a copy, RFMCore/RemoteLink.h says what changed), the AUv3's render kernel and M2's probes, and the Swift
 // API the app and the extension use. FM1Kit (MIT, github.com/ocean/FM1Kit): installing RemoteFM1 on the FM-1 (Install/).
 import PackageDescription
 
-let rfm = "remote/RemoteFM1"            // inside vendor/FM1VST
-let vendorRFM = "../../vendor/FM1VST/remote/RemoteFM1"   // the same, from Sources/RFMCore
+let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 0.3 (standalone, fa97a90: MIDI_IN), its own submodule
+let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
 
 let package = Package(
@@ -26,7 +26,7 @@ let package = Package(
         // which leaves only its stubs (host.c links against them), as FM1VST does without libusb.
         .target(
             name: "CRemoteFM1",
-            path: "vendor/FM1VST",
+            path: "vendor",
             sources: [
                 "\(rfm)/host/src/codec.c",
                 "\(rfm)/host/src/fake.c",
@@ -36,7 +36,7 @@ let package = Package(
                 "\(rfm)/host/src/tiles_ref.c",
                 "\(rfm)/host/src/macos/host.c",
                 "\(rfm)/host/src/macos/usb.c",
-                "plugin/RemoteMidi.c",
+                "FM1VST/plugin/RemoteMidi.c",
             ],
             publicHeadersPath: "\(rfm)/host/include",
             cSettings: [
@@ -44,7 +44,7 @@ let package = Package(
                 .headerSearchPath("\(rfm)/proto"),
                 .headerSearchPath("\(rfm)/firmware/src"),
                 .headerSearchPath("\(rfm)/host/src/macos"),
-                .headerSearchPath("plugin"),
+                .headerSearchPath("FM1VST/plugin"),
                 .define("RFM_NO_LIBUSB", to: "1"),
             ],
             linkerSettings: [.linkedFramework("CoreMIDI"), .linkedFramework("CoreFoundation")]

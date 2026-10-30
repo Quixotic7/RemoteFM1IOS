@@ -17,7 +17,7 @@ One app, two forms: a standalone app and an AUv3 instrument (AUM, Logic for iPad
 
 | Piece | From | On iOS |
 | --- | --- | --- |
-| libremotefm1: codec, screen encoder, panel, session, fake unit (`host/src/*.c`, `host/include/rfm`, `proto/rfm1.h`) | RemoteFM1 v0.2.2 | as is: portable C99, no OS calls. Bluetooth pacing, lossy tiles and HOLD (whole screen changes) are already in it |
+| libremotefm1: codec, screen encoder, panel, session, fake unit (`host/src/*.c`, `host/include/rfm`, `proto/rfm1.h`) | RemoteFM1 `standalone` (fa97a90, MPL-2.0; `vendor/RemoteFM1`, its own submodule) | as is: portable C99, no OS calls. Bluetooth pacing, lossy tiles and HOLD (whole screen changes) are already in it; 0.3's MIDI_IN (the TRS jack's MIDI) too |
 | CoreMIDI back end (`plugin/RemoteMidi.c` + `RemoteCandidates.h`, RemoteFM1's `host/src/macos/host.c` glue) | FM1VST 0.6.2 | CoreMIDI's API is the same on iOS; built with `RFM_NO_LIBUSB` (no vendor bulk on iOS: SysEx only, over Bluetooth or USB) |
 | `RemoteLink` (session thread, event queue, triple buffer) | FM1VST `plugin/RemoteLink.*` (no JUCE) | as is, except its unit lock (flock), which is replaced by the lease in section 4 |
 | Device (clock, resampler), core descriptor ABI 6 (`engine/`, `core-api/fm1core.h`) | FM1VST | as is |
@@ -372,6 +372,16 @@ reference for behaviour and wording; the stored map uses its ids, so a map reads
   (PanelMidiTests). Simulator screenshots: the MIDI page, the input list, learn mode (`-learn`, `-learnpick KN1`,
   `-demomap`), the AU's Knobs from MIDI page and learn mode (`AUPAGE=midi scripts/sim_autest.sh`), the Keys from MIDI
   and Knob mode pages (`-sheetpage keychannel|midimode`, `AUPAGE=keychannel|midimode`).
+- **The FM-1's TRS MIDI in (app and AU).** RemoteFM1 0.3 (caps bit 9, `RFM_CAP_MIDI_IN`) forwards the MIDI arriving
+  at the unit's TRS jack in a session (MIDI_IN 0x54: 1..64 bytes of whole messages, channel and real time;
+  RemoteFM1's docs/TRS-MIDI-HOSTS.md). libremotefm1 checks the body and calls the session's `midi_in`;
+  `RemoteLink::cbMidiIn` splits it by status into a queue (`popMidi`, session thread -> one consumer), and the engine
+  that is attached to the link (the app's, or the AU instance owning the lease) pops it next to the panel events
+  and sends each message straight to the core's MIDI in (`toFirmware`: not learnt, not mapped, no keys), as the
+  website does (`site.midiIn`, the firmware's own MIDI in). A clock from the jack goes there too, alongside the AU's
+  host clock if that is on. Counted in Diagnostics › Link ("TRS MIDI in"; `rfmc_status_t.trs_midi_in`). An older
+  firmware never sends it: nothing changes. Tested: TrsMidiTests (the fake unit's jack, `rfmc_fake_trs`, through
+  the echo core: split, in order, several bodies). A real FM-1 with 0.3: not yet.
 - **Device only, not tested yet.** A real MIDI keyboard or controller (USB, Bluetooth), learning from it and the mode
   guess on its knobs, a learned control in an AU host (AUM) routing MIDI to the instance, a real OMX-27 (its REMOTE
   firmware, the handshake, LEDs and screen pacing over USB on iOS, auto-reconnect on plugging in), the OMX in the
