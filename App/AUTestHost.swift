@@ -2,10 +2,11 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // The AU test (M2): this app as a minimal AUv3 host for its own extension. It finds the component, loads two
 // instances out of process, plays them (silence) on an AVAudioEngine with a MIDI note, collects each instance's
-// probe report through the AU's message channel, saves one instance's fullState into a third, shows the AU's view,
-// and writes everything to autest.json (Documents, and the App Group container when there is one). With -autest it
-// runs by itself at launch and then asks the extension to present its Bluetooth panel (autest-bt.json); with -aupage
-// <midi | learn | learn:KN1 | window> (M8) it asks the view for that page instead (autest-page.json).
+// probe report through the AU's message channel, checks its parameter tree from the host's side (PLAN.md section
+// 12), saves one instance's fullState into a third, shows the AU's view, and writes everything to autest.json
+// (Documents, and the App Group container when there is one). With -autest it runs by itself at launch and then
+// asks the extension to present its Bluetooth panel (autest-bt.json); with -aupage <midi | learn | learn:KN1 |
+// window> (M8) it asks the view for that page instead (autest-page.json).
 //
 // It never starts the FM-1 link, and the probes never send MIDI or connect to an endpoint.
 
@@ -145,6 +146,37 @@ final class AUTestHost {
         if let st = statusReport(units[0]) {
             step("host clock", st.clockMsgs == 0,
                  "\(st.clockMsgs) clock messages sent, state \(st.hostClock) (1: the host gives no tempo or transport)")
+        }
+
+        // (PLAN.md section 12) the parameter tree as the host sees it, out of process; the first Tier 2 slot's
+        // value text from the extension, and a host write reaching the firmware (the instance is past its boot's
+        // grace: the engine ran 2 s)
+        if let tree = units[0].auAudioUnit.parameterTree {
+            let all = tree.allParameters
+            let ids = Set(all.map(\.identifier))
+            let want = ["knob_master", "knob_select", "knob_4", "btn_fx", "btn_octup", "key_00", "key_26", "t2_00", "t2_79"]
+            let st = statusReport(units[0])
+            step("parameter tree", all.count == RFMAudioUnit.parameterCount && want.allSatisfy(ids.contains)
+                    && st?.parameters == all.count,
+                 "\(all.count) parameters (want \(RFMAudioUnit.parameterCount)), the extension says \(st?.parameters ?? -1); "
+                    + "missing \(want.filter { !ids.contains($0) }); \(st?.paramsBound ?? 0) firmware slots bound")
+            if let p = tree.parameter(withAddress: 49), (st?.paramsBound ?? 0) > 0 {
+                var lo: AUValue = 0, hi: AUValue = 1
+                let a = p.string(fromValue: &lo), b = p.string(fromValue: &hi)
+                let name = a.components(separatedBy: ": ").first ?? ""
+                p.setValue(1, originator: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                let v1 = paramValue(units[0], name)
+                p.setValue(0, originator: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                let v0 = paramValue(units[0], name)
+                step("parameter write", !name.isEmpty && v1 != nil && v0 != nil && v1 != v0,
+                     "P01 \"\(a)\" .. \"\(b)\"; \(name) after 1: \(v1.map(String.init) ?? "?"), after 0: \(v0.map(String.init) ?? "?")")
+            } else {
+                step("parameter write", nil, "the instance's firmware has no parameter map")
+            }
+        } else {
+            step("parameter tree", false, "no parameter tree")
         }
 
         // 5: the other process's side of the App Group checks: ask each instance to ping, then read both sides
@@ -319,6 +351,15 @@ final class AUTestHost {
         if let j = m["json"] as? String { r.report = ProbeReport.decode(Data(j.utf8)) }
         if r.instance == nil && m["ok"] == nil { r.error = "empty reply: \(m)" }
         return r
+    }
+
+    /// a firmware parameter of the instance's core, by name ("param")
+    private func paramValue(_ u: AVAudioUnit, _ name: String) -> Int? {
+        let sel = NSSelectorFromString("messageChannelFor:")
+        guard let obj = u.auAudioUnit.perform(sel, with: RFMShared.diagnosticsChannel)?.takeUnretainedValue(),
+              let ch = obj as? AUMessageChannel, let call = ch.callAudioUnit
+        else { return nil }
+        return (call(["cmd": "param", "name": name])["value"] as? NSNumber)?.intValue
     }
 
     /// the instance's AUReport ("status")

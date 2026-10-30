@@ -138,6 +138,7 @@ public struct CoreState: Equatable, Sendable {
     public static let settingsKey = "rfm1.settings"
     public static let kindKey = "rfm1.coreKind"
     public static let sha256Key = "rfm1.coreSHA256"
+    public static let masterKey = "rfm1.master"
 
     public var core: String
     public var version: String
@@ -145,15 +146,17 @@ public struct CoreState: Equatable, Sendable {
     public var settings: AUSettings
     public var kind: String                     // "native" | "wasm"
     public var sha256: String                   // an imported file's ("" for a built-in core)
+    public var master: Int?                     // the MASTER pot, 0..1023 (not in the flash); nil: the core's default
 
     public init(core: String, version: String, flash: Data?, settings: AUSettings = AUSettings(), kind: String = "native",
-                sha256: String = "") {
+                sha256: String = "", master: Int? = nil) {
         self.core = core
         self.version = version
         self.flash = flash
         self.settings = settings
         self.kind = kind
         self.sha256 = sha256
+        self.master = master
     }
 
     /// the firmware this state names, for CoreRef.resolve
@@ -167,6 +170,7 @@ public struct CoreState: Equatable, Sendable {
         settings = AUSettings(d[Self.settingsKey] as? [String: Any])
         kind = d[Self.kindKey] as? String ?? "native"
         sha256 = d[Self.sha256Key] as? String ?? ""
+        master = (d[Self.masterKey] as? NSNumber).map { max(0, min(1023, $0.intValue)) }
         flash = nil
         if let z = d[Self.flashKey] as? Data {
             let n = (d[Self.flashSizeKey] as? NSNumber)?.intValue ?? 0
@@ -184,6 +188,7 @@ public struct CoreState: Equatable, Sendable {
         d[Self.settingsKey] = settings.dict
         d[Self.kindKey] = kind
         if !sha256.isEmpty { d[Self.sha256Key] = sha256 }
+        if let master { d[Self.masterKey] = master }
         if let flash {
             if let z = try? (flash as NSData).compressed(using: .lzfse) as Data {
                 d[Self.flashKey] = z

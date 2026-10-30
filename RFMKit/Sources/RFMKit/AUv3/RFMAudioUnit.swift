@@ -22,6 +22,8 @@
 //   M7           imported .rfm1 firmware too (the app's mirror in the App Group: FirmwareCatalog), run in wasm3; the
 //                catalog keys (CoreInfo.id) pick a core; fullState keeps its kind and SHA-256 and a restore resolves
 //                them (CoreRef.resolve: the same file, else the same firmware with a note, else as before)
+//   parameters   the parameter tree (HostParameters, PLAN.md section 12): FM1VST's knobs, buttons, keys and Tier 2
+//                slots, for a host's MIDI control and automation; fullState keeps MASTER (the flash has the rest)
 //
 // It lives in RFMKit, not in the extension, so the Mac tests can create and render it directly.
 
@@ -53,6 +55,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     private var tornDown = false
     let e: OpaquePointer                        // rfme_t (the faceplate plays it: PanelEngineHost)
     private let mapFollower: MidiMapFollower    // (M8) the global learned map, kept by the engine
+    let hostParams: HostParameters              // the parameter tree
     private let link: OpaquePointer?            // rfmc_t
     public let session: PanelSession?
     public let backend: String                  // "none", "fake", "shared fake", "device"
@@ -133,6 +136,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         }
         e = rfme_new(link)
         mapFollower = MidiMapFollower(engine: e)
+        hostParams = HostParameters(engine: e)
         rfmk_set_engine(k, e)
         instanceState = state
 
@@ -178,6 +182,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             }
         }
         startTimer()
+        hostParams.start()
     }
 
     /// M2's: runProbes false is the Mac tests' AU (no core, no panel, no CoreMIDI)
@@ -202,6 +207,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         timer?.cancel()
         Self.unregister(self)
         rfmSetRenderContextEngine(nil)
+        hostParams.detach()
         mapFollower.stop()
         rfme_free(e)                            // (the clock stopped, the slot released; before the link goes)
         if let session { session.finish() }     // (the link and the lease freed in the background)
@@ -262,6 +268,21 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 
     public override var internalRenderBlock: AUInternalRenderBlock { rfmk_render_block(kernel) }
 
+    /// the parameter tree's size (the AU test)
+    public static let parameterCount = HostParameters.count
+
+    /// fixed for the AU's life (names and ranges never change: HostParameters)
+    public override var parameterTree: AUParameterTree? {
+        get { hostParams.tree }
+        set {}
+    }
+
+    /// Knob 1..4, Knob Master, Select, Presets, Algo
+    public override func parametersForOverview(withCount count: Int) -> [NSNumber] {
+        let order = [4, 5, 6, 7, 0, 1, 2, 3]
+        return order.prefix(max(0, count)).map { NSNumber(value: $0) }
+    }
+
     public override var fullState: [String: Any]? {
         get {
             var s = super.fullState ?? [:]
@@ -289,6 +310,9 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
                     let flash = r.keepFlash ? c.flash : nil
                     _ = loadLocked(r.key, flash: flash, from: !r.keepFlash ? "a fresh flash"
                                    : flash == nil ? "a fresh flash (none saved)" : "the saved flash")
+                    if let m = c.master {               // (the pot isn't in the flash)
+                        _ = rfme_event(e, UInt8(RFMC_EV_MASTER), 0, Int16(m))
+                    }
                     coreNote = r.note
                     unrestored = r.keepFlash ? nil : c
                     if !r.keepFlash && !coreNote.isEmpty { coreNote += " (the saved state is kept)" }
@@ -425,8 +449,10 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             if !got && !buf.isEmpty {
                 got = buf.withUnsafeMutableBufferPointer { rfme_final_flash(e, $0.baseAddress, UInt32($0.count)) } != 0
             }
+            var m = rfme_hp_param_t()                   // (MASTER as the last parameter sync saw it)
+            let master = rfme_hp_param(e, UInt32(RFME_HP_MASTER), &m) != 0 && hostParams.info.seq != 0 ? Int(m.plain) : nil
             return CoreState(core: info.firmwareID, version: info.version, flash: got ? Data(buf) : nil,
-                             settings: settings_, kind: info.kind, sha256: info.sha256)
+                             settings: settings_, kind: info.kind, sha256: info.sha256, master: master)
         }
     }
 
@@ -448,6 +474,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         public var hostClock = 0
         public var hostTempo = 0.0, hostBeat = 0.0
         public var clockMsgs: UInt32 = 0, clockDropped: UInt32 = 0
+        /// the parameter tree: one line, the Tier 2 slots bound, the host's parameter changes seen in renders
+        public var paramsText = "", paramsBound = 0, paramEvents: UInt32 = 0
         public init() {}
 
         public var hostClockText: String {
@@ -492,6 +520,10 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         s.hostBeat = k.host_beat
         s.clockMsgs = k.clock_msgs
         s.clockDropped = k.clock_dropped
+        s.paramEvents = k.param_events
+        let hp = hostParams.info
+        s.paramsText = HostParameters.line(hp)
+        s.paramsBound = Int(hp.t2_bound)
         var r = rfme_status_t()
         rfme_status(e, &r)
         s.midiIn = r.midi_in
@@ -765,6 +797,7 @@ public struct AUReport: Codable, Sendable {
     public var transpose = 0
     public var slots = ""                       // how the native cores were found (RFMAudioUnit.slotsLine)
     public var hostClock = 0, clockMsgs = 0, clockDropped = 0
+    public var parameters = 0, paramsBound = 0  // the parameter tree's size; Tier 2 slots bound now
 
     public init() {}
 
@@ -814,6 +847,8 @@ public struct AUReport: Codable, Sendable {
         hostClock = s.hostClock
         clockMsgs = Int(s.clockMsgs)
         clockDropped = Int(s.clockDropped)
+        parameters = au.parameterTree?.allParameters.count ?? 0
+        paramsBound = s.paramsBound
         if let p = s.panel {
             owner = p.owner
             ownerName = p.ownerName

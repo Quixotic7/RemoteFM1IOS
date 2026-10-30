@@ -237,6 +237,7 @@ struct AUSheet: View {
             ("clock", ["stopped", "audio", "timer (no sound)", "caller"][min(max(c.clock, 0), 3)]),
             ("MIDI", "in \(s.midiIn) (\(s.midiNotes) notes), out \(s.midiOutMsgs)"),
             ("host clock", s.hostClockText),
+            ("parameters", s.paramsText),
             ("flash", "\(c.flashSize / 1024) KiB, from \(s.bootedFrom.isEmpty ? "–" : s.bootedFrom)"),
             ("cores", RFMAudioUnit.slotsLine.isEmpty ? "–" : RFMAudioUnit.slotsLine),
         ]
