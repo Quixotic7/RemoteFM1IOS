@@ -236,7 +236,7 @@ struct rfme {
     std::atomic<int> rtOk{0};
     bool timerRebase = true;                // (the core thread's)
     bool producing = false;                 // (the core thread's) inside produce(): the MIDI out is kept
-    uint64_t outAt = 0;                     // (the core thread's) the ring position being rendered
+    uint64_t outAt = 0;                     // (the core thread's) the ring position of the render running
 
     // ---- THE RING (RFME_CLOCK_AUDIO). One producer (the core thread: posW), one consumer (the audio callback:
     // posR); positions count frames since the engine was made and never wrap. The producer keeps it filled to
@@ -662,7 +662,7 @@ struct rfme {
         for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
             midiOut.fetch_add(1, std::memory_order_relaxed);
             if (keep)
-                (void)midiOutQ.push(OutPacket{outAt, pkt});
+                (void)midiOutQ.push(OutPacket{outAt + dev->render_frame(), pkt});   // (its frame in the ring)
         }
         if (!halted.load(std::memory_order_relaxed) && dev->halted()) {
             haltCode.store((uint32_t)dev->core().halted(), std::memory_order_relaxed);
@@ -857,8 +857,10 @@ struct rfme {
             const uint32_t i = (uint32_t)(pos & (kRingFrames - 1));
             const uint32_t first = k < kRingFrames - i ? k : kRingFrames - i;
             dev->render(bufL.get() + i, bufR.get() + i, first, rate);
-            if (k > first)
+            if (k > first) {                            // (the ring wraps)
+                outAt = pos + first;
                 dev->render(bufL.get(), bufR.get(), k - first, rate);
+            }
             pos = next;
         }
         flushMidiIn();

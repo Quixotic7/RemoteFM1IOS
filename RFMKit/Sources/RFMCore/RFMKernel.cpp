@@ -19,6 +19,7 @@ void rfmk_free(rfmk_t *k)
         return;
     rfmp_ticker_stop(k->ticker);
     rfmk_drop_midi_out(k);
+    rfmk_drop_host_blocks(k);
     delete k;
 }
 
@@ -33,6 +34,7 @@ int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max
     k->maxFrames = max_frames;
     k->storage.assign((size_t)channels * max_frames, 0.0f);
     k->scratch.assign(max_frames, 0.0f);
+    rfmhc_reset(&k->hc);                        // (not rendering: the render thread's state)
     k->bufs.resize(channels);
     for (uint32_t c = 0; c < channels; c++)
         k->bufs[c] = k->storage.data() + (size_t)c * max_frames;
@@ -69,7 +71,14 @@ void rfmk_stats(rfmk_t *k, rfmk_stats_t *out)
     const uint64_t f = k->levelFrames.load(std::memory_order_relaxed);
     out->level_frames = f;
     out->level_rms = f ? std::sqrt(k->levelSum.load(std::memory_order_relaxed) / (2.0 * (double)f)) : 0.0;
+    out->host_clock = k->hostState.load(std::memory_order_relaxed);
+    out->host_tempo = k->hostTempo.load(std::memory_order_relaxed);
+    out->host_beat = k->hostBeat.load(std::memory_order_relaxed);
+    out->clock_msgs = k->clockMsgs.load(std::memory_order_relaxed);
+    out->clock_dropped = k->clockDropped.load(std::memory_order_relaxed);
 }
+
+void rfmk_set_host_clock(rfmk_t *k, int on) { k->hostClockOn.store(on != 0, std::memory_order_relaxed); }
 
 void rfmk_reset_level(rfmk_t *k) { k->levelReset.store(true, std::memory_order_relaxed); }
 

@@ -126,8 +126,10 @@ void CoreDevice::render(float *L, float *R, uint32_t n, double host_rate)
     }
     if (host_rate == (double)FM1P_FS) {     // bypass: the device's samples as they are
         rs_rate_ = 0;
-        for (uint32_t k = 0; k < n; k++)
+        for (uint32_t k = 0; k < n; k++) {
+            at_ = k;
             pop(L[k], R[k]);
+        }
         return;
     }
     if (rs_rate_ != host_rate) {
@@ -135,6 +137,7 @@ void CoreDevice::render(float *L, float *R, uint32_t n, double host_rate)
         rs_rate_ = host_rate;
     }
     for (uint32_t k = 0; k < n; k++) {
+        at_ = k;
         while (rs_.need()) {
             float l, r;
             pop(l, r);

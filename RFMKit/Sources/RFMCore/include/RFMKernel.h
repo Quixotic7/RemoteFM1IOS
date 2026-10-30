@@ -34,9 +34,17 @@ typedef struct {
     uint32_t midi_out_msgs;     // MIDI messages given to the host's MIDI output
     double level_rms;           // the output's RMS since the last rfmk_reset_level (full scale 1.0)
     uint64_t level_frames;
+    // the host's clock (rfmk_set_host_clock): 0 off, 1 on but the host gives no tempo or transport, 2 stopped,
+    // 3 moving; its last tempo and beat; messages sent to the core; the host's own clock bytes dropped
+    int host_clock;
+    double host_tempo, host_beat;
+    uint32_t clock_msgs, clock_dropped;
 } rfmk_stats_t;
 void rfmk_reset_level(rfmk_t *k);
 void rfmk_stats(rfmk_t *k, rfmk_stats_t *out);
+// (any thread) the host's tempo and transport as MIDI clock to the core (RFMHostClock.h; default on); while on,
+// clock and transport bytes in the host's MIDI are dropped (when the host gives its tempo and transport)
+void rfmk_set_host_clock(rfmk_t *k, int on);
 
 // one render with no host (the Mac tests): frames into `channels` buffers, plus up to one MIDI message
 void rfmk_render_test(rfmk_t *k, float *const *bufs, uint32_t channels, uint32_t frames, const uint8_t *midi,
@@ -55,6 +63,9 @@ extern "C" {
 AUInternalRenderBlock rfmk_render_block(rfmk_t *k);
 // the host's MIDI output (AUAudioUnit.MIDIOutputEventBlock, nil: none); set in allocateRenderResources
 void rfmk_set_midi_out(rfmk_t *k, AUMIDIOutputEventBlock block);
+// the host's musical context and transport (nil: none), read every render for the clock; set in
+// allocateRenderResources
+void rfmk_set_host_blocks(rfmk_t *k, AUHostMusicalContextBlock musical, AUHostTransportStateBlock transport);
 #ifdef __cplusplus
 }
 #endif
