@@ -264,17 +264,16 @@ public struct InstallFirmwarePage: View {
         let to = s.package.title
         switch s.kind {
         case .remoteFM1(let from):
-            let v = RemoteFM1Version(string: s.package.version)
-            let what = v.map { $0 > from ? "an update" : $0 < from ? "a step back" : "a reinstall" } ?? "a change"
-            return "From RemoteFM1 \(from) to \(to): \(what). FM1Kit counts any change between custom firmwares as a "
-                + "firmware switch, which can erase an FM-1's projects and samples, so confirm it."
+            guard let v = RemoteFM1Version(string: s.package.version) else { return "Replaces RemoteFM1 \(from) with \(to)." }
+            return v > from ? "Updates RemoteFM1 \(from) to \(v)." : v < from ? "Goes back from RemoteFM1 \(from) to \(v)."
+                : "Installs RemoteFM1 \(v) again."
         case .switching:
             return "This switches the FM-1 from \(s.deviceName) (\(s.deviceIdentity)) to \(to). Switching firmware can erase "
                 + "the FM-1's projects and samples: back them up in its current firmware first."
         case .sameIdentity:
             return "\(to) is already on the FM-1. Reinstalling it writes it again."
         case .reinstall:
-            return "FM1Kit won't install this over itself."
+            return "This can't be installed over itself."
         case .midUpdate:
             return "The FM-1 is waiting part-way through an update (it reports \(s.deviceIdentity)). Finish it with \(to)."
         }
