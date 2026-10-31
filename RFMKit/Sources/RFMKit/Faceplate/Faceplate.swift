@@ -27,8 +27,23 @@ import SwiftUI
     public var stepNumbers = false                  // step numbers 1-16 on the naturals (Settings)
     public var sheetOpen = false
     public var editorOpen = false
+    public var displayAlone = false                 // the display alone, full size (a double tap on it)
+    public var firmwareName: String?                // the running firmware: the status row's word
+    @ObservationIgnored public var onWord: (() -> Void)?   // a tap on the word (the host's Firmware panel)
 
     public init() {}
+
+    /// the status row's word: the firmware's name in capitals, REMOTE FM1 without one
+    public nonisolated static func word(_ firmware: String?) -> String {
+        let n = (firmware ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "REMOTE FM1" : n.uppercased()
+    }
+
+    public var word: String { Self.word(firmwareName) }
+
+    public func showDisplay(_ on: Bool) {
+        withAnimation(.easeInOut(duration: 0.25)) { displayAlone = on }
+    }
 
     public func move(_ d: Int) {
         let all = Page.allCases
@@ -98,11 +113,16 @@ public struct FaceplateView: View, @MainActor Equatable {
                                          openSheet: openSheet)
                     case .controls: ControlsView(feed: feed, ui: ui, theme: theme, chip: chip, size: size, chrome: chrome,
                                                  openSheet: openSheet)
-                    case .screen: ScreenOnlyView(feed: feed, theme: theme, chip: chip, size: size, chrome: chrome,
+                    case .screen: ScreenOnlyView(feed: feed, ui: ui, theme: theme, chip: chip, size: size, chrome: chrome,
                                                  openSheet: openSheet)
                     }
                 }
                 .transition(.opacity)
+                if ui.displayAlone {
+                    FullDisplay(feed: feed, ui: ui)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                        .zIndex(1)
+                }
             }
             .frame(width: size.width, height: size.height)
         }
@@ -129,6 +149,7 @@ struct StatusRow: View {
     let spec: FaceplateLayout.Status
     let m: FaceplateLayout.Mapper
     var word = "REMOTE FM1"
+    var onWord: (() -> Void)?
     let openSheet: () -> Void
 
     var body: some View {
@@ -142,7 +163,12 @@ struct StatusRow: View {
                     .font(RFMFonts.hardware(spec.wordFont * s))
                     .tracking(spec.wordFont * s * spec.wordTracking)
                     .foregroundStyle(theme.label.color)
-                    .accessibilityAddTraits(.isHeader)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onWord?() }
+                    .accessibilityAddTraits(onWord == nil ? .isHeader : [.isHeader, .isButton])
+                    .accessibilityHint(onWord == nil ? "" : "Opens the firmware")
             }
             Grabber(theme: theme, width: spec.grabberWidth * s, bar: spec.barWidth * s, open: openSheet)
         }
@@ -239,7 +265,7 @@ struct FullView: View {
         let s = m.s
         ZStack(alignment: .topLeading) {
             if chrome, let st = L.status {
-                StatusRow(theme: theme, chip: chip, spec: st, m: m, openSheet: openSheet)
+                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, openSheet: openSheet)
             } else if chrome, let gr = L.grabber {
                 Grabber(theme: theme, width: gr.width * s, bar: 40 * s, height: gr.height * s, open: openSheet)
                     .position(x: size.width / 2, y: max(22, m.y(gr.midY)))
@@ -253,7 +279,7 @@ struct FullView: View {
                 .place(m.rect(o.x, o.y, o.width, o.height))
             // the display
             let ds = L.displaySize * s
-            DisplayView(screen: feed.screen, theme: theme, size: ds)
+            ProtectedDisplay(feed: feed, theme: theme, size: ds, ui: ui, flipped: kind != .phonePortrait)
                 .position(x: m.x(L.display.x) + L.displaySize * m.sx / 2, y: m.y(L.display.y) + ds / 2)
             // the red LED and KN1-4
             switch L.kn {
@@ -346,13 +372,13 @@ struct ControlsView: View {
         let s = m.s
         ZStack(alignment: .topLeading) {
             if chrome, let st = L.status {
-                StatusRow(theme: theme, chip: chip, spec: st, m: m, openSheet: openSheet)
+                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, openSheet: openSheet)
             } else if chrome, let gr = L.grabber {
                 Grabber(theme: theme, width: gr.width * s, bar: 40 * s, height: gr.height * s, open: openSheet)
                     .position(x: size.width / 2, y: max(22, m.y(gr.midY)))
             }
             let ds = L.displaySize * s
-            DisplayView(screen: feed.screen, theme: theme, size: ds)
+            ProtectedDisplay(feed: feed, theme: theme, size: ds, ui: ui)
                 .position(x: m.x(L.display.x) + L.displaySize * m.sx / 2, y: m.y(L.display.y) + ds / 2)
             // the deck's background: a sideways swipe here changes the deck
             Color.clear.contentShape(Rectangle())
@@ -487,6 +513,7 @@ struct DeckSwitch: View {
 
 struct ScreenOnlyView: View {
     let feed: PanelFeed
+    let ui: FaceplateUI
     let theme: Theme
     let chip: PanelChip
     let size: CGSize
@@ -514,7 +541,7 @@ struct ScreenOnlyView: View {
                         .position(x: size.width / 2, y: 22)
                 }
             }
-            DisplayView(screen: feed.screen, theme: theme, size: side)
+            ProtectedDisplay(feed: feed, theme: theme, size: side, ui: ui)
                 .position(x: size.width / 2, y: size.height / 2)
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
