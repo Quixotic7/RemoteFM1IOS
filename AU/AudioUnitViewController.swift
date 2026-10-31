@@ -29,6 +29,11 @@ public final class AudioUnitViewController: AUViewController, AUAudioUnitFactory
         MidiMapStore.shared.observe()
         model.onBluetooth = { [weak self] in self?.presentBluetooth() }
         model.onAbout = { [weak self] info in self?.presentAbout(info) }
+        model.onOpenURL = { [weak self] u, done in
+            guard let ctx = self?.extensionContext else { done(false); return }
+            nonisolated(unsafe) let done = done     // (called back on the main queue only)
+            ctx.open(u) { ok in DispatchQueue.main.async { done(ok) } }
+        }
         let hosting = UIHostingController(rootView: AUView(model: model))
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         hosting.view.backgroundColor = .clear
@@ -229,6 +234,10 @@ final class AUViewModel {
     @ObservationIgnored var userPicked = false          // (a view picked in the sheet: no more fitting to the size)
     @ObservationIgnored var onBluetooth: (@MainActor () -> Void)?
     @ObservationIgnored var onAbout: (@MainActor (CoreInfo?) -> Void)?
+    /// opens a link through the extension's context (some hosts open nothing: false)
+    @ObservationIgnored var onOpenURL: (@MainActor (URL, @escaping (Bool) -> Void) -> Void)?
+    var details: [String: AvailableFirmware] = [:]      // the catalog's, as the app shared them (FirmwareDetailsShare)
+    @ObservationIgnored private let thumbCapture = ThumbCapture()
     @ObservationIgnored var onViewSize: (@MainActor (CGSize) -> Void)?    // (a Mac) an instance's own size
     @ObservationIgnored var onPickSize: (@MainActor (CGSize) -> Void)?    // (a Mac) the sheet's Window size
     var macWindow = false                               // (a Mac) the sheet's Window section
@@ -268,6 +277,10 @@ final class AUViewModel {
         self.au = au
         feed.attach(au)
         learn.attach(au)
+        feed.onFrame = { [weak self] rgba in
+            guard let self else { return }
+            thumbCapture.frame(rgba, id: current?.firmwareID, booted: status.core.booted)
+        }
         au.onEvent = { [weak self] e in
             Task { @MainActor in
                 switch e {

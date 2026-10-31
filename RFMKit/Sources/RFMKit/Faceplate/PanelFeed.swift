@@ -124,6 +124,8 @@ public final class PanelFeed {
     public var onKnobTouched: ((Knob) -> Void)?
     /// every poll (the faceplate's tick): MIDI learn takes its messages here
     public var onTick: (() -> Void)?
+    /// each new screen frame (RGBX 240x240): the firmware list's thumbnails (ThumbCapture)
+    public var onFrame: (([UInt8]) -> Void)?
     private var panelSeq: UInt32 = 0
     private var previewSeq: UInt32 = 0
     private var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
@@ -273,6 +275,7 @@ public final class PanelFeed {
             previewSeq = s
             screen.image = RemoteController.image(rgba)
             screen.frames += 1
+            onFrame?(rgba)
         }
     }
 

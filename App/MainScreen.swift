@@ -56,6 +56,7 @@ struct LaunchOptions {
     var statesSave = false                              // (DEBUG) -statessave: the States page's Save as… field open
     var statesShare: String?                            // (DEBUG) -statesshare <name>: that state's … open (Share…)
     var backupDemo = false                              // (DEBUG) -backupdemo: Back up everything run at launch
+    var makeThumbs = false                              // (DEBUG) -makethumbs: each built-in core run ~6 s for its thumbnail
     var displayAlone = false                            // -displayalone: the display alone, full size
     var protector: Bool?                                // -protector on|off: the screen protector put on or taken off
     var peel: Double?                                   // -peel 0.3: the film drawn that far peeled (screenshots)
@@ -92,6 +93,7 @@ struct LaunchOptions {
         statesSave = a.contains("-statessave")
         statesShare = value("-statesshare")
         backupDemo = a.contains("-backupdemo")
+        makeThumbs = a.contains("-makethumbs")
         #endif
     }
 }
@@ -137,6 +139,7 @@ struct MainScreen: View {
     @State private var dataBack: AppSheetPage? = .firmware   // where States and Safety copies go back to
     @State private var saveOpen = false                 // Save state…: the States page with its field open
     @Environment(\.scenePhase) private var phase
+    @Environment(\.openURL) private var openURL
     private static let mirror = StateMirror()
     private static let mirrorQueue = DispatchQueue(label: "rfm1.mirror", qos: .utility)
     @State private var turned = false                  // (-orientation landscape refused: drawn turned, for screenshots)
@@ -207,6 +210,7 @@ struct MainScreen: View {
         .persistentSystemOverlays(.hidden)
         .statusBarHidden(ui.displayAlone)
         .onChange(of: player.current?.name, initial: true) { _, n in ui.firmwareName = n }
+        .onChange(of: catalog.checked, initial: true) { FirmwareDetailsShare.save(catalog.details) }   // (the AU's panel)
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
         .sheet(isPresented: $showAbout) {
@@ -290,6 +294,7 @@ struct MainScreen: View {
         if options.statesDemo { statesDemo() }
         syncMirror()
         if options.backupDemo { backUp() }
+        if options.makeThumbs { Task { await makeThumbs() } }
         #endif
         if options.themeEditor { ui.editorOpen = true }
         if options.displayAlone { ui.displayAlone = true }
@@ -388,6 +393,21 @@ struct MainScreen: View {
     }
 
     private func close() { withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false } }
+
+    #if DEBUG
+    /// (DEBUG) -makethumbs: each built-in core without a thumbnail run until it has one (screenshots), then the first
+    private func makeThumbs() async {
+        let start = player.selected
+        for c in builtIn where !FirmwareThumbs.shared.exists(c.firmwareID) {
+            player.select(c.id)
+            for _ in 0..<40 where !FirmwareThumbs.shared.exists(c.firmwareID) {
+                midi.feed.poll()
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        player.select(start)
+    }
+    #endif
 
     /// the status row's firmware name: the sheet opens on the Firmware panel
     private func openFirmwarePanel() {
@@ -525,6 +545,10 @@ struct MainScreen: View {
         let files = library.files
         return SheetPage(player.current?.name ?? "Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
             if let c = player.current {
+                FirmwareInfoCard(info: FirmwareInfo.lookup(c, details: catalog.details), running: player.status.booted) { u, done in
+                    openURL(u) { done($0) }
+                }
+                .padding(.top, 12)
                 SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.status.booted ? " · running" : "")")
             }
             SheetSectionTitle("This firmware", top: 12)
@@ -536,12 +560,8 @@ struct MainScreen: View {
             dataRows(from: .firmware).padding(.top, 12)
                 .id("reset")
             SheetSectionTitle("Built in")
-            SheetList {
-                ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
-                    SheetRow("\(c.name)", value: c.version, divider: i < builtIn.count - 1, chevron: false,
-                             check: c.id == player.selected) { player.select(c.id) }
-                }
-            }
+            FirmwareTileGrid(cores: builtIn, selected: player.selected) { player.select($0) }
+                .id("builtin")
             SheetSectionTitle("Imported")
                 .overlay(alignment: .bottomTrailing) {
                     if !files.isEmpty {
@@ -560,8 +580,13 @@ struct MainScreen: View {
                         .accessibilityLabel(editingFirmware ? "Done deleting" : "Edit imported firmware")
                     }
                 }
+            if !editingFirmware, !imported.isEmpty {
+                FirmwareTileGrid(cores: imported, selected: player.selected, select: { player.select($0) },
+                                 delete: { c in deleteAction(c).map { d in { withAnimation { d() } } } })
+                    .padding(.bottom, 10)
+            }
             SheetList {
-                ForEach(imported) { c in
+                ForEach(editingFirmware ? imported : []) { c in
                     if editingFirmware, let f = files.first(where: { $0.key == c.id && $0.error == nil }) {
                         FirmwareDeleteRow(title: c.name, value: c.version, playing: c.id == player.selected,
                                           divider: !broken.isEmpty || c.id != imported.last?.id,

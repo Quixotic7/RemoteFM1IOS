@@ -238,6 +238,16 @@ struct AUSheet: View {
     private var firmwarePage: some View {
         let builtIn = model.cores.filter { !$0.imported }, imported = model.cores.filter(\.imported)
         return SheetPage(model.status.coreName.isEmpty ? "Firmware" : model.status.coreName, back: { model.page = nil }) {
+            if let c = model.current {
+                FirmwareInfoCard(info: FirmwareInfo.lookup(c, details: model.details), running: model.status.core.booted) { u, done in
+                    if let o = model.onOpenURL { o(u, done) } else { done(false) }
+                }
+                .padding(.top, 12)
+                .onAppear {
+                    model.details = FirmwareDetailsShare.load()
+                    FirmwareThumbs.shared.reload()
+                }
+            }
             SheetSectionTitle("This firmware", top: 12)
             SheetList {
                 SheetRow("About this firmware") { model.onAbout?(model.current) }
@@ -245,20 +255,10 @@ struct AUSheet: View {
             }
             dataRows(fromMain: false).padding(.top, 12)
             SheetSectionTitle("Built in")
-            SheetList {
-                ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
-                    SheetRow(c.name, value: c.version, divider: i < builtIn.count - 1, chevron: false,
-                             check: c.id == model.status.coreKey) { model.select(c.id) }
-                }
-            }
+            FirmwareTileGrid(cores: builtIn, selected: model.status.coreKey) { model.select($0) }
             SheetSectionTitle("Imported")
             if !imported.isEmpty {
-                SheetList {
-                    ForEach(Array(imported.enumerated()), id: \.element.id) { i, c in
-                        SheetRow(c.name, value: c.version, divider: i < imported.count - 1, chevron: false,
-                                 check: c.id == model.status.coreKey) { model.select(c.id) }
-                    }
-                }
+                FirmwareTileGrid(cores: imported, selected: model.status.coreKey) { model.select($0) }
             }
             if model.fileGone {
                 SheetNote("\(model.status.coreName.isEmpty ? "This firmware" : model.status.coreName)'s file was deleted in "

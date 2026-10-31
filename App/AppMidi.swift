@@ -18,6 +18,7 @@ final class AppMidi {
     let learn: MidiLearnMode
     let omx: OmxLink
     let omxTarget: PanelOmxTarget
+    let thumbCapture = ThumbCapture()
     private var terminate: NSObjectProtocol?
 
     init(player: CorePlayer) {
@@ -34,6 +35,11 @@ final class AppMidi {
         omx.onActive = { _ in input.reconnect() }
         omx.onToast = { text, ok in feed.toast.show(text, ok ? .ok : .neutral) }
         feed.onKnobTouched = { k in omx.knobUsed(k) }
+        let capture = thumbCapture
+        feed.onFrame = { [weak player] rgba in
+            guard let player else { return }
+            capture.frame(rgba, id: player.current?.firmwareID, booted: player.status.booted && player.mode == .core)
+        }
         terminate = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification,
                                                            object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { omx.willClose() }

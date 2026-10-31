@@ -171,6 +171,18 @@ libremotefm1's own tests, built outside the source tree:
     cmake -S vendor/RemoteFM1/host -B /tmp/rfm-host -DRFM_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
     cmake --build /tmp/rfm-host -j 8 && (cd /tmp/rfm-host && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure)
 
+## The Firmware panel's tiles and info
+
+The Firmware panel (app and AU) opens with the running firmware's card: its thumbnail, name, version, author, the
+remotefm1.com catalog's one-line tag and description (three lines, More), and **View source on GitHub** (the catalog's
+source at that version, else `github.com/<repo>`, else the core's or .rfm1 manifest's source URL; in an AU host that
+opens nothing the link is shown to copy). Descriptions come from the cached catalog by firmware id (the app shares them
+with the AU in the App Group's `catalog-details.json`); without one, the core's credits. The built-in and imported
+lists are grids of tiles; a long press on an imported one deletes it (Edit still works). Thumbnails are each firmware's
+own LCD, captured ~3 s after it boots when none exists yet (never an all-black frame) into the App Group's
+`Thumbs/<firmwareID>.png` (`FirmwareThumbs`, `ThumbCapture`); without one the tile shows the name on a colour of its
+own. DEBUG `-makethumbs` runs each built-in core until it has one.
+
 ## Imported firmware (.rfm1)
 
 Besides the built-in cores, the app plays `.rfm1` files: FM-1 firmware built as WebAssembly (docs/RFM1-FORMAT.md;

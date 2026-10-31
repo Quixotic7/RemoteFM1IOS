@@ -7,7 +7,7 @@
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
 # -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo; the cartridge page: -sheetpage cart, DEBUG's -cartdemo) and saves a PNG
 # per state ("name@s": that shot waits s seconds). The iPhone fixes: -sheetpage keychannel | midimode, DEBUG's
-# -firmwareedit [ask], -askreset, -safetydemo, -statesdemo, -statessave, -statesshare <name>, -backupdemo; -displayalone, -protector on|off, -peel f (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
+# -firmwareedit [ask], -askreset, -safetydemo, -statesdemo, -statessave, -statesshare <name>, -backupdemo, -makethumbs (each built-in core run for its thumbnail); -displayalone, -protector on|off, -peel f (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
 # install | unanswered | bluetooth | update. The core runs (ChoralRoot by default) so the real framebuffer shows;
 # "-source fm1" uses the fake unit (the simulator's default backend), whose demo input presses keys by itself. A
 # simulator this script booted is shut
@@ -80,6 +80,8 @@ PHONE_SHOTS=(
     # the screen protector (-protector on|off, -peel f: drawn that far folded)
     "phone-sheet-data|-source phone -view full -sheet -protector on -orientation portrait"
     "phone-firmware-panel|-source phone -view full -sheetpage firmware -orientation portrait"
+    "phone-firmware-thumbs@40|-source phone -view full -sheetpage firmware -makethumbs -orientation portrait"
+    "phone-firmware-tiles|-source phone -view full -sheetpage firmware -sheetscroll builtin -orientation portrait"
     "phone-display-alone|-source phone -view full -displayalone -orientation portrait"
     "phone-display-alone-landscape|-source phone -view full -displayalone -orientation landscape"
     "phone-protector-on|-source phone -view full -protector on -orientation portrait"
@@ -109,6 +111,7 @@ PHONE_SHOTS=(
     "phone-install-cutoff@25|-source fm1 -view full -sheetpage install -installdemo cutoff -orientation portrait"
 )
 PAD_SHOTS=(
+    "pad-firmware-tiles@40|-source phone -view full -sheetpage firmware -makethumbs -sheetscroll builtin -orientation landscape"
     "pad-full-landscape|-source phone -view full -orientation landscape"
     "pad-full-portrait|-source fm1 -view full -theme Midnight -orientation portrait"
     "pad-controls-portrait|-source phone -view controls -deck keys -orientation portrait"
