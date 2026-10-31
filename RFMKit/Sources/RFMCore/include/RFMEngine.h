@@ -220,6 +220,23 @@ typedef struct {
 // the newest panel state (one reader thread, any but the clock's); returns its seq (0: none yet; out zeroed)
 uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out);
 
+// ---- the firmware's own button names (fm1core.h button_names, FM1P_B_* order: FX SEL ENV LFO EDIT GLO HOME SAVE ARP SEQ
+// PLAY REC OCT- OCT+; docs/BUTTON-LABELS.md in RemoteFM1): the running core's, as its descriptor gives them (a native
+// core's, or an .rfm1's read through rfm1_layout), "" for none. Whether the faceplate shows them is the host's setting
+// ("Firmware's button names"), kept here so every view of this engine reads one value; the fallback rules (trimmed,
+// blank: the printed name, OCT-/OCT+ never renamed) are the reader's (RFMKit ButtonNames).
+typedef struct {
+    uint32_t gen;               // moves on every core change and setting change (rfme_button_names_gen)
+    int loaded;                 // 1: a core is loaded (names below are its)
+    int use;                    // the setting (default 1)
+    char names[14][48];         // UTF-8, NUL-terminated, cut at 47 bytes
+} rfme_button_names_t;
+// (any thread) the number that moves on a core or setting change: poll it, then read the names when it moved
+uint32_t rfme_button_names_gen(rfme_t *e);
+// (any thread but the audio thread) the names now; returns gen
+uint32_t rfme_button_names(rfme_t *e, rfme_button_names_t *out);
+void rfme_set_button_names(rfme_t *e, int use);
+
 typedef struct {
     int loaded, booted, halted, clock, attached;
     uint32_t halt_code;         // halted(): 0x100 | exit code

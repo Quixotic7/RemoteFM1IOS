@@ -112,13 +112,15 @@ public struct MidiMapSection: View {
     var titled: Bool
     var useMap: Binding<Bool>?
     let pickMode: (String) -> Void
+    var names: ButtonNames
     @State private var confirming = false
 
     /// learn: starts learn mode (the host closes its sheet). titled: the section's title (not on a page of its own).
     /// useMap: the "Use learned knobs" switch (AUSettings.useLearnedMap), nil: none. pickMode: opens the mode page
-    /// (MidiModeList) for a mapping's source
+    /// (MidiModeList) for a mapping's source. names: the firmware's button names (a renamed button "PERF (ARP)")
     public init(store: MidiMapStore = .shared, top: CGFloat = 20, titled: Bool = true, useMap: Binding<Bool>? = nil,
-                pickMode: @escaping (String) -> Void, learn: @escaping () -> Void) {
+                names: ButtonNames = .standard, pickMode: @escaping (String) -> Void, learn: @escaping () -> Void) {
+        self.names = names
         self.store = store
         self.top = top
         self.titled = titled
@@ -174,7 +176,7 @@ public struct MidiMapSection: View {
 
     private func row(_ m: MidiMapping, divider: Bool) -> some View {
         HStack(spacing: 6) {
-            (Text(m.target).font(RFMFonts.ui(14, 700)).foregroundColor(Palette.sheetText)
+            (Text(names.title(m.target)).font(RFMFonts.ui(14, 700)).foregroundColor(Palette.sheetText)
              + Text(" ← ").font(RFMFonts.ui(14, 500)).foregroundColor(Palette.sheetMuted)
              + Text(MidiSource.label(m.src)).font(RFMFonts.ui(14, 500)).foregroundColor(Palette.sheetMuted2))
                 .lineLimit(1).minimumScaleFactor(0.8)
@@ -193,7 +195,7 @@ public struct MidiMapSection: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(m.target): how CC values turn it")
+                .accessibilityLabel("\(names.title(m.target)): how CC values turn it")
                 .accessibilityValue(mode.label)
             }
             Button { store.remove(m.src) } label: {
@@ -203,7 +205,7 @@ public struct MidiMapSection: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(m.target) ← \(MidiSource.label(m.src))")
+            .accessibilityLabel("Remove \(names.title(m.target)) ← \(MidiSource.label(m.src))")
         }
         .padding(.leading, 16).padding(.trailing, 4)
         .frame(minHeight: 48)

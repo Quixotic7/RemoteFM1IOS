@@ -43,6 +43,9 @@ APP=$DD/Build/Products/Debug-iphonesimulator/RemoteFM1.app
 PHONE_SHOTS=(
     "phone-full|-source phone -view full -orientation portrait"
     "phone-full-landscape|-source phone -view full -orientation landscape"
+    "phone-names-choralroot|-source phone -core choralroot -view controls -deck buttons -orientation portrait"
+    "phone-names-fizz|-source phone -core fizz -view controls -deck buttons -orientation portrait"
+    "phone-names-choralroot-full|-source phone -core choralroot -view full -orientation portrait"
     "phone-controls-buttons|-source fm1 -view controls -deck buttons -knobs main -orientation portrait"
     "phone-controls-keys|-source fm1 -view controls -deck keys -knobs kn -steps -orientation portrait"
     "phone-controls-landscape|-source phone -view controls -deck buttons -orientation landscape"

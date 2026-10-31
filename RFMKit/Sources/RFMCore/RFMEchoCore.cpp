@@ -27,6 +27,14 @@ public:
         d_.name = "MIDI echo (tests)";
         d_.version = "1";
         d_.keymap.fill(-1);
+        // button names (fm1core.h button_names) for ButtonNamesTests: FX none, SEL "KEY", ENV blank, EDIT its printed
+        // name, ARP " perf " (trimmed, upper-cased), PLAY a long one, OCT- one (never shown: OCT is never renamed)
+        d_.button_names[FM1P_B_SEL] = "KEY";
+        d_.button_names[FM1P_B_ENV] = "   ";
+        d_.button_names[FM1P_B_EDIT] = "EDIT";
+        d_.button_names[FM1P_B_ARP] = " perf ";
+        d_.button_names[FM1P_B_PLAY] = "LOOPER-LONG";
+        d_.button_names[FM1P_B_OCTDN] = "DOWN";
         std::memset(&p_, 0, sizeof p_);
     }
     const CoreDesc &info() const override { return d_; }

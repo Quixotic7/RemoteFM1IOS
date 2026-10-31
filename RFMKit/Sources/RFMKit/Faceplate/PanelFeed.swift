@@ -116,6 +116,9 @@ public final class PanelFeed {
     public let learn = LearnFeed()
     public let toast = ToastCenter()
     public let pickup = PickupFeed()
+    /// the running firmware's button names (ButtonNames), read again when the engine's core or setting changes
+    public let names = ButtonNameFeed()
+    private var namesGen: UInt32 = 0
     public private(set) weak var host: (any PanelEngineHost)?
     /// a knob turned (or MASTER moved) by a touch on this screen (the OMX-27's encoder then turns that knob)
     public var onKnobTouched: ((Knob) -> Void)?
@@ -145,6 +148,7 @@ public final class PanelFeed {
         panelSeq = 0
         previewSeq = 0
         pickupSeq = nil
+        namesGen = 0
     }
 
     // MARK: in (the same path as the FM-1's events)
@@ -261,6 +265,7 @@ public final class PanelFeed {
     public func poll() {
         guard let host else { return }
         pollPanel()
+        pollNames()
         pickup.expire(now: ProcessInfo.processInfo.systemUptime)
         onTick?()
         let s = rgba.withUnsafeMutableBufferPointer { b in host.withPanelEngine { rfme_preview($0, previewSeq, b.baseAddress) } }
@@ -269,6 +274,15 @@ public final class PanelFeed {
             screen.image = RemoteController.image(rgba)
             screen.frames += 1
         }
+    }
+
+    /// the button names, when the engine's core or the setting changed since the last look
+    public func pollNames() {
+        guard let host else { return }
+        guard host.withPanelEngine({ rfme_button_names_gen($0) }) != namesGen else { return }
+        let (n, g) = host.withPanelEngine { ButtonNames.read($0) }
+        namesGen = g
+        if names.value != n { names.value = n }
     }
 
     /// the panel state alone (the LEDs, what is held, the knobs), without the screen

@@ -293,13 +293,15 @@ struct PanelButton: View {
                 } else if label == .rec {
                     Circle().fill(Palette.recGlyph).frame(width: ic * 0.8, height: ic * 0.8).frame(width: ic, height: ic)
                 }
-                Text(label.legend)
+                Text(feed.names.value.label(label))      // (the firmware's name: shrinks to half size, then "…")
                     .font(RFMFonts.hardware(font))
                     .tracking(font * 0.06)
                     .foregroundStyle(legend)
                     .shadow(color: lit ? theme.led.color : .clear, radius: lit ? 4 : 0)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(0.5)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 3)
             }
             .offset(y: down ? 1 : 0)
         }
@@ -315,7 +317,8 @@ struct PanelButton: View {
             }
             .onEnded { _ in feed.button(label, down: false) })
         .accessibilityElement()
-        .accessibilityLabel(label.spoken)
+        .accessibilityLabel(feed.names.value.isRenamed(label)
+                            ? "\(feed.names.value.label(label).capitalized) (\(label.spoken))" : label.spoken)
         .accessibilityAddTraits(lit ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { tap() }
     }
@@ -372,6 +375,8 @@ public struct ButtonGrid: View {
                         PanelButton(label: l, theme: theme, lights: feed.lights, feed: feed, height: bh,
                                     radius: (bh * 0.24).rounded(), font: max(10, (bh * 0.26).rounded()))
                             .frame(width: bw, height: bh)
+                            .overlay(alignment: r == 0 ? .top : .bottom) { PrintedLabel(label: l, top: r == 0,
+                                                                                       theme: theme, feed: feed) }
                     }
                 }
             }
@@ -380,6 +385,29 @@ public struct ButtonGrid: View {
         .background(Well(bed: theme.bed.color, radius: (bh * 0.34).rounded() + 6))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Function buttons")
+    }
+}
+
+/// a renamed button's printed name, small above the top row / below the bottom row (in the well's margin), as on
+/// the faceplate; nothing when the button shows its printed name
+struct PrintedLabel: View {
+    let label: PanelFeed.Label
+    let top: Bool
+    let theme: Theme
+    let feed: PanelFeed
+
+    var body: some View {
+        if feed.names.value.isRenamed(label) {
+            Text(label.legend)
+                .font(RFMFonts.hardware(7))
+                .tracking(0.4)
+                .foregroundStyle(theme.label.color.opacity(0.75))
+                .lineLimit(1)
+                .fixedSize()
+                .offset(y: top ? -9 : 9)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }
 

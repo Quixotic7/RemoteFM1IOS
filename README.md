@@ -284,6 +284,11 @@ gives them to the firmware as `key_vel` / `key_lean`. Diagnostics' "touch" row s
 what the FM-1 confirms. Only cores that read velocity use it (ChoralRoot 0.25.1+, a full build); the store cores play
 as before. The host library's TOUCH code comes from RemoteFM1 0.3.1 (PLAN.md section 16).
 
+
+The faceplate shows the running firmware's own button names (ChoralRoot's KEY, PERF, LOOP...; FIZZ's TRACKS, MIX...)
+with the printed name small beside a renamed button; "Firmware's button names" (on by default, under View) turns it
+off (PLAN.md section 17).
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).

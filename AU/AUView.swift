@@ -77,6 +77,13 @@ struct AUSheet: View {
                         fm1Card
                         SheetSectionTitle("View · or swipe sideways")
                         ViewTiles(ui: model.ui) { model.userPicked = true }
+                        SheetList {
+                            SheetToggle("Firmware's button names",
+                                        on: Binding(get: { model.status.settings.buttonNames },
+                                                    set: { v in model.changeSettings { $0.buttonNames = v } }),
+                                        divider: false)
+                        }
+                        .padding(.top, 12)
                         if model.macWindow { windowSection.id("window") }
                         SheetSectionTitle("Theme")
                         ThemeSwatches(store: store, edit: nil)
@@ -256,7 +263,7 @@ struct AUSheet: View {
     /// Knobs from MIDI: learned from the host's MIDI (route a controller to this instrument in the host)
     private var midiPage: some View {
         SheetPage("Knobs from MIDI", back: { model.page = nil }) {
-            MidiMapSection(top: 12, titled: false, useMap: useMap, pickMode: { src in
+            MidiMapSection(top: 12, titled: false, useMap: useMap, names: model.feed.names.value, pickMode: { src in
                 model.modeSource = src
                 model.page = .midiMode
             }) { model.startLearn() }

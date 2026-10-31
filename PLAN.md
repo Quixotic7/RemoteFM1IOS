@@ -613,3 +613,17 @@ confirm it; then a key arrives as `9F 53+k v` (its own velocity) and its pressur
   read keys on / off only, so they sound the same either way.
 - Tests: TouchTests (TOUCH after the ACK only with the cap and the setting on, PANEL_R's confirmation, 9F / AF to
   key_vel / key_lean on the echo core, off in a session, a unit before 0.3.1).
+
+## 17. The firmware's button names on the faceplate
+
+RemoteFM1 docs/BUTTON-LABELS.md (button-labels, 22e9514). The running core's descriptor `button_names[FM1P_NB]`
+(FM1P_B_* order), read when the backend is made (RFMNativeCore; RFMWasmCore through rfm1_layout's offset), is exposed
+by the engine as `rfme_button_names` / `rfme_button_names_gen` (moves on every core or setting change) and
+`rfme_set_button_names` (the setting). RFMKit `ButtonNames` holds the rules: trimmed, upper-cased; nil/blank: the
+printed name; a list not 14 long, or the setting off: all printed; OCT-/OCT+ never renamed. `PanelFeed.names` follows
+the engine; the buttons show the name (shrinking to half size, then "…"), a renamed one has its printed name small
+above the top row / below the bottom row. MIDI learn's bar, toasts and the mapping list say "PERF (ARP)"; the AU's
+button parameters keep their printed names, their value text uses the firmware's ("PERF: down"). Setting
+`AUSettings.buttonNames` ("Firmware's button names", default on; the app's sheet and per AU instance, under View).
+Names today: ChoralRoot KEY BASS LOCK OPT PERF LOOP; FIZZ TRACKS MIX LATCH SHIFT SOUNDS MIDI FX PATTERNS; Felucca,
+Melodee, Saadet, Boardwalk, LOOM-8, AMB none. Tested by ButtonNamesTests (the echo core has names) and AUParamTests.

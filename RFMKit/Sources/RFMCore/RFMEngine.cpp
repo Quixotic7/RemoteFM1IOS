@@ -223,6 +223,8 @@ struct rfme final : rfm::HostParams::Panel {
     std::mutex hpLock;
     rfm::Triple<rfm::HostParamState> hpOut;
     std::mutex hpViewLock;
+    std::atomic<uint32_t> namesGen{1};      // (rfme_button_names_gen) moves on a core change or the setting
+    std::atomic<int> namesUse{1};
     std::unique_ptr<rfm::HostParamState> hpView{new rfm::HostParamState()};
     uint32_t hpSeq = 0, hpSeen = 0;
     uint32_t hpLabels = 0, hpKeysHeld = 0;  // (the core thread's) the buttons and keys the host holds
@@ -1174,6 +1176,7 @@ struct rfme final : rfm::HostParams::Panel {
             halted.store(false);
             haltCode.store(0);
             core.reset();                               // (shutdown(); a native slot: dlclose, given back)
+            namesGen.fetch_add(1);
         }
     }
 
@@ -1188,6 +1191,7 @@ struct rfme final : rfm::HostParams::Panel {
         std::lock_guard<std::mutex> g(hpViewLock);
         core = std::move(c);
         dev = std::make_unique<rfm::CoreDevice>(*core);
+        namesGen.fetch_add(1);
         return true;
     }
 
@@ -1605,6 +1609,27 @@ uint32_t rfme_preview(rfme_t *e, uint32_t have, uint8_t *rgba)
         return e->viewSeq;
     rfm::lcdToRGBA(e->preview.front()->lcd, rgba, FM1P_LCD_W * FM1P_LCD_H);
     return e->viewSeq;
+}
+
+uint32_t rfme_button_names_gen(rfme_t *e) { return e->namesGen.load(); }
+
+uint32_t rfme_button_names(rfme_t *e, rfme_button_names_t *out)
+{
+    std::memset(out, 0, sizeof *out);
+    std::lock_guard<std::mutex> g(e->hpViewLock);       // (guards `core` against an unload)
+    out->gen = e->namesGen.load();
+    out->use = e->namesUse.load();
+    out->loaded = e->core != nullptr;
+    if (e->core)
+        for (int i = 0; i < FM1P_NB; i++)
+            std::snprintf(out->names[i], sizeof out->names[i], "%s", e->core->info().button_names[(size_t)i].c_str());
+    return out->gen;
+}
+
+void rfme_set_button_names(rfme_t *e, int use)
+{
+    if (e->namesUse.exchange(use ? 1 : 0) != (use ? 1 : 0))
+        e->namesGen.fetch_add(1);
 }
 
 uint32_t rfme_panel(rfme_t *e, rfme_panel_t *out)

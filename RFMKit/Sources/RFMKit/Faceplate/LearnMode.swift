@@ -101,8 +101,9 @@ public final class MidiLearnMode {
 
     /// the picked control's bindings dropped (main.js learnForget)
     public func forget() {
-        guard let t = learn.selected else { return }
+        guard let id = learn.selected else { return }
         let n = learn.forgetSelected()
+        let t = feed.names.value.title(id)
         feed.toast.show(n == 0 ? "\(t) has no binding" : "\(t): \(n == 1 ? "its binding" : "its \(n) bindings") forgotten",
                         seconds: 2.5)
         refresh()
@@ -119,21 +120,23 @@ public final class MidiLearnMode {
         switch r {
         case .rejected(let why): feed.toast.show(why, .bad, seconds: 2.5)
         case .bound(let b, _):
-            feed.toast.show(Self.boundText(b), .ok, seconds: 3)
+            feed.toast.show(Self.boundText(b, names: feed.names.value), .ok, seconds: 3)
         case .none: break
         }
     }
 
     /// main.js learnTook: "KN1 ← CC 21, channel 1 (absolute)"
-    public nonisolated static func boundText(_ b: MidiMapping) -> String {
-        "\(b.target) ← \(MidiSource.label(b.src, long: true))\(b.mode.map { " (\($0.label))" } ?? "")"
+    public nonisolated static func boundText(_ b: MidiMapping, names: ButtonNames = .standard) -> String {
+        "\(names.title(b.target)) ← \(MidiSource.label(b.src, long: true))\(b.mode.map { " (\($0.label))" } ?? "")"
     }
 
     /// main.js learnView's line
-    public nonisolated static func barText(selected: String?, sources: [MidiMapping]) -> String {
-        guard let sel = selected else { return "Tap a knob or button, then move a control on your MIDI device" }
+    public nonisolated static func barText(selected: String?, sources: [MidiMapping],
+                                           names: ButtonNames = .standard) -> String {
+        guard let id = selected else { return "Tap a knob or button, then move a control on your MIDI device" }
+        let sel = names.title(id)
         if !sources.isEmpty { return "\(sel) ← \(sources.map { MidiSource.label($0.src) }.joined(separator: ", "))" }
-        let button = MidiTarget.named(sel)?.isButton == true
+        let button = MidiTarget.named(id)?.isButton == true
         return "\(sel): now \(button ? "press a button or a key" : "turn a knob or a pot") on your MIDI device"
     }
 
@@ -147,7 +150,7 @@ public final class MidiLearnMode {
         let bound = on ? store.boundTargets : []
         if l.bound != bound { l.bound = bound }
         let srcs = sel.map { store.sourcesOf($0) } ?? []
-        let text = on ? Self.barText(selected: sel, sources: srcs) : ""
+        let text = on ? Self.barText(selected: sel, sources: srcs, names: feed.names.value) : ""
         if l.text != text { l.text = text }
         if l.canForget != !srcs.isEmpty { l.canForget = !srcs.isEmpty }
     }

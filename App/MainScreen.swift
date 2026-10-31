@@ -350,6 +350,12 @@ struct MainScreen: View {
                     if source == .fm1, chip != .linked { fm1Actions }     // (not linked: claim it, or pair it)
                     SheetSectionTitle("View · or swipe sideways")
                     ViewTiles(ui: ui)
+                    SheetList {
+                        SheetToggle("Firmware's button names", on: Binding(get: { player.midiSettings.buttonNames },
+                                                                         set: { player.midiSettings.buttonNames = $0 }),
+                                    divider: false)
+                    }
+                    .padding(.top, 12)
                     SheetSectionTitle("Theme")
                     ThemeSwatches(store: store) { withAnimation { ui.editorOpen = true } }
                     SheetList {
@@ -535,7 +541,7 @@ struct MainScreen: View {
                       + "don't take go to the firmware's MIDI in. Velocity & pressure: the FM-1's keys play at their own "
                       + "velocity and send their pressure to the firmware (RemoteFM1 0.3.1 or later; off: velocity 100).")
             SheetNote("FM-1 link: \(controller.statusText)")
-            MidiMapSection(useMap: m.useLearnedMap, pickMode: { src in
+            MidiMapSection(useMap: m.useLearnedMap, names: feed.names.value, pickMode: { src in
                 modeSource = src
                 page = .midiMode
             }, learn: startLearn).id("knobs")

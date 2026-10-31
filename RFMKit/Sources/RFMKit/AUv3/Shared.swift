@@ -155,6 +155,8 @@ public struct AUSettings: Equatable, Sendable {
     /// TOUCH (RemoteFM1 0.3.1+): the FM-1's keys' own velocity and pressure (poly aftertouch) to the firmware; off, or
     /// older firmware: velocity 100, no pressure, as before
     public var keyTouch = true
+    /// the faceplate shows the running firmware's own button names (docs/BUTTON-LABELS.md); off: the printed ones
+    public var buttonNames = true
     public init() {}
 
     /// rfmc_set_key_touch's flags
@@ -174,13 +176,14 @@ public struct AUSettings: Equatable, Sendable {
         useLearnedMap = (d?["useLearnedMap"] as? NSNumber)?.boolValue ?? true
         hostClock = (d?["hostClock"] as? NSNumber)?.boolValue ?? true
         keyTouch = (d?["keyTouch"] as? NSNumber)?.boolValue ?? true
+        buttonNames = (d?["buttonNames"] as? NSNumber)?.boolValue ?? true
     }
 
     /// (notesPlayKeys too, for an older build reading it)
     var dict: [String: Any] {
         ["keyChannel": Int(keyChannel.engineValue), "notesPlayKeys": notesPlayKeys, "transpose": transpose,
          "keyNotesToFirmware": keyNotesToFirmware, "useLearnedMap": useLearnedMap, "hostClock": hostClock,
-         "keyTouch": keyTouch]
+         "keyTouch": keyTouch, "buttonNames": buttonNames]
     }
 }
 

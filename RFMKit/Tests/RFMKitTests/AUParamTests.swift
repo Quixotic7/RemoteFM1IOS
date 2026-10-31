@@ -162,6 +162,17 @@ final class AUParamTests: XCTestCase {
         XCTAssertEqual(fw(au, "Buttons"), 0)
         XCTAssertEqual(fw(au, "Presses"), 2)
         XCTAssertEqual(text(au, fx, 1), "FX: down")
+        // a button's value text: the firmware's name (the echo core: SEL "KEY", ARP " perf "), its name stays printed;
+        // OCT- is never renamed; the setting off: the printed names
+        let sel = Int32(RFME_HP_BUTTON) + Int32(RFME_B_SEL), arp = Int32(RFME_HP_BUTTON) + Int32(RFME_B_ARP)
+        let octDn = Int32(RFME_HP_BUTTON) + Int32(RFME_B_OCTDN)
+        XCTAssertEqual(text(au, sel, 1), "KEY: down")
+        XCTAssertEqual(text(au, arp, 0), "PERF: up")
+        XCTAssertEqual(text(au, octDn, 1), "OCT-: down")
+        XCTAssertEqual(p(au, sel).displayName, "Button SEL")
+        au.settings.buttonNames = false
+        XCTAssertEqual(text(au, sel, 1), "SEL: down")
+        au.settings.buttonNames = true
 
         let key5 = Int32(RFME_HP_KEY) + 5
         p(au, key5).setValue(1, originator: nil)

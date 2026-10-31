@@ -388,6 +388,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         rfme_set_midi(e, m.keyChannel.engineValue, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0, m.useLearnedMap ? 1 : 0)
         rfmk_set_host_clock(kernel, settings_.hostClock ? 1 : 0)
         if let link { rfmc_set_key_touch(link, m.keyTouchFlags) }
+        rfme_set_button_names(e, m.buttonNames ? 1 : 0)
     }
 
     /// (ctl held) the core loaded into a free slot and booted; the clock given back to its owner

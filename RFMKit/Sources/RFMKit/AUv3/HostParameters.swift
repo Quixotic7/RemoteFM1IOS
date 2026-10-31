@@ -21,6 +21,7 @@ import RFMCore
 
 final class HostParameters: @unchecked Sendable {
     static let count = Int(RFME_HP_COUNT)
+    static let buttonBase = AUParameterAddress(RFME_HP_BUTTON)
     static let knobIDs = ["knob_select", "knob_presets", "knob_algo", "knob_1", "knob_2", "knob_3", "knob_4"]
     static let knobNames = ["Knob Select", "Knob Presets", "Knob Algo", "Knob 1", "Knob 2", "Knob 3", "Knob 4"]
     static let buttonIDs = ["btn_fx", "btn_sel", "btn_env", "btn_lfo", "btn_edit", "btn_glo", "btn_home", "btn_save",
@@ -94,6 +95,11 @@ final class HostParameters: @unchecked Sendable {
 
     private func text(_ a: AUParameterAddress, _ v: AUValue) -> String {
         withEngine("") { e in
+            // a button's value: the firmware's name for it now ("PERF: down"); the parameter's name stays printed
+            if a >= Self.buttonBase, a < Self.buttonBase + 14 {
+                let i = Int(a - Self.buttonBase), n = ButtonNames.read(e).names
+                return (n.renamed[i] ? n.labels[i] : Self.buttonLabels[i]) + (v >= 0.5 ? ": down" : ": up")
+            }
             var b = [CChar](repeating: 0, count: 64)
             _ = rfme_hp_text(e, UInt32(a), v, &b, 64)
             return CorePlayer.string(b)
