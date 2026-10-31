@@ -307,8 +307,10 @@ struct FullView: View {
                     .position(x: size.width / 2, y: size.height - 18 * m.sy - 12)
             }
             // the screen protector: its film over the display, its red tab beside the screen
-            ScreenFilm(geo: FilmGeometry(display: dr, radius: max(10, (ds * 0.09).rounded()),
-                                         tab: FilmGeometry.tab(display: dr, below: kind == .phonePortrait)))
+            if kind.landscape {             // (the wide layouts only: the FM-1's own shape)
+                ScreenFilm(geo: FilmGeometry(display: dr, radius: max(10, (ds * 0.09).rounded()),
+                                             tab: FilmGeometry.tab(display: dr)))
+            }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
     }

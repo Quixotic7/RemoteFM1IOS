@@ -84,7 +84,7 @@ let package = Package(
         ),
         // the UI's fonts (OFL, bundled) and design/tokens.json (a copy; a test keeps the two equal)
         .target(name: "RFMKit", dependencies: ["RFMCore", .product(name: "FM1Kit", package: "FM1Kit")],
-                resources: [.copy("Resources/Fonts"), .copy("Resources/tokens.json")]),
+                resources: [.copy("Resources/Fonts"), .copy("Resources/tokens.json"), .copy("Resources/Thumbs")]),
         .testTarget(name: "RFMKitTests", dependencies: ["RFMKit", .product(name: "FM1Kit", package: "FM1Kit")],
                     exclude: ["Fixtures"]),
     ],

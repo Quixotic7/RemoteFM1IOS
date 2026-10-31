@@ -21,13 +21,13 @@ final class FirmwareThumbsTests: XCTestCase {
 
     func testSaveLoadAndBlank() throws {
         let t = FirmwareThumbs(directory: tempDir())
-        XCTAssertNil(t.image("felucca"))
-        XCTAssertFalse(t.save(rgba: frame(lit: false), id: "felucca"))
-        XCTAssertFalse(t.exists("felucca"))
-        XCTAssertTrue(t.save(rgba: frame(lit: true), id: "felucca"))
-        XCTAssertTrue(t.exists("felucca"))
+        XCTAssertNil(t.image("made-up-fw"))
+        XCTAssertFalse(t.save(rgba: frame(lit: false), id: "made-up-fw"))
+        XCTAssertFalse(t.exists("made-up-fw"))
+        XCTAssertTrue(t.save(rgba: frame(lit: true), id: "made-up-fw"))
+        XCTAssertTrue(t.exists("made-up-fw"))
         let again = FirmwareThumbs(directory: t.directory)
-        let img = try XCTUnwrap(again.image("felucca"))
+        let img = try XCTUnwrap(again.image("made-up-fw"))
         XCTAssertEqual(img.width, 240)
         XCTAssertEqual(img.height, 240)
         XCTAssertTrue(t.url("rfm1:ab/c").lastPathComponent == "rfm1_ab_c.png")
@@ -38,20 +38,20 @@ final class FirmwareThumbsTests: XCTestCase {
     func testCaptureTiming() {
         let t = FirmwareThumbs(directory: tempDir())
         let c = ThumbCapture(thumbs: t)
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: true, now: 100))
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: true, now: 102))
-        XCTAssertFalse(c.frame(frame(lit: false), id: "fizz", booted: true, now: 103.5))   // black: retried
-        XCTAssertTrue(c.frame(frame(lit: true), id: "fizz", booted: true, now: 104))
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: true, now: 105))        // once
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 100))
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 102))
+        XCTAssertFalse(c.frame(frame(lit: false), id: "other-fw", booted: true, now: 103.5))   // black: retried
+        XCTAssertTrue(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 104))
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 105))        // once
         // another firmware, all black past the window: given up
         XCTAssertFalse(c.frame(frame(lit: false), id: "buzz", booted: true, now: 200))
         XCTAssertFalse(c.frame(frame(lit: false), id: "buzz", booted: true, now: 205))
         XCTAssertFalse(c.frame(frame(lit: true), id: "buzz", booted: true, now: 214))
         XCTAssertFalse(t.exists("buzz"))
         // existing: not taken again after a reboot
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: false, now: 300))
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: true, now: 301))
-        XCTAssertFalse(c.frame(frame(lit: true), id: "fizz", booted: true, now: 305))
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: false, now: 300))
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 301))
+        XCTAssertFalse(c.frame(frame(lit: true), id: "other-fw", booted: true, now: 305))
     }
 
     func testInfoLookup() {

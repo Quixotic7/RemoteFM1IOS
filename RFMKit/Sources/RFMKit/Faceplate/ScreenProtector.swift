@@ -2,8 +2,8 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // The display up close and its film:
 //   ScreenProtector  the clear protective film the FM-1 ships with: a faint sheen over the display, with its solid
-//                    red tab (about a knob cap's size) sticking out beside the screen's corner nearest KN1 (landscape:
-//                    right of the screen, level with its top; phone portrait: below its bottom-leading corner).
+//                    red tab (about a knob cap's size) sticking out right of the screen, level with its top, square to
+//                    the panel; on the wide (landscape) layouts only, as the FM-1 looks.
 //                    Dragging the tab across the screen folds the film back (the fold line halfway between the tab's
 //                    place and the finger); let go early and it springs back, past a third of the way it peels off and
 //                    is gone, the red square with it. Remembered (UserDefaults: the app's; in the AU the extension's, so
@@ -51,12 +51,11 @@ public struct FilmGeometry: Equatable, Sendable {
     /// the film's back edge along the peel (from the tab's centre, <= 0): the fold line starts there, so nothing folds at rest
     let back: CGFloat
 
-    /// the tab's square beside a display: right of it, level with its top, or (below) under its leading corner;
-    /// overlapping the bezel a little
-    public static func tab(display d: CGRect, below: Bool) -> CGRect {
+    /// the tab's square beside a display, as on the FM-1: right of it, level with its top, overlapping the bezel a
+    /// little, square to the panel (not turned)
+    public static func tab(display d: CGRect) -> CGRect {
         let t = (d.width * 0.13).rounded(), o = (t * 0.15).rounded()
-        return below ? CGRect(x: d.minX + o, y: d.maxY - o, width: t, height: t)
-                     : CGRect(x: d.maxX - o, y: d.minY + o, width: t, height: t)
+        return CGRect(x: d.maxX - o, y: d.minY + o, width: t, height: t)
     }
 
     public init(display: CGRect, radius: CGFloat, tab: CGRect) {
@@ -64,9 +63,8 @@ public struct FilmGeometry: Equatable, Sendable {
         self.radius = radius
         self.tab = tab
         let c = CGPoint(x: tab.midX, y: tab.midY)
-        var dx = display.midX - c.x, dy = display.midY - c.y
-        let n = max(hypot(dx, dy), 1e-9)
-        dx /= n; dy /= n
+        // the peel runs straight across the screen, away from the tab (the tab is right of the screen: leftward)
+        let dx: CGFloat = tab.midX >= display.midX ? -1 : 1, dy: CGFloat = 0
         direction = CGVector(dx: dx, dy: dy)
         // the display's rounded square
         var sq: [CGPoint] = []
@@ -79,15 +77,10 @@ public struct FilmGeometry: Equatable, Sendable {
                 sq.append(CGPoint(x: x + r * CGFloat(cos(a)), y: y + r * CGFloat(sin(a))))
             }
         }
-        // the strip: the tab and a stretch of the display's edge nearest it, as wide as the tab, in its hull
-        let hw = max(tab.width, tab.height) * 0.7
-        let q = CGPoint(x: min(max(c.x, display.minX), display.maxX), y: min(max(c.y, display.minY), display.maxY))
-        let qi = CGPoint(x: q.x + dx * hw * 2, y: q.y + dy * hw * 2)
-        let ex = -dy * hw, ey = dx * hw
-        let tw = hw * 0.7
-        let strip = Self.hull([CGPoint(x: qi.x + ex, y: qi.y + ey), CGPoint(x: qi.x - ex, y: qi.y - ey),
-                               CGPoint(x: c.x - dx * tw + ex * 0.7, y: c.y - dy * tw + ey * 0.7),
-                               CGPoint(x: c.x - dx * tw - ex * 0.7, y: c.y - dy * tw - ey * 0.7)])
+        // the strip: a straight band from inside the display's edge out to the tab, as tall as the tab
+        let x0 = dx < 0 ? display.maxX - r : display.minX + r
+        let strip = [CGPoint(x: x0, y: tab.minY), CGPoint(x: c.x, y: tab.minY),
+                     CGPoint(x: c.x, y: tab.maxY), CGPoint(x: x0, y: tab.maxY)]
         pieces = [Self.oriented(sq), Self.oriented(strip)]
         let proj = pieces.flatMap { $0 }.map { ($0.x - c.x) * dx + ($0.y - c.y) * dy }
         let reach = proj.max() ?? 0

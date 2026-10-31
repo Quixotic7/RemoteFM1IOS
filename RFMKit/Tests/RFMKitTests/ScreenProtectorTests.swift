@@ -26,24 +26,25 @@ final class ScreenProtectorTests: XCTestCase {
 
     func testTabSitsBesideTheScreenNearestKN1() {
         let d = CGRect(x: 198, y: 20, width: 172, height: 172)
-        let right = FilmGeometry.tab(display: d, below: false)       // landscape: right of the screen, level with its top
+        let right = FilmGeometry.tab(display: d)       // landscape: right of the screen, level with its top
         XCTAssertGreaterThan(right.maxX, d.maxX)
         XCTAssertLessThan(right.minX, d.maxX, "overlapping the bezel a little")
         XCTAssertLessThan(right.minY - d.minY, right.height)
-        let below = FilmGeometry.tab(display: d, below: true)        // phone portrait: under the leading corner
-        XCTAssertGreaterThan(below.maxY, d.maxY)
-        XCTAssertLessThan(below.minX - d.minX, below.width)
     }
 
     func testFoldFollowsTheFingerFromTheTabAcrossTheScreen() {
         let d = CGRect(x: 0, y: 0, width: 200, height: 200)
-        let g = FilmGeometry(display: d, radius: 18, tab: FilmGeometry.tab(display: d, below: false))
-        // the tab at the screen's top right: dragging toward the screen's middle (down left) folds, away does nothing
-        XCTAssertLessThan(g.direction.dx, 0)
-        XCTAssertGreaterThan(g.direction.dy, 0)
-        XCTAssertGreaterThan(g.fold(dx: -100, dy: 100), 0.2)
-        XCTAssertEqual(g.fold(dx: 100, dy: -100), 0)
-        XCTAssertEqual(g.fold(dx: -9000, dy: 9000), 1)
+        let g = FilmGeometry(display: d, radius: 18, tab: FilmGeometry.tab(display: d))
+        // the tab right of the screen: the peel runs straight left across it, right does nothing
+        XCTAssertEqual(g.direction.dx, -1)
+        XCTAssertEqual(g.direction.dy, 0)
+        XCTAssertGreaterThan(g.fold(dx: -100, dy: 0), 0.2)
+        XCTAssertEqual(g.fold(dx: -100, dy: 0), g.fold(dx: -100, dy: 60), "only the horizontal travel counts")
+        XCTAssertEqual(g.fold(dx: 100, dy: 0), 0)
+        XCTAssertEqual(g.fold(dx: -9000, dy: 0), 1)
+        // the strip to the tab is square to the panel: straight top and bottom edges
+        XCTAssertEqual(g.pieces[1].map(\.y).min(), g.tab.minY)
+        XCTAssertEqual(g.pieces[1].map(\.y).max(), g.tab.maxY)
         // unfolded: the whole film on (the display and the strip to the tab), no flap, the tab in its place
         let f0 = g.folded(0)
         XCTAssertEqual(f0.left.count, 2)
@@ -56,9 +57,6 @@ final class ScreenProtectorTests: XCTestCase {
         XCTAssertLessThan(f.tab.x, g.tab.midX)
         // fully folded: nothing left on
         XCTAssertTrue(g.folded(g.length * 1.01).left.isEmpty)
-        // below the screen's leading corner: up and right (toward the middle) folds
-        let b = FilmGeometry(display: d, radius: 18, tab: FilmGeometry.tab(display: d, below: true))
-        XCTAssertGreaterThan(b.fold(dx: 100, dy: -100), 0.2)
         XCTAssertFalse(ScreenProtector.peels(0.2))
         XCTAssertTrue(ScreenProtector.peels(0.5))
     }
