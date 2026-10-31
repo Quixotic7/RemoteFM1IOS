@@ -769,6 +769,18 @@ public final class CorePlayer {
         return true
     }
 
+    /// (section 18 step 3: Back up everything) every firmware's saved memory as it is now (the running one saved
+    /// first)
+    public func currentFlashes() async -> [Backup.Current] {
+        if bootedID != nil { await saveNow() }
+        return cores.compactMap { c in
+            let url = flashURL(c.id)
+            guard let d = io.sync(execute: { FlashFile.read(url, expectedSize: 0).data }) else { return nil }
+            return Backup.Current(firmwareID: c.firmwareID, firmwareName: c.name,
+                                  kind: c.kind, version: c.version, sha256: c.sha256, flash: d)
+        }
+    }
+
     /// waits until the queued writes are on disk
     private func flush() async {
         await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in io.async { k.resume() } }

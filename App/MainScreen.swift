@@ -18,6 +18,11 @@
 // running RemoteFM1, or an older RemoteFM1, gets a prompt over the faceplate (InstallPrompter; DEBUG: -fm1prompt
 // install | unanswered | bluetooth | update) whose Install opens that page. Settings › Send a DX7 cartridge (RFMKit's
 // Cart/: a .syx sent as a user bank; -sheetpage cart, DEBUG -cartdemo); an .syx opened from Files lands there.
+// PLAN.md section 18 step 3: a state's … has Share… (a .rfm1state through the share sheet); an opened .rfm1state is
+// imported into the library and shown on its firmware's States page (not installed: said, with Get firmware when the
+// catalog has it); Documents/States mirrors the library (StateMirror: at launch, on a library change, back in the
+// foreground); Settings › Your data: Back up everything (Documents/Backups, then Share… as a zip) and Restore from
+// backup… (a folder or .rfm1state files; duplicates skipped). DEBUG -backupdemo: a backup made at launch (screenshots).
 
 import UniformTypeIdentifiers
 
@@ -49,6 +54,8 @@ struct LaunchOptions {
     var safetyDemo = false                              // (DEBUG) -safetydemo: a few made-up safety copies
     var statesDemo = false                              // (DEBUG) -statesdemo: a few made-up states (one of another version)
     var statesSave = false                              // (DEBUG) -statessave: the States page's Save as… field open
+    var statesShare: String?                            // (DEBUG) -statesshare <name>: that state's … open (Share…)
+    var backupDemo = false                              // (DEBUG) -backupdemo: Back up everything run at launch
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -77,6 +84,8 @@ struct LaunchOptions {
         safetyDemo = a.contains("-safetydemo")
         statesDemo = a.contains("-statesdemo")
         statesSave = a.contains("-statessave")
+        statesShare = value("-statesshare")
+        backupDemo = a.contains("-backupdemo")
         #endif
     }
 }
@@ -112,6 +121,16 @@ struct MainScreen: View {
     @State private var source: SoundSource
     @State private var prompter: InstallPrompter
     @State private var launched = false
+    @State private var shareItem: ShareItem?            // (section 18 step 3) a file in the share sheet
+    @State private var stateNotice = ""                 // an opened .rfm1state: what happened (the States page)
+    @State private var stateNeeds: String?              // its firmware, not installed: the catalog's id (Get firmware)
+    @State private var importingBackup = false          // the document picker picks a backup, not firmware
+    @State private var backingUp = false
+    @State private var backupNote = ""
+    @State private var lastBackup: URL?
+    @Environment(\.scenePhase) private var phase
+    private static let mirror = StateMirror()
+    private static let mirrorQueue = DispatchQueue(label: "rfm1.mirror", qos: .utility)
     @State private var turned = false                  // (-orientation landscape refused: drawn turned, for screenshots)
     private let store = ThemeStore.shared
     private let options = LaunchOptions()
@@ -182,9 +201,11 @@ struct MainScreen: View {
         .sheet(isPresented: $showAbout) {
             AboutFirmware(info: player.current, onDelete: deleteAction(player.current))
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [FirmwareLibrary.fileType, .data],
+        .fileImporter(isPresented: $showImporter,
+                      allowedContentTypes: importingBackup ? [.folder, Self.stateType] : [FirmwareLibrary.fileType, .data],
                       allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
+            if importingBackup { importingBackup = false; restore(urls); return }
             PickerFolder.firmware.remember(urls)
             var last: ImportedFirmware?
             for u in urls { last = (try? library.importFile(u)) ?? last }
@@ -197,6 +218,13 @@ struct MainScreen: View {
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .onAppear(perform: launch)
+        .sheet(item: $shareItem) { ActivitySheet(url: $0.url) }
+        .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
+        .onChange(of: phase) { _, p in if p == .active { syncMirror() } }   // (files put in Documents/States meanwhile)
+        .onOpenURL { url in                             // (a .rfm1state: imported, its States page)
+            guard url.isFileURL, url.pathExtension.lowercased() == StateFile.fileExtension else { return }
+            openState(url)
+        }
         .onOpenURL { url in                             // (an .syx from Files or AirDrop: the cartridge page)
             guard url.isFileURL, url.pathExtension.lowercased() == "syx" else { return }
             CartSender.shared(for: controller).add(url: url)
@@ -248,6 +276,8 @@ struct MainScreen: View {
         if options.askReset { askReset = true }
         if options.safetyDemo { safetyDemo() }
         if options.statesDemo { statesDemo() }
+        syncMirror()
+        if options.backupDemo { backUp() }
         #endif
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
@@ -552,16 +582,24 @@ struct MainScreen: View {
     private var statesPage: some View {
         let c = player.current
         return SheetPage("States", backTitle: "Firmware", back: { page = .firmware }) {
+            if !stateNotice.isEmpty {
+                SheetNote(stateNotice, color: .orange).padding(.top, 12)
+                if let id = stateNeeds {
+                    SheetButton("Get firmware") { catalogItem = id; stateNeeds = nil; page = .catalogItem }.padding(.top, 8)
+                }
+            }
             SheetSectionTitle(c.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
             StatesList(firmware: c?.name ?? "", version: c?.version ?? "", states: player.states,
-                       startSaving: options.statesSave,
+                       startSaving: options.statesSave, startEditing: options.statesShare,
                        save: { n in Task { await player.saveState(name: n) } },
                        load: { s in Task { await player.loadState(s) } },
                        rename: { s, n in _ = try? player.library.rename(s, to: n) },
-                       delete: { s in player.library.delete(s) })
+                       delete: { s in player.library.delete(s) },
+                       share: { s in share(s) })
             SheetNote("A state is the firmware's memory (its patches, banks, sequences) with MASTER, the octave and the "
                       + "keys' touch, under a name. The app and every AU instance share them: a state saved here loads "
-                      + "in the AU instrument, and the other way. Loading keeps a safety copy of the current memory first.")
+                      + "in the AU instrument, and the other way. Loading keeps a safety copy of the current memory first. "
+                      + "Each state is also a .rfm1state file in Files › RemoteFM1 › States; Share… sends one.")
             SheetList {
                 SheetRow("Safety copies", value: "\(player.safetyCopies.count)", divider: false) { page = .safetyCopies }
             }
@@ -657,7 +695,7 @@ struct MainScreen: View {
     }
 
     private var settingsPage: some View {
-        SheetPage("Settings", back: { page = nil }) {
+        SheetPage("Settings", scrollTo: options.sheetScroll, back: { page = nil }) {
             SheetSectionTitle("Keys", top: 12)
             SheetList {
                 SheetToggle("Step numbers on the keys", on: $ui.stepNumbers, divider: false)
@@ -675,7 +713,109 @@ struct MainScreen: View {
                 SendCartRow(sender: .shared(for: controller)) { page = .cart }
             }
             SheetNote("A DX7 cartridge (.syx) becomes a user bank on RemoteFM1 0.3.0 or later.")
+            SheetSectionTitle("Your data").id("data")
+            SheetList {
+                SheetRow(backingUp ? "Backing up…" : "Back up everything", chevron: false) { if !backingUp { backUp() } }
+                if let lastBackup {
+                    SheetRow("Share the backup…", chevron: false) { shareBackup(lastBackup) }
+                }
+                SheetRow("Restore from backup…", divider: false, chevron: false) {
+                    importingBackup = true
+                    showImporter = true
+                }
+            }
+            SheetNote(backupNote.isEmpty
+                      ? "Back up everything writes every state, each firmware's current memory and the newest safety "
+                        + "copies into Files › RemoteFM1 › Backups. Restore adds a backup's states to the library; "
+                        + "nothing is overwritten."
+                      : backupNote)
         }
+    }
+
+    // MARK: files and backups (section 18 step 3)
+
+    static let stateType = UTType(exportedAs: StateFile.typeIdentifier, conformingTo: .data)
+
+    /// Documents/States made like the library (off the main thread; a file the user added there: imported)
+    private func syncMirror() {
+        let lib = player.library
+        Self.mirrorQueue.async {
+            let r = StateMirror(root: Self.mirror.root, library: lib).sync()
+            if r.imported > 0 || !r.failed.isEmpty {
+                RFMShared.log("states").info("mirror: \(r.imported) imported, \(r.failed.count) unreadable")
+            }
+        }
+    }
+
+    private func share(_ s: SavedState) {
+        do { shareItem = ShareItem(url: try StateFile.temporaryFile(s, library: player.library)) }
+        catch { stateNotice = "Can't share \"\(s.name)\": \(error.localizedDescription)" }
+    }
+
+    /// a .rfm1state opened (Files, AirDrop, Mail): into the library, then its firmware's States page
+    private func openState(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        stateNeeds = nil
+        do {
+            let i = try player.library.importFile(url)
+            let s = i.state
+            let what = i.duplicate ? "\"\(s.name)\" is already in the library." : "Imported \"\(s.name)\"."
+            if let c = player.cores.first(where: { $0.firmwareID == s.firmwareID && $0.id == player.selected })
+                ?? player.cores.first(where: { $0.firmwareID == s.firmwareID }) {
+                if c.id != player.selected { player.select(c.id) }
+                stateNotice = what + " Load it below."
+            } else {
+                let name = s.firmwareName.isEmpty ? s.firmwareID : s.firmwareName
+                let a = catalog.available.first { $0.id == s.firmwareID }
+                stateNeeds = a?.id
+                stateNotice = what + " It's a state of \(name) \(s.version), which isn't installed"
+                    + (a == nil ? ": add that firmware to load it." : ": get it, then load the state from its States page.")
+            }
+        } catch {
+            stateNotice = "\(url.lastPathComponent) wasn't imported: \(error.localizedDescription)"
+        }
+        page = .states
+        withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+    }
+
+    private func backUp() {
+        backingUp = true
+        backupNote = ""
+        let lib = player.library, hist = player.history
+        let app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        Task {
+            let cur = await player.currentFlashes()
+            let r = await Task.detached { Result { try Backup.write(library: lib, history: hist, current: cur, app: app) } }.value
+            backingUp = false
+            switch r {
+            case .success(let (dir, m)):
+                lastBackup = dir
+                backupNote = "Backed up \(m.states.count) state\(m.states.count == 1 ? "" : "s"), \(m.current.count) "
+                    + "firmware memor\(m.current.count == 1 ? "y" : "ies") and \(m.safetyCopies.count) safety "
+                    + "cop\(m.safetyCopies.count == 1 ? "y" : "ies") into Files › RemoteFM1 › Backups › \(dir.lastPathComponent)."
+            case .failure(let e):
+                backupNote = "The backup failed: \(e.localizedDescription)"
+            }
+        }
+    }
+
+    private func shareBackup(_ dir: URL) {
+        do { shareItem = ShareItem(url: try Backup.zip(dir)) }
+        catch { backupNote = "Can't zip the backup: \(error.localizedDescription)" }
+    }
+
+    private func restore(_ urls: [URL]) {
+        var all = Backup.RestoreReport()
+        for u in urls {
+            let scoped = u.startAccessingSecurityScopedResource()
+            let r = Backup.restore(from: u, into: player.library)
+            if scoped { u.stopAccessingSecurityScopedResource() }
+            all.imported += r.imported; all.duplicates += r.duplicates; all.failed += r.failed
+        }
+        let ids = Set(player.cores.map(\.firmwareID))
+        let missing = Set(all.imported.filter { !ids.contains($0.firmwareID) }.map { $0.firmwareName.isEmpty ? $0.firmwareID : $0.firmwareName })
+        backupNote = all.text + (missing.isEmpty ? "" : " Not installed: \(missing.sorted().joined(separator: ", ")) (its states wait in the library).")
     }
 }
 
@@ -716,4 +856,19 @@ struct FirmwareDeleteRow: View {
         .frame(minHeight: 52)
         .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
     }
+}
+
+/// (section 18 step 3) a file for the share sheet
+struct ShareItem: Identifiable {
+    let url: URL
+    var id: String { url.path }
+}
+
+/// the system share sheet with one file (AirDrop, Mail, Save to Files, ...)
+struct ActivitySheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

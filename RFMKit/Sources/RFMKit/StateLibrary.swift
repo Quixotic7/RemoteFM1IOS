@@ -129,11 +129,16 @@ public final class StateLibrary: @unchecked Sendable {
                            note: note, firmwareID: firmwareID, firmwareName: firmwareName, kind: kind, version: version,
                            sha256: sha256, date: now(), flashSize: flash.count, flashSHA256: FlashFile.sha256(flash),
                            master: master, transpose: settings?.transpose, keyTouch: settings?.keyTouch, origin: origin)
+        try add(s, flash: flash)
+        return s
+    }
+
+    /// (a save, an import) a state's files written: the bytes first, checked, then the entry; the others told
+    func add(_ s: SavedState, flash: Data) throws {
         let z = (try? (flash as NSData).compressed(using: .lzfse) as Data) ?? flash
         try FlashFile.write(z, to: flashURL(s), keepPrev: false)
         try FlashFile.encoder.encode(s).write(to: entryURL(s), options: .atomic)
         Self.postChange()
-        return s
     }
 
     /// a state renamed (and its note, when given)

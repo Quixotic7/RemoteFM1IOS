@@ -253,7 +253,8 @@ struct AUSheet: View {
             SheetSectionTitle("\(name.isEmpty ? "Firmware" : name) \(model.status.coreVersion)", top: 12)
             StatesList(firmware: name, version: model.status.coreVersion, states: model.states,
                        saveTitle: "Save to library…", save: { model.saveState($0) }, load: { model.loadState($0) },
-                       rename: { model.renameState($0, $1) }, delete: { model.deleteState($0) })
+                       rename: { model.renameState($0, $1) }, delete: { model.deleteState($0) },
+                       shareNote: "Share it from the RemoteFM1 app (Firmware › States); it's in Files › RemoteFM1 › States too.")
             SheetNote("Save to library keeps this instance's memory, MASTER, the octave and the keys' touch under a name; "
                       + "the RemoteFM1 app and every AU instance share the library. Loading replaces this instance's "
                       + "memory (a safety copy is kept first); the host keeps it in the project at its next save.")

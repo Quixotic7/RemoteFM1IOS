@@ -2,7 +2,8 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // PLAN.md section 18 step 2 in the sheet (the app's States page, the AU's): Save as… (a name, "<Firmware> <date>"
 // to start with), the firmware's states newest first (name; date, version, "made with" another one), Load asked
-// again inline, and per state Rename and Delete (asked again).
+// again inline, and per state Rename and Delete (asked again). Step 3: the … also has Share… (the app: a .rfm1state
+// through the share sheet) or, without one (the AU), a note where to share from.
 
 #if os(iOS)
 import SwiftUI
@@ -16,6 +17,10 @@ public struct StatesList: View {
     let load: (SavedState) -> Void
     let rename: (SavedState, String) -> Void
     let delete: (SavedState) -> Void
+    let share: ((SavedState) -> Void)?
+    let shareNote: String
+    let startEditing: String?           // (screenshots) the first state whose name starts so: its … open
+    @State private var started = false
 
     private enum Ask: Equatable { case load(String), delete(String) }
     @State private var saving = false
@@ -26,9 +31,10 @@ public struct StatesList: View {
 
     /// startSaving: the Save as… field open (screenshots)
     public init(firmware: String, version: String, states: [SavedState], saveTitle: String = "Save as…",
-                startSaving: Bool = false,
+                startSaving: Bool = false, startEditing: String? = nil,
                 save: @escaping (String) -> Void, load: @escaping (SavedState) -> Void,
-                rename: @escaping (SavedState, String) -> Void, delete: @escaping (SavedState) -> Void) {
+                rename: @escaping (SavedState, String) -> Void, delete: @escaping (SavedState) -> Void,
+                share: ((SavedState) -> Void)? = nil, shareNote: String = "") {
         self.firmware = firmware
         self.version = version
         self.states = states
@@ -37,6 +43,9 @@ public struct StatesList: View {
         self.load = load
         self.rename = rename
         self.delete = delete
+        self.share = share
+        self.shareNote = shareNote
+        self.startEditing = startEditing
         _saving = State(initialValue: startSaving)
         _saveName = State(initialValue: startSaving ? StateLibrary.defaultName(firmware) : "")
     }
@@ -69,6 +78,12 @@ public struct StatesList: View {
                 .padding(.top, 12)
             }
         }
+        .task(id: states.count) {
+            guard let n = startEditing, !started, let s = states.first(where: { $0.name.hasPrefix(n) }) else { return }
+            started = true
+            editName = s.name
+            editing = s.id
+        }
     }
 
     @ViewBuilder private func entry(_ s: SavedState) -> some View {
@@ -88,6 +103,17 @@ public struct StatesList: View {
                     rename(s, editName)
                 }
                 HStack {
+                    if let share {
+                        Button { share(s) } label: {
+                            Label("Share…", systemImage: "square.and.arrow.up").font(RFMFonts.ui(14, 700))
+                                .foregroundStyle(Palette.sheetAccent)
+                                .padding(.horizontal, 16).frame(height: 40).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else if !shareNote.isEmpty {
+                        Text(shareNote).font(RFMFonts.ui(12, 500)).foregroundStyle(Palette.sheetMuted2)
+                            .padding(.leading, 16).fixedSize(horizontal: false, vertical: true)
+                    }
                     Spacer()
                     Button { withAnimation { ask = .delete(s.id) } } label: {
                         Text("Delete…").font(RFMFonts.ui(14, 700)).foregroundStyle(SheetConfirm.red)
@@ -115,7 +141,7 @@ public struct StatesList: View {
                     .frame(width: 40, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Rename or delete \(s.name)")
+            .accessibilityLabel(share == nil ? "Rename or delete \(s.name)" : "Rename, share or delete \(s.name)")
             Button { withAnimation { ask = .load(s.id); editing = nil } } label: {
                 Text("Load").font(RFMFonts.ui(14, 700)).foregroundStyle(Palette.sheetAccent)
                     .padding(.horizontal, 6).frame(height: 44).contentShape(Rectangle())

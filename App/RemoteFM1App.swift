@@ -105,7 +105,7 @@ struct RemoteFM1App: App {
 
     /// an .rfm1 opened from Files, Safari's downloads or AirDrop: copied into Documents/Firmware and selected
     @MainActor static func open(_ url: URL, _ library: FirmwareLibrary, _ player: CorePlayer) {
-        guard url.isFileURL, url.pathExtension.lowercased() != "syx" else { return }   // (.syx: MainScreen)
+        guard url.isFileURL, !["syx", StateFile.fileExtension].contains(url.pathExtension.lowercased()) else { return }   // (.syx, .rfm1state: MainScreen)
         do {
             let f = try library.importFile(url)
             player.catalogChanged()

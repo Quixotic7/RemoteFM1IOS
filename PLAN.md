@@ -679,6 +679,26 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    -statessave); sim_autest AUPAGE=states.
 3. **Files.** `.rfm1state` (one file: a manifest and the flash) to share and import (Files, AirDrop); Back up
    everything into the RemoteFM1 folder; the states mirrored there.
+   *As built (2026-10-31):* `StateFile.swift`, format in docs/RFM1STATE-FORMAT.md: `RFM1STAT`, UInt32 LE manifest
+   length, JSON manifest (format 1, the SavedState, flash encoding and length), the LZFSE flash; decode checks every
+   length, the size and SHA-256 and refuses a bad file in plain words. `StateLibrary.importState/importFile`
+   (duplicate = the same flash SHA-256 for that firmware: skipped, the library's returned; an id kept when free),
+   `allStates()`. App/Info.plist exports `com.quixotic7.remotefm1.state` (.rfm1state, Owner): an opened file is
+   imported and the sheet opens on its firmware's States page (that firmware selected; not installed: said, with
+   Get firmware when the catalog lists its id). Share…: the state's … (StatesList `share`), a temporary .rfm1state
+   in UIActivityViewController. **The AU has no share or export**: the library is the App Group's, so whatever the
+   AU saves is in the app's States page and its Documents mirror; the AU's … says "Share it from the RemoteFM1 app"
+   (no Exports folder to move, nothing to get out of step). `StateMirror`: Documents/States/<Firmware>/<name>.rfm1state
+   + README.txt, synced at launch, on every library change (Darwin notification) and back in the foreground; the
+   library wins (a rename moves the file, a delete removes it, a file removed in Files is written again); a
+   .rfm1state the user puts anywhere in the folder is imported (then moved to its place); a ledger `.mirror.json`
+   tells the mirror's files from the user's. Settings › Your data: Back up everything (`Backup.write`:
+   Documents/Backups/RemoteFM1 backup <date>/ with States/, Current/ (`CorePlayer.currentFlashes()`, the running
+   one saved first; the same flash once), Safety copies/ (the newest 3 per firmware), manifest.json, README.txt),
+   Share the backup… (a zip by NSFileCoordinator `.forUploading`), Restore from backup… (a folder or .rfm1state files;
+   a backup's States and Current imported, duplicates skipped, unreadable files named; a zip: unzip in Files first).
+   Tests: StateFileTests (round trip, cut short / not a state / damaged / bad manifest, import duplicates, the mirror,
+   backup contents, restore). sim_shots: phone-states-share (-statesshare), phone-settings-backup (-backupdemo).
 4. **Versions.** A state remembers its firmware version; loading it into another version warns first (with a safety
    copy); an update keeps the previous .rfm1 until the user removes it; a flash that looks wiped after a boot offers
    the safety copy.
