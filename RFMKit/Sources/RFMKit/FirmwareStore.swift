@@ -347,17 +347,22 @@ public final class FirmwareStore {
             didChange?()
             throw FirmwareStoreError.invalid(why)
         }
-        let old = library.files.filter {
+        // older versions of the same firmware: the newest of them is kept (a way back if the new one doesn't read the
+        // memory), the rest removed; the user removes the kept one when they're happy
+        let older = library.files.filter {
             $0.error == nil && $0.coreID == f.coreID && $0.sha256 != f.sha256 && !FirmwareVersion.less(f.version, $0.version)
-        }
+        }.sorted { FirmwareVersion.less($1.version, $0.version) }
+        let kept = older.first
+        let old = Array(older.dropFirst())
         didChange?()
-        if !old.isEmpty {
-            willReplace?(old, f)
+        if !older.isEmpty {
+            willReplace?(older, f)
             for o in old { library.delete(o) }
             didChange?()
         }
-        message = old.isEmpty ? "Installed \(f.name) \(f.version)." : "Updated \(f.name) to \(f.version)."
-        log.info("\(self.message, privacy: .public) (\(f.file, privacy: .public); removed \(old.map(\.file), privacy: .public))")
+        message = older.isEmpty ? "Installed \(f.name) \(f.version)."
+            : "Updated \(f.name) to \(f.version). \(kept.map { "\($0.version) is kept: delete it when you're happy." } ?? "")"
+        log.info("\(self.message, privacy: .public) (\(f.file, privacy: .public); kept \(kept?.file ?? "-", privacy: .public); removed \(old.map(\.file), privacy: .public))")
         return f
     }
 }

@@ -326,17 +326,20 @@ final class FirmwareStoreTests: XCTestCase {
     }
 
     /// an update: the new file in, the older one of the same id out (willReplace told first)
-    func testUpdateRemovesTheOlderFile() async throws {
-        // another build of AMB-1 1.3: the fixture with a custom section added (a different SHA-256, still valid)
+    func testUpdateKeepsThePreviousFile() async throws {
+        // two other builds of AMB-1 1.3: the fixture with a custom section added (a different SHA-256, still valid)
         var other = try amb
         other.append(contentsOf: [0x00, 0x06, 0x01, UInt8(ascii: "x")] + Array("test".utf8))
+        var older = try amb
+        older.append(contentsOf: [0x00, 0x06, 0x01, UInt8(ascii: "y")] + Array("tset".utf8))
         let lib = library()
         try FileManager.default.createDirectory(at: lib.folder, withIntermediateDirectories: true)
         try other.write(to: lib.folder.appendingPathComponent("amb-local.rfm1"))
+        try older.write(to: lib.folder.appendingPathComponent("amb-local-2.rfm1"))
         lib.sync()
-        let old = try XCTUnwrap(lib.files.first)
-        XCTAssertNil(old.error, "the fixture with a custom section added should still load")
-        XCTAssertNotEqual(old.sha256, Self.ambSHA)
+        XCTAssertEqual(lib.files.count, 2)
+        XCTAssertTrue(lib.files.allSatisfy { $0.error == nil }, "the fixture with a custom section added should still load")
+        let before = Set(lib.files.map(\.sha256))
 
         let t = try transport()
         let s = store(lib, t)
@@ -348,16 +351,23 @@ final class FirmwareStoreTests: XCTestCase {
         s.willReplace = { o, n in replaced = (o.map(\.sha256), n.sha256) }
         await s.install(e)
         XCTAssertEqual(s.failure, "")
-        XCTAssertEqual(s.message, "Updated AMB-1 to 1.3.")
-        XCTAssertEqual(replaced?.0, [old.sha256])
+        XCTAssertEqual(s.message, "Updated AMB-1 to 1.3. 1.3 is kept: delete it when you're happy.")
+        XCTAssertEqual(Set(replaced?.0 ?? []), before)
         XCTAssertEqual(replaced?.1, Self.ambSHA)
-        XCTAssertEqual(lib.files.map(\.sha256), [Self.ambSHA])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: lib.mirror.appendingPathComponent("\(old.sha256).rfm1").path))
-        // a saved choice of the old file finds the new one by id
+        // the new one and one previous build kept (a way back), the other removed
+        XCTAssertEqual(lib.files.count, 2)
+        XCTAssertTrue(lib.files.contains { $0.sha256 == Self.ambSHA })
+        XCTAssertEqual(Set(lib.files.map(\.sha256)).subtracting([Self.ambSHA]).count, 1)
+        let old = try XCTUnwrap(lib.files.first { $0.sha256 != Self.ambSHA })
+        // a saved choice of the kept file still finds that file; one of the removed file finds a build of its id
         let r = CoreRef(kind: "wasm", id: "amb", version: "1.3", sha256: old.sha256)
             .resolve(in: FirmwareCatalog(dir: lib.mirror).cores())
-        XCTAssertEqual(r?.key, FirmwareCatalog.keyPrefix + Self.ambSHA)
-        XCTAssertEqual(r?.keepFlash, true)
+        XCTAssertEqual(r?.key, FirmwareCatalog.keyPrefix + old.sha256)
+        let gone = try XCTUnwrap(before.subtracting(lib.files.map(\.sha256)).first)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lib.mirror.appendingPathComponent("\(gone).rfm1").path))
+        let r2 = CoreRef(kind: "wasm", id: "amb", version: "1.3", sha256: gone)
+            .resolve(in: FirmwareCatalog(dir: lib.mirror).cores())
+        XCTAssertEqual(r2?.keepFlash, true)
     }
 
     func testCancel() async throws {

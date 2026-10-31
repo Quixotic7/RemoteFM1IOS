@@ -702,6 +702,12 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
 4. **Versions.** A state remembers its firmware version; loading it into another version warns first (with a safety
    copy); an update keeps the previous .rfm1 until the user removes it; a flash that looks wiped after a boot offers
    the safety copy.
+   *As built (2026-10-31):* a state from another version asks "was made with X; this is Y. Another version may not
+   read it, or may reset it. Load it anyway?" (`SavedState.loadQuestion`); Get firmware's update keeps the newest older
+   build of that firmware (the rest removed; its message says which is kept); after a version change the player watches
+   the first 6 saves, and one that's (nearly) all erased while the old memory held something shows "<Firmware> started
+   with an empty memory" with Restore it / Keep the new one (`CorePlayer.wipedCopy`, `WipedMemoryCard`). A firmware
+   that resets to its own defaults rather than erasing isn't caught: the "before update" copy is still in Safety copies.
 5. **The firmware's own web managers.** As the website does (RemoteFM1 `web/managers/`: `fm1-shim.js` replaces Web
    MIDI with a port named as the firmware's USB port, wired to the running firmware): a Manager page in a WKWebView
    loading remotefm1.com's hosted manager with the same shim injected, bridged to the engine. Needs host SysEx into

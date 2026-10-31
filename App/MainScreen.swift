@@ -189,6 +189,11 @@ struct MainScreen: View {
                 VStack(spacing: 10) {
                     Spacer()
                     if !midi.learn.active {
+                        if let c = player.wipedCopy {
+                            WipedMemoryCard(copy: c, firmware: player.current?.name ?? "The firmware") { restore in
+                                Task { _ = await player.answerWiped(restore: restore) }
+                            }
+                        }
                         InstallPromptView(prompt: prompter.prompt, install: openInstall) { prompter.notNow() }
                     }
                     PerfBanner(player.perfNote)

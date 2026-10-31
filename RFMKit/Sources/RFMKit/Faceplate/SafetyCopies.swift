@@ -117,3 +117,41 @@ public struct SafetyCopiesList: View {
     static func date(_ d: Date) -> String { d.formatted(date: .abbreviated, time: .shortened) }
 }
 #endif
+
+#if os(iOS)
+/// (section 18 step 4) a firmware came up after a version change with an empty memory: the copy from before, offered
+public struct WipedMemoryCard: View {
+    let copy: FlashHistory.Snapshot
+    let firmware: String
+    let answer: (Bool) -> Void
+
+    public init(copy: FlashHistory.Snapshot, firmware: String, answer: @escaping (Bool) -> Void) {
+        self.copy = copy
+        self.firmware = firmware
+        self.answer = answer
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(firmware) started with an empty memory").font(RFMFonts.ui(16, 700)).foregroundStyle(Palette.sheetText)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text("This version may not read what \(copy.version.isEmpty ? "the last version" : copy.version) saved. "
+                 + "Your memory from before the update is kept: restore it, or keep the new one.")
+                .font(RFMFonts.ui(13)).foregroundStyle(Palette.sheetMuted2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                SheetButton("Restore it", accent: true) { answer(true) }
+                SheetButton("Keep the new one") { answer(false) }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 4)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Palette.sheetBackground.opacity(0.98)))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.sheetAccent, lineWidth: 1.5))
+        .padding(.horizontal, 16)
+        .environment(\.colorScheme, .dark)
+    }
+}
+#endif

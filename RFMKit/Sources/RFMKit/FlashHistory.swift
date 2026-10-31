@@ -18,6 +18,14 @@ import CryptoKit
 import Foundation
 
 public enum FlashFile {
+    /// a flash image with (almost) nothing in it: at least 99 % of its bytes erased (0xFF) or zero
+    public static func looksErased(_ d: Data) -> Bool {
+        guard !d.isEmpty else { return true }
+        var blank = 0
+        for b in d where b == 0xFF || b == 0 { blank += 1 }
+        return blank * 100 >= d.count * 99
+    }
+
     /// which firmware wrote a flash file (the sidecar <name>.json)
     public struct Meta: Codable, Sendable, Equatable {
         public var firmwareID: String

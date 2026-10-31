@@ -88,9 +88,8 @@ public struct StatesList: View {
 
     @ViewBuilder private func entry(_ s: SavedState) -> some View {
         if ask == .load(s.id) {
-            SheetAsk(question: "Load \"\(s.name)\"\(s.versionNote(running: version).isEmpty ? "" : " (\(s.versionNote(running: version)))")? "
-                     + "The current memory is kept as a safety copy first.",
-                     action: "Load", cancel: { withAnimation { ask = nil } },
+            SheetAsk(question: s.loadQuestion(running: version),
+                     action: s.versionNote(running: version).isEmpty ? "Load" : "Load anyway", cancel: { withAnimation { ask = nil } },
                      confirm: { withAnimation { ask = nil }; load(s) })
         } else if ask == .delete(s.id) {
             SheetAsk(question: "Delete \"\(s.name)\" from the library? The app and the AU instrument both lose it.",

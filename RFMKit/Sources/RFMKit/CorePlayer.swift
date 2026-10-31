@@ -205,6 +205,10 @@ public final class CorePlayer {
     public private(set) var status = CoreStatus()
     public private(set) var preview: CGImage?
     public private(set) var message = ""
+    /// (section 18 step 4) the firmware wiped its memory after a version change: the copy from before, to offer back
+    public private(set) var wipedCopy: FlashHistory.Snapshot?
+    /// (the catalog key booted after a version change, the copy taken then, saves left to look at) watched for a while
+    @ObservationIgnored private var wipeWatch: (id: String, copy: FlashHistory.Snapshot, left: Int)?
     public private(set) var audioText = ""
     /// the audio output route now (MIDI & audio › Audio output), read again on every route change
     public private(set) var outputs: [AudioRoute.Output] = []
@@ -601,6 +605,7 @@ public final class CorePlayer {
     }
 
     private func write(_ data: Data, _ id: String) {
+        noteSave(data, id)
         let url = flashURL(id)
         let log = self.log, history = self.history
         let info = cores.first { $0.id == id }
@@ -621,7 +626,9 @@ public final class CorePlayer {
         let m = FlashFile.meta(url)
         guard m?.version != info.version else { return }
         let reason: FlashHistory.Reason = m.map { .beforeUpdate(from: $0.version, to: info.version) } ?? .firstCopy
-        history.record(bytes, firmwareID: info.firmwareID, version: m?.version ?? "", reason: reason)
+        let copy = history.record(bytes, firmwareID: info.firmwareID, version: m?.version ?? "", reason: reason)
+        // a real version change of a memory that held something: the first save shows whether the new version kept it
+        if m != nil, let copy, !FlashFile.looksErased(bytes) { wipeWatch = (info.id, copy, 6) }
         log.info("flash \(url.lastPathComponent, privacy: .public): \(reason.text, privacy: .public): a safety copy")
         try? FlashFile.writeMeta(.init(firmwareID: info.firmwareID, version: info.version, size: bytes.count,
                                        sha256: FlashFile.sha256(bytes), date: Date()), for: url)
@@ -674,6 +681,26 @@ public final class CorePlayer {
     /// a safety copy restored into the selected firmware (a copy of the current flash first); false: not this
     /// firmware's, or its bytes are gone
     @discardableResult
+    /// (a save) the first few after a version change (the first may still be the old memory, written before the
+    /// firmware clears it): an empty memory means the new version reset it
+    func noteSave(_ data: Data, _ id: String) {
+        guard var w = wipeWatch, w.id == id else { return }
+        w.left -= 1
+        wipeWatch = w.left > 0 ? w : nil
+        if FlashFile.looksErased(data) {
+            wipeWatch = nil
+            wipedCopy = w.copy
+            log.info("flash \(id, privacy: .public): wiped after the update; offering \(w.copy.id, privacy: .public)")
+        }
+    }
+
+    /// the wiped-memory notice: put the copy back (true: restored), or keep the new memory
+    public func answerWiped(restore: Bool) async -> Bool {
+        guard let c = wipedCopy else { return false }
+        wipedCopy = nil
+        return restore ? await self.restore(c) : false
+    }
+
     public func restore(_ s: FlashHistory.Snapshot) async -> Bool {
         guard let c = current, s.firmwareID == c.firmwareID, let d = history.data(s) else {
             message = "That safety copy can't be read."

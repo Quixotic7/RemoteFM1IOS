@@ -242,4 +242,47 @@ final class FlashHistoryTests: XCTestCase {
         XCTAssertEqual(au.status().bootedFrom, "a fresh flash (reset)")
         XCTAssertTrue(au.status().core.booted)
     }
+
+    /// (step 4) after a version change, a first save that's empty offers the copy from before; Restore puts it back
+    @MainActor func testWipedMemoryAfterAnUpdateIsOffered() async throws {
+        try needCores()
+        let dir = tempDir()
+        let cores = dir.appendingPathComponent("cores")
+        var a = try image(0xB2)
+        // (a memory with something in it: a fresh one is nearly all erased, which isn't watched) its last 2 % written
+        let n = a.count / 50
+        a.replaceSubrange((a.count - n - 1)..<(a.count - 1), with: Data((0..<n).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) }))
+        XCTAssertFalse(FlashFile.looksErased(a))
+        let url = cores.appendingPathComponent("choralroot.bin")
+        try FlashFile.write(a, to: url, firmwareID: "choralroot", version: "0.0.1")
+        let suite = "rfm-flash-\(UUID().uuidString)"
+        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { d.removePersistentDomain(forName: suite) }
+        let p = CorePlayer(link: nil, slotsDir: CoreTests.coresDir, flashDir: cores, selected: "choralroot", midiDefaults: d)
+        defer { p.stop() }
+        p.setAudio(false)
+        p.setMode(.core)
+        XCTAssertTrue(p.status.booted, p.message)
+        XCTAssertNil(p.wipedCopy)
+        p.noteSave(Data(repeating: 0xFF, count: a.count), "choralroot")      // (the new version's first save: erased)
+        let c = try XCTUnwrap(p.wipedCopy, "an erased first save after the update is offered back")
+        XCTAssertEqual(c.sha256, FlashFile.sha256(a))
+        p.noteSave(Data(repeating: 0xFF, count: a.count), "choralroot")      // (only the first save is looked at)
+        let ok = await p.answerWiped(restore: true)
+        XCTAssertTrue(ok, p.message)
+        XCTAssertNil(p.wipedCopy)
+        XCTAssertEqual(FlashFile.read(url, expectedSize: a.count).data, a)
+        XCTAssertTrue(FlashFile.looksErased(Data(repeating: 0, count: 100)))
+        XCTAssertFalse(FlashFile.looksErased(a))
+    }
+
+    /// (step 4) a state from another version: the Load question says so plainly
+    func testLoadQuestionWarnsAboutAnotherVersion() {
+        var s = SavedState(id: "x", name: "Jam 3", note: "", firmwareID: "fizz", firmwareName: "FIZZ", kind: "native",
+                           version: "0.11", sha256: "", date: Date(), flashSize: 1, flashSHA256: "", master: nil,
+                           transpose: nil, keyTouch: nil, origin: "app")
+        XCTAssertTrue(s.loadQuestion(running: "0.12").contains("was made with version 0.11; this is 0.12"))
+        s.version = "0.12"
+        XCTAssertEqual(s.loadQuestion(running: "0.12"), "Load \"Jam 3\"? The current memory is kept as a safety copy first.")
+    }
 }
