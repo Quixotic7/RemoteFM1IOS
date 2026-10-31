@@ -307,9 +307,11 @@ struct MainScreen: View {
         if source == .fm1 { controller.appeared() } else if controller.isRunning { controller.stop() }
         if let l = options.landscape, let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             // (an iPad's windowing mode refuses it: the faceplate is then drawn turned, for scripts/sim_shots.sh)
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: l ? .landscapeRight : .portrait)) { err in
+            // (@Sendable: iOS calls the handler off the main thread; a main-actor closure here stopped the app)
+            let turn = { @MainActor in turned = true }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: l ? .landscapeRight : .portrait)) { @Sendable err in
                 RFMShared.log("ui").error("orientation: \(err.localizedDescription, privacy: .public)")
-                if l { DispatchQueue.main.async { turned = true } }
+                if l { Task { @MainActor in turn() } }
             }
         }
     }

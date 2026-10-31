@@ -48,6 +48,8 @@ public struct FilmGeometry: Equatable, Sendable {
     public let length: CGFloat
     /// the film's pieces (each a convex polygon, counter-clockwise in a y-down space... any one orientation)
     public let pieces: [[CGPoint]]
+    /// the film's back edge along the peel (from the tab's centre, <= 0): the fold line starts there, so nothing folds at rest
+    let back: CGFloat
 
     /// the tab's square beside a display: right of it, level with its top, or (below) under its leading corner;
     /// overlapping the bezel a little
@@ -87,8 +89,10 @@ public struct FilmGeometry: Equatable, Sendable {
                                CGPoint(x: c.x - dx * tw + ex * 0.7, y: c.y - dy * tw + ey * 0.7),
                                CGPoint(x: c.x - dx * tw - ex * 0.7, y: c.y - dy * tw - ey * 0.7)])
         pieces = [Self.oriented(sq), Self.oriented(strip)]
-        let reach = pieces.flatMap { $0 }.map { ($0.x - c.x) * dx + ($0.y - c.y) * dy }.max() ?? 0
-        length = 2 * max(reach, 1)
+        let proj = pieces.flatMap { $0 }.map { ($0.x - c.x) * dx + ($0.y - c.y) * dy }
+        let reach = proj.max() ?? 0
+        back = min(0, proj.min() ?? 0)
+        length = 2 * max(reach - back, 1)
     }
 
     /// the fold (0...1) from the finger's movement: its travel along the peel's direction over the film's length
@@ -101,9 +105,9 @@ public struct FilmGeometry: Equatable, Sendable {
     public func folded(_ t: CGFloat) -> (left: [[CGPoint]], flap: [[CGPoint]], tab: CGPoint) {
         let c = CGPoint(x: tab.midX, y: tab.midY), u = direction
         let h = max(0, t) / 2
-        let along = { (p: CGPoint) in (p.x - c.x) * u.dx + (p.y - c.y) * u.dy - h }
+        let along = { (p: CGPoint) in (p.x - c.x) * u.dx + (p.y - c.y) * u.dy - back - h }
         let left = pieces.map { Self.clip($0, keep: { along($0) }) }.filter { $0.count > 2 }
-        let flap = pieces.map { Self.clip($0, keep: { -along($0) }) }.filter { $0.count > 2 }
+        let flap = h <= 0 ? [] : pieces.map { Self.clip($0, keep: { -along($0) }) }.filter { $0.count > 2 && abs(Self.area($0)) > 0.5 }
             .map { $0.map { p in let d = along(p); return CGPoint(x: p.x - 2 * d * u.dx, y: p.y - 2 * d * u.dy) } }
         return (left, flap, CGPoint(x: c.x + u.dx * 2 * h, y: c.y + u.dy * 2 * h))
     }
