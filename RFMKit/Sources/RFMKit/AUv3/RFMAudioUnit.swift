@@ -307,6 +307,10 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
                     }
                     if let i = cores.first(where: { $0.id == r.key }), r.keepFlash, !c.version.isEmpty, i.version != c.version {
                         log.info("restore: \(c.core, privacy: .public) \(c.version, privacy: .public) saved, \(i.version, privacy: .public) here: booting from the saved flash anyway")
+                        if let f = c.flash {                // (section 18: a safety copy first)
+                            history.record(f, firmwareID: i.firmwareID, version: c.version,
+                                           reason: .beforeUpdate(from: c.version, to: i.version))
+                        }
                     }
                     let flash = r.keepFlash ? c.flash : nil
                     _ = loadLocked(r.key, flash: flash, from: !r.keepFlash ? "a fresh flash"
@@ -360,6 +364,28 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             _ = loadLocked(id, flash: nil, from: "a fresh flash")
         }
         updateName()
+    }
+
+    /// (section 18) the safety copies; the extension's Application Support for now (step 2: the App Group's). Set
+    /// before the instance is used (tests)
+    public var history = FlashHistory()
+
+    /// Reset firmware…: a safety copy of the instance's flash, then the core booted with a fresh flash (the host's
+    /// project keeps it at its next save). The copy, or nil when there was no flash to copy
+    @discardableResult
+    public func resetFlash() -> FlashHistory.Snapshot? {
+        let c = coreStateForSave()
+        var snap: FlashHistory.Snapshot?
+        ctl.withLock {
+            guard let id = coreID else { return }
+            if let c, let f = c.flash {
+                snap = history.record(f, firmwareID: c.core, version: c.version, reason: .beforeReset)
+            }
+            unrestored = nil
+            _ = loadLocked(id, flash: nil, from: "a fresh flash (reset)")
+            log.info("reset \(id, privacy: .public)\(snap == nil ? "" : ": a safety copy kept", privacy: .public)")
+        }
+        return snap
     }
 
     /// the firmware powered off and on again from its flash (a halted core, or the user's Restart)

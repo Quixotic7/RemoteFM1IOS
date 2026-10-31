@@ -352,6 +352,8 @@ final class AUViewModel {
     func select(_ id: String) { au?.selectCore(id) }
     func claim() { au?.claimPanel() }
     func restart() { au?.restartCore() }
+    /// (section 18) a safety copy, then a fresh flash
+    func resetFlash() { au?.resetFlash() }
     /// the instance's MIDI settings (shown at once; the status catches up on its next poll)
     func changeSettings(_ change: (inout AUSettings) -> Void) {
         guard let au else { return }

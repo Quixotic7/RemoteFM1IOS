@@ -45,6 +45,7 @@ struct AUView: View {
 struct AUSheet: View {
     @Bindable var model: AUViewModel
     private let store = ThemeStore.shared
+    @State private var askReset = false         // (section 18) Reset firmware… asked inline
 
     var body: some View {
         sheet.onChange(of: model.ui.sheetOpen) { _, open in
@@ -221,7 +222,9 @@ struct AUSheet: View {
                       + "open the app once after adding files so the instrument sees them.")
             SheetList {
                 SheetRow("About this firmware") { model.onAbout?(model.current) }
-                SheetRow("Restart the firmware", divider: false, chevron: false) { model.restart() }
+                SheetRow("Restart the firmware", chevron: false) { model.restart() }
+                ResetFirmwareRow(name: model.status.coreName.isEmpty ? "the firmware" : model.status.coreName,
+                                 asking: $askReset, divider: false) { model.resetFlash() }
             }
             .padding(.top, 16)
             let s = model.status.core

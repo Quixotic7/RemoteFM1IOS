@@ -639,6 +639,19 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    state, a reset, a restore, a web manager's bank write) the current flash is copied into a history; also a rolling
    copy (the last 10 saves and one a day for a week, per firmware). Flash writes go to a new file, are checked, then
    swapped in, the previous one kept. **Reset firmware…**: a safety copy, then a fresh flash.
+   *As built (2026-10-31):* `FlashHistory.swift`. `FlashFile.write`: temp file, fsync, read back and SHA-256
+   compared, the old file renamed to `<name>.prev`, the temp renamed in; a sidecar `<name>.json` (firmware id,
+   version, size, hash). `FlashFile.read`: a missing/unreadable/wrong-size file falls back to `.prev`, the note shown
+   as the player's message. `FlashHistory` (root Application Support/FlashHistory/<id>/index.json + <uuid>.bin; the
+   root is a parameter for step 2's App Group): event copies (newest 30), rolling copies at most every 5 min (the
+   last 10 and the newest of each day for 7 days, relabelled "daily"), no copy equal to the newest (an event relabels
+   it). CorePlayer: every write may be a rolling copy; a boot whose sidecar names another version copies first
+   ("before update a→b"; a file without a sidecar: "first safety copy"); `willDelete` and Get firmware's update
+   (`willReplace`) copy first; `resetFlash()` (copy, the file, .prev and sidecar removed, a fresh boot),
+   `restore(_:)` (copy, then written and booted), `safetyCopy(_:)` (the hook for loading a state / a manager's write).
+   The AU: `resetFlash()` (copy into the extension's own Application Support, fresh boot; the host keeps it at its
+   next save) and a copy before a restored state of another version. UI: Firmware page › Safety copies (Restore asked
+   inline) and Reset firmware… (asked inline); the AU's firmware page has Reset. Tests: FlashHistoryTests.
 2. **Named states, shared.** A States page per firmware: Save as, Load, Rename, Delete, the safety history. A state:
    the flash, the firmware's id and version, the date, the settings outside the flash (MASTER, ...). Kept in the App
    Group, so the app and every AU instance see the same library (the AU's sheet: Save to library, Load from library).

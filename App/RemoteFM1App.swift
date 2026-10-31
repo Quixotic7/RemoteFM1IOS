@@ -57,7 +57,8 @@ struct RemoteFM1App: App {
         _player = State(initialValue: p)
         let st = FirmwareStore(library: lib)
         st.didChange = { p.catalogChanged() }
-        st.willReplace = { old, new in
+        st.willReplace = { old, new in            // (section 18: a safety copy of the flash first; one file per id)
+            if let o = old.first { p.safetyCopy(of: o.key, .beforeUpdate(from: o.version, to: new.version)) }
             if old.contains(where: { $0.key == p.selected }) { p.select(new.key) }   // (the flash is shared by id)
         }
         _store = State(initialValue: st)

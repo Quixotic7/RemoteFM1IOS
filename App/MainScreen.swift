@@ -45,6 +45,8 @@ struct LaunchOptions {
     var cartDemo = false                                // (DEBUG) -cartdemo: two made-up cartridges on the cart page
     var firmwareEdit: String?                           // (DEBUG) -firmwareedit [ask]: the Firmware page in Edit (ask:
                                                         // the first imported row asks "Delete?")
+    var askReset = false                                // (DEBUG) -askreset: the Firmware page asks "Reset firmware?"
+    var safetyDemo = false                              // (DEBUG) -safetydemo: a few made-up safety copies
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -69,6 +71,8 @@ struct LaunchOptions {
         catalogGet = value("-catalogget")
         cartDemo = a.contains("-cartdemo")
         if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
+        askReset = a.contains("-askreset")
+        safetyDemo = a.contains("-safetydemo")
         #endif
     }
 }
@@ -76,7 +80,7 @@ struct LaunchOptions {
 enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
     case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install, cart
-    case keyChannel = "keychannel", midiMode = "midimode"
+    case keyChannel = "keychannel", midiMode = "midimode", safetyCopies = "safetycopies"
 }
 
 struct MainScreen: View {
@@ -98,6 +102,8 @@ struct MainScreen: View {
     @State private var showAUTest = false
     @State private var showBluetooth = false
     @State private var showAbout = false
+    @State private var askReset = false                 // Reset firmware… asked inline
+    @State private var askRestore: String?              // the safety copy whose row asks "Restore?"
     @State private var source: SoundSource
     @State private var prompter: InstallPrompter
     @State private var launched = false
@@ -234,6 +240,8 @@ struct MainScreen: View {
         }
         #if DEBUG
         if options.cartDemo { CartSender.shared(for: controller).addDemo() }
+        if options.askReset { askReset = true }
+        if options.safetyDemo { safetyDemo() }
         #endif
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
@@ -297,6 +305,7 @@ struct MainScreen: View {
     @ViewBuilder private var sheet: some View {
         switch page {
         case .firmware: firmwarePage
+        case .safetyCopies: safetyCopiesPage
         case .getFirmware:
             GetFirmwarePage(store: catalog, builtIn: builtIn, scrollTo: options.sheetScroll, back: { page = .firmware }) { id in
                 catalogItem = id
@@ -421,7 +430,7 @@ struct MainScreen: View {
         let imported = player.cores.filter(\.imported)
         let broken = library.files.filter { $0.error != nil }
         let files = library.files
-        return SheetPage("Firmware", back: { page = nil }) {
+        return SheetPage("Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
             SheetSectionTitle("Built in", top: 12)
             SheetList {
                 ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
@@ -492,8 +501,15 @@ struct MainScreen: View {
             SheetList {
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)
-                SheetRow("Restart the firmware", divider: false, chevron: false) { player.powerCycle() }
+                SheetRow("Restart the firmware", chevron: false) { player.powerCycle() }
+                SheetRow("Safety copies", value: "\(player.safetyCopies.count)") { page = .safetyCopies }
+                    .disabled(player.current == nil)
+                ResetFirmwareRow(name: player.current?.name ?? "the firmware", asking: $askReset, divider: false) {
+                    Task { await player.resetFlash() }
+                }
+                .disabled(player.current == nil)
             }
+            .id("reset")
             .padding(.top, 16)
             if player.current?.imported == true, player.status.booted {
                 SheetNote(player.status.coreWakes == 0 ? "Runs in the WebAssembly interpreter (no sound yet)."
@@ -508,6 +524,38 @@ struct MainScreen: View {
             if !player.message.isEmpty { SheetNote(player.message, color: .orange) }
         }
     }
+
+    /// the selected firmware's safety copies (PLAN.md section 18), Restore asked inline
+    private var safetyCopiesPage: some View {
+        SheetPage("Safety copies", backTitle: "Firmware", back: { askRestore = nil; page = .firmware }) {
+            SheetSectionTitle(player.current.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
+            SafetyCopiesList(copies: player.safetyCopies, asking: $askRestore) { s in
+                Task { await player.restore(s) }
+            }
+            SheetNote("A copy of the firmware's memory is kept before an update, a delete, a reset or a restore, and "
+                      + "while you play: the last 10 saves and one a day for a week. Restore puts a copy back (the "
+                      + "current memory is kept as a copy first).")
+            if !player.message.isEmpty { SheetNote(player.message) }
+        }
+    }
+
+    #if DEBUG
+    /// (-safetydemo) made-up copies of the selected firmware's flash, for screenshots
+    private func safetyDemo() {
+        guard let c = player.current else { return }
+        let h = FlashHistory(root: player.history.root, now: { Date().addingTimeInterval(-86400 * 2) })
+        let size = max(Int(c.flashSize), 1024)
+        h.record(Data(repeating: 1, count: size), firmwareID: c.firmwareID, version: "1.6.0", reason: .rolling)
+        let h2 = FlashHistory(root: player.history.root, now: { Date().addingTimeInterval(-86400) })
+        h2.record(Data(repeating: 2, count: size), firmwareID: c.firmwareID, version: "1.6.0",
+                  reason: .beforeUpdate(from: "1.6.0", to: c.version))
+        let h3 = FlashHistory(root: player.history.root, now: { Date().addingTimeInterval(-3600) })
+        h3.record(Data(repeating: 3, count: size), firmwareID: c.firmwareID, version: c.version, reason: .beforeReset)
+        player.history.record(Data(repeating: 4, count: size), firmwareID: c.firmwareID, version: c.version, reason: .rolling)
+    }
+    #else
+    private func safetyDemo() {}
+    #endif
 
     private var midiPage: some View {
         let m = Binding(get: { player.midiSettings }, set: { player.midiSettings = $0 })

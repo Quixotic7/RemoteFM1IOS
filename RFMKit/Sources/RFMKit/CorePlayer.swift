@@ -13,6 +13,11 @@
 // device seconds when it changed, and this class writes the copy on a background queue. flash_sync and a save also
 // come with a core switch, Pattern mode, the app going to the background, and stop(). A firmware that reboots
 // itself (halted, exit code 0) is powered on again from its flash, as FM1VST does.
+//
+// PLAN.md section 18 step 1 (FlashHistory.swift): the writes are FlashFile's (checked, the previous file kept as
+// .prev, which a boot uses when the file is damaged); each write may also be a rolling safety copy (FlashHistory). A
+// boot whose flash file was written by another version of the firmware (the sidecar's) keeps a copy first ("before
+// update"). resetFlash, restore and safetyCopy (the hook for later steps: loading a state, a manager's write).
 
 import AVFoundation
 import CoreGraphics
@@ -222,6 +227,8 @@ public final class CorePlayer {
     nonisolated static let midiSettingsKey = "rfm1.midiSettings"
 
     public let flashDir: URL
+    /// (section 18) the safety copies
+    public let history: FlashHistory
     @ObservationIgnored nonisolated(unsafe) let e: OpaquePointer
     @ObservationIgnored private let mapFollower: MidiMapFollower   // (M8) the global learned map
     @ObservationIgnored private let midiDefaults: UserDefaults
@@ -244,8 +251,9 @@ public final class CorePlayer {
     /// resolved in the catalog (the same file, else the same firmware with a note), before `selected`
     /// midiDefaults: where midiSettings is remembered
     public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil,
-                ref: CoreRef? = nil, midiDefaults: UserDefaults = .standard) {
+                ref: CoreRef? = nil, midiDefaults: UserDefaults = .standard, history: FlashHistory? = nil) {
         self.link = link
+        self.history = history ?? FlashHistory(root: flashDir?.appendingPathComponent(".history"))
         self.midiDefaults = midiDefaults
         midiSettings = AUSettings(midiDefaults.dictionary(forKey: Self.midiSettingsKey))
         self.selected = selected ?? ""
@@ -302,6 +310,7 @@ public final class CorePlayer {
     /// while nothing runs falls back to the first core
     /// an imported file is about to be deleted: when it is the selection, the selection moves first (replacement)
     public func willDelete(_ key: String) {
+        if let c = cores.first(where: { $0.id == key }) { safetyCopy(of: key, .beforeDelete("\(c.name) \(c.version)")) }
         guard let k = Self.replacement(deleting: key, selected: selected, in: cores) else { return }
         select(k)
     }
@@ -432,7 +441,10 @@ public final class CorePlayer {
             return false
         }
         let url = flashURL(selected)
-        let bytes: Data? = io.sync { try? Data(contentsOf: url) }
+        let r = io.sync { FlashFile.read(url, expectedSize: Int(rfme_flash_size(e))) }
+        let bytes = r.data
+        if !r.note.isEmpty { log.error("flash \(url.lastPathComponent, privacy: .public): \(r.note, privacy: .public)") }
+        if let info, let bytes { checkVersion(bytes, url, info) }
         let ok: Int32
         if let bytes, !bytes.isEmpty {
             ok = bytes.withUnsafeBytes { rfme_boot(e, $0.bindMemory(to: UInt8.self).baseAddress, UInt32($0.count)) }
@@ -442,7 +454,7 @@ public final class CorePlayer {
         footprintAfter = rfmp_footprint()
         bootedID = selected
         flashBuf = [UInt8](repeating: 0, count: Int(rfme_flash_size(e)))
-        message = ok != 0 ? fallbackNote : "boot failed"
+        message = ok == 0 ? "boot failed" : [fallbackNote, r.note].filter { !$0.isEmpty }.joined(separator: " ")
         log.info("booted \(self.selected, privacy: .public) from \(bytes == nil ? "a fresh flash" : "\(url.lastPathComponent)", privacy: .public)")
         rescan()
         return ok != 0
@@ -575,13 +587,98 @@ public final class CorePlayer {
 
     private func write(_ data: Data, _ id: String) {
         let url = flashURL(id)
-        let log = self.log
+        let log = self.log, history = self.history
+        let info = cores.first { $0.id == id }
+        let fid = info?.firmwareID ?? id, version = info?.version ?? ""
         io.async {
-            do { try data.write(to: url, options: .atomic) }
-            catch { log.error("flash: \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)") }
+            do {
+                try FlashFile.write(data, to: url, firmwareID: fid, version: version)
+                history.record(data, firmwareID: fid, version: version, reason: .rolling)
+            } catch { log.error("flash: \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)") }
         }
         saves += 1
         lastSave = Date()
+    }
+
+    /// (a boot) the flash file was written by another version of this firmware: a copy first, the sidecar then
+    /// names this version. A file from before the sidecars: a first copy (its version unknown)
+    private func checkVersion(_ bytes: Data, _ url: URL, _ info: CoreInfo) {
+        let m = FlashFile.meta(url)
+        guard m?.version != info.version else { return }
+        let reason: FlashHistory.Reason = m.map { .beforeUpdate(from: $0.version, to: info.version) } ?? .firstCopy
+        history.record(bytes, firmwareID: info.firmwareID, version: m?.version ?? "", reason: reason)
+        log.info("flash \(url.lastPathComponent, privacy: .public): \(reason.text, privacy: .public): a safety copy")
+        try? FlashFile.writeMeta(.init(firmwareID: info.firmwareID, version: info.version, size: bytes.count,
+                                       sha256: FlashFile.sha256(bytes), date: Date()), for: url)
+    }
+
+    /// a safety copy of a catalog key's saved flash (the running one's latest copy written first); nil: none to copy
+    @discardableResult
+    public func safetyCopy(of key: String, _ reason: FlashHistory.Reason) -> FlashHistory.Snapshot? {
+        if key == bootedID { _ = takeFlash() }
+        let url = flashURL(key)
+        let c = cores.first { $0.id == key }
+        let r = io.sync { FlashFile.read(url, expectedSize: 0) }
+        guard let d = r.data else { return nil }
+        return history.record(d, firmwareID: c?.firmwareID ?? key, version: FlashFile.meta(url)?.version ?? c?.version ?? "",
+                              reason: reason)
+    }
+
+    /// (section 18's hook: before loading a state, a web manager's write) the running firmware saved now, then a
+    /// safety copy
+    @discardableResult
+    public func safetyCopy(_ reason: FlashHistory.Reason) async -> FlashHistory.Snapshot? {
+        if bootedID == selected { await saveNow() }
+        return safetyCopy(of: selected, reason)
+    }
+
+    /// the safety copies of the selected firmware, newest first
+    public var safetyCopies: [FlashHistory.Snapshot] {
+        _ = saves                                       // (observed: a save may add one)
+        return current.map { history.list($0.firmwareID) } ?? []
+    }
+
+    /// Reset firmware…: a safety copy, then the selected firmware started with a fresh flash (its file removed)
+    @discardableResult
+    public func resetFlash() async -> FlashHistory.Snapshot? {
+        let snap = await safetyCopy(.beforeReset)
+        let key = selected
+        let wasBooted = bootedID == key
+        if wasBooted { saveStopped(); rfme_unload(e); bootedID = nil }
+        let url = flashURL(key)
+        io.sync { FlashFile.remove(url) }
+        if wasBooted || mode == .core { _ = bootSelected() }
+        message = "\(current?.name ?? key) started with a clean memory; a copy of the old one is in Safety copies."
+        saves += 1
+        log.info("reset \(key, privacy: .public)")
+        refresh()
+        return snap
+    }
+
+    /// a safety copy restored into the selected firmware (a copy of the current flash first); false: not this
+    /// firmware's, or its bytes are gone
+    @discardableResult
+    public func restore(_ s: FlashHistory.Snapshot) async -> Bool {
+        guard let c = current, s.firmwareID == c.firmwareID, let d = history.data(s) else {
+            message = "That safety copy can't be read."
+            return false
+        }
+        await safetyCopy(.beforeRestore)
+        let key = selected
+        let wasBooted = bootedID == key
+        if wasBooted { saveStopped(); rfme_unload(e); bootedID = nil }
+        let url = flashURL(key)
+        do { try io.sync { try FlashFile.write(d, to: url, firmwareID: c.firmwareID, version: c.version) } }
+        catch {
+            message = "Restore failed: \(error.localizedDescription)"
+            if wasBooted || mode == .core { _ = bootSelected() }
+            return false
+        }
+        if wasBooted || mode == .core { _ = bootSelected() }
+        message = "Restored the copy of \(s.date.formatted(date: .abbreviated, time: .shortened)) (\(s.reason))."
+        saves += 1
+        refresh()
+        return true
     }
 
     /// waits until the queued writes are on disk
