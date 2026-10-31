@@ -213,7 +213,7 @@ private final class ResizeGrip: UIView {
 @MainActor
 @Observable
 final class AUViewModel {
-    enum Page { case firmware, midi, keyChannel, midiMode, diagnostics }
+    enum Page { case firmware, states, midi, keyChannel, midiMode, diagnostics }
     var instance = "–"
     var status = RFMAudioUnit.Status()
     var cores: [CoreInfo] = []
@@ -236,6 +236,12 @@ final class AUViewModel {
     @ObservationIgnored private weak var au: RFMAudioUnit?     // (weak: the view never keeps an instance alive)
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var ticks = 0
+
+    // (section 18 step 2) the firmware's states in the shared library and its safety copies, read again on a change
+    var states: [SavedState] = []
+    var copies: [FlashHistory.Snapshot] = []
+    var stateMessage = ""
+    @ObservationIgnored private var libraryObserver: NSObjectProtocol?
 
     var current: CoreInfo? { cores.first { $0.id == status.coreKey } ?? status.coreInfo }
     /// the imported firmware playing here was deleted in the app (its mirror is gone; the module stays loaded)
@@ -274,6 +280,12 @@ final class AUViewModel {
             }
         }
         if let s = au.viewSize { onViewSize?(s) }     // (after onEvent: a restore in between isn't missed)
+        if libraryObserver == nil {
+            libraryObserver = NotificationCenter.default.addObserver(forName: StateLibrary.didChange, object: nil,
+                                                                     queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadStates() }
+            }
+        }
         poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {
@@ -343,6 +355,13 @@ final class AUViewModel {
             sheetScroll = what.split(separator: ":").dropFirst().first.map(String.init)
             page = nil
             ui.sheetOpen = true
+        } else if what == "states" {                    // (a state saved here first when the library has none)
+            if let au, let f = au.firmware, au.library.list(f.firmwareID).isEmpty {
+                _ = try? au.saveState(name: "Saved in the AU")
+            }
+            reloadStates()
+            ui.sheetOpen = true
+            page = .states
         } else if what.hasPrefix("learn") {
             learn.start(ui)
             if let t = what.split(separator: ":").dropFirst().first { learn.pick(String(t)) }
@@ -354,6 +373,47 @@ final class AUViewModel {
     func restart() { au?.restartCore() }
     /// (section 18) a safety copy, then a fresh flash
     func resetFlash() { au?.resetFlash() }
+
+    // MARK: states (section 18 step 2)
+
+    func reloadStates() {
+        guard let au, let f = au.firmware else { states = []; copies = []; return }
+        states = au.library.list(f.firmwareID)
+        copies = au.history.list(f.firmwareID)
+    }
+
+    func saveState(_ name: String) {
+        guard let au else { return }
+        do { let s = try au.saveState(name: name); stateMessage = "Saved \"\(s.name)\" to the library." }
+        catch { stateMessage = "Save failed: \(error.localizedDescription)" }
+        reloadStates()
+    }
+
+    func loadState(_ s: SavedState) {
+        guard let au else { return }
+        do {
+            try au.loadState(s)
+            let v = s.versionNote(running: status.coreVersion)
+            stateMessage = "Loaded \"\(s.name)\"" + (v.isEmpty ? "." : " (\(v)).")
+                + " The host keeps it in the project when the project is next saved."
+        } catch { stateMessage = "Load failed: \(error.localizedDescription)" }
+        refresh()
+        reloadStates()
+    }
+
+    func renameState(_ s: SavedState, _ name: String) { _ = try? au?.library.rename(s, to: name); reloadStates() }
+    func deleteState(_ s: SavedState) { au?.library.delete(s); reloadStates() }
+
+    func restore(_ snap: FlashHistory.Snapshot) {
+        guard let au else { return }
+        do {
+            try au.restore(snap)
+            stateMessage = "Restored the copy of \(snap.date.formatted(date: .abbreviated, time: .shortened)). The host "
+                + "keeps it in the project when the project is next saved."
+        } catch { stateMessage = "Restore failed: \(error.localizedDescription)" }
+        refresh()
+        reloadStates()
+    }
     /// the instance's MIDI settings (shown at once; the status catches up on its next poll)
     func changeSettings(_ change: (inout AUSettings) -> Void) {
         guard let au else { return }

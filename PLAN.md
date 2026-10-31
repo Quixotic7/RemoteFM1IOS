@@ -655,6 +655,28 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
 2. **Named states, shared.** A States page per firmware: Save as, Load, Rename, Delete, the safety history. A state:
    the flash, the firmware's id and version, the date, the settings outside the flash (MASTER, ...). Kept in the App
    Group, so the app and every AU instance see the same library (the AU's sheet: Save to library, Load from library).
+   *As built (2026-10-31):* `StateLibrary.swift`: the App Group's `States/<firmware id>/<uuid>.flash` (LZFSE, written
+   by FlashFile: temp, fsync, read back, renamed in; no .prev) and `<uuid>.json` (SavedState: name, note, firmware id,
+   name, kind, version, file hash, date, flash size and hash, MASTER, transpose, keys' touch, origin app/au). Settings
+   kept: MASTER, transpose, keyTouch (they change how it plays); key channel, notes to firmware, learned map, host
+   clock and button names stay the instance's / app's. One file pair per state, no index, no locks: a save writes new
+   files (bytes first), rename rewrites one entry atomically, delete removes entry then bytes; a list skips entries
+   without bytes and removes bytes without an entry after an hour. Changes post the Darwin notification
+   `<group>.states` (forwarded in-process as `StateLibrary.didChange`; the history posts it too). FlashHistory: root the
+   App Group's `FlashHistory` (`FlashHistory.shared`; no group: Application Support), one `<uuid>.json` per copy instead
+   of index.json (an index is split when read); prune only removes or relabels entries it listed, so concurrent
+   writers never drop each other's copies; each process moves its step-1 Application Support/FlashHistory into the
+   group once (`migrate`, idempotent). CorePlayer: `library`, `states`, `saveState(name:)`, `loadState(_:)` (another
+   firmware or a wrong flash size refused; "before load state" copy, flash written, core rebooted, MASTER event,
+   transpose/keyTouch into midiSettings, "made with <v>" in the message); `libraryGen` follows the notification. The
+   AU: `library`, `firmware`, `saveState`, `loadState`, `restore(_:)` (copy, then loadLocked with the bytes; the host
+   saves it in its project at its next save, said in the note). UI: `StatesList` (Faceplate/StatesList.swift: Save as…
+   with "<Firmware> <date>", rows name / date · version · made with, Load asked inline, … → Rename / Delete asked);
+   the app's Firmware › States (with a Safety copies row); the AU's Firmware › States & safety copies (Save to
+   library…, the list, Safety copies with Restore). Tests: StateLibraryTests (CRUD, two libraries on one folder with
+   concurrent saves/renames/deletes, notification, two histories writing at once, step-1 migration, AU→app and
+   app→AU round trip with safety copies and AU restore). sim_shots: phone-states, phone-states-save (-statesdemo,
+   -statessave); sim_autest AUPAGE=states.
 3. **Files.** `.rfm1state` (one file: a manifest and the flash) to share and import (Files, AirDrop); Back up
    everything into the RemoteFM1 folder; the states mirrored there.
 4. **Versions.** A state remembers its firmware version; loading it into another version warns first (with a safety

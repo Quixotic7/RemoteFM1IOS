@@ -366,9 +366,54 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         updateName()
     }
 
-    /// (section 18) the safety copies; the extension's Application Support for now (step 2: the App Group's). Set
-    /// before the instance is used (tests)
-    public var history = FlashHistory()
+    /// (section 18) the safety copies: the App Group's, one history per firmware with the app's. Set before the
+    /// instance is used (tests)
+    public var history = FlashHistory.shared
+    /// (section 18 step 2) the named states, the app's library too
+    public var library = StateLibrary.shared
+
+    /// the firmware playing here (its own id) and its entry; nil: none
+    public var firmware: CoreInfo? { ctl.withLock { coreID == nil ? nil : (coreInfo ?? CoreInfo(id: coreID!)) } }
+
+    /// the instance's memory, MASTER and the kept settings saved as a new state in the library
+    public func saveState(name: String, note: String = "") throws -> SavedState {
+        guard let c = coreStateForSave(), let f = c.flash, let info = firmware else { throw StateLibrary.LibraryError.empty }
+        return try library.save(name: name, note: note, firmwareID: c.core, firmwareName: info.name, kind: c.kind,
+                                version: c.version, sha256: c.sha256, flash: f, master: c.master, settings: c.settings,
+                                origin: "au")
+    }
+
+    /// a state from the library loaded here: a safety copy of the instance's memory ("before load state"), then the
+    /// core rebooted from the state's flash, MASTER and the kept settings set. The host keeps it in its project at
+    /// its next save. Another version's state loads too (the caller says so)
+    public func loadState(_ s: SavedState) throws {
+        let d = try library.flash(s)
+        try replaceFlash(d, firmwareID: s.firmwareID, reason: .beforeLoadState, from: "the state \"\(s.name)\"",
+                         master: s.master) { s.apply(to: &$0) }
+    }
+
+    /// a safety copy put back (a copy of the instance's memory first)
+    public func restore(_ snap: FlashHistory.Snapshot) throws {
+        guard let d = history.data(snap) else { throw StateLibrary.LibraryError.damaged }
+        try replaceFlash(d, firmwareID: snap.firmwareID, reason: .beforeRestore, from: "a safety copy", master: nil) { _ in }
+    }
+
+    private func replaceFlash(_ d: Data, firmwareID: String, reason: FlashHistory.Reason, from: String, master: Int?,
+                              settings change: (inout AUSettings) -> Void) throws {
+        guard let info = firmware, info.firmwareID == firmwareID else { throw StateLibrary.LibraryError.missing }
+        if info.flashSize > 0 && d.count != Int(info.flashSize) { throw StateLibrary.LibraryError.damaged }
+        if let c = coreStateForSave(), let f = c.flash {
+            history.record(f, firmwareID: c.core, version: c.version, reason: reason)
+        }
+        ctl.withLock {
+            guard let id = coreID else { return }
+            unrestored = nil
+            change(&settings_)
+            _ = loadLocked(id, flash: d, from: from)
+            if let m = master { _ = rfme_event(e, UInt8(RFMC_EV_MASTER), 0, Int16(max(0, min(1023, m)))) }
+        }
+        log.info("flash replaced from \(from, privacy: .public)")
+    }
 
     /// Reset firmware…: a safety copy of the instance's flash, then the core booted with a fresh flash (the host's
     /// project keeps it at its next save). The copy, or nil when there was no flash to copy

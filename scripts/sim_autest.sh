@@ -7,7 +7,7 @@
 #
 #   scripts/sim_autest.sh [UDID]        (default: RFM iPhone 17, CEB2B846-...)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-autest); NOBUILD=1 reuses the last build
-#   AUPAGE=midi | keychannel | midimode | learn | learn:KN1 | window | sheet:midi   (M8) the second screenshot is
+#   AUPAGE=midi | keychannel | midimode | learn | learn:KN1 | window | sheet:midi | states   (M8) the second screenshot is
 #             that page of the AU's view
 #             (au-page.png), not the Bluetooth panel (window: the sheet's Mac-only Window section, in a Debug build)
 #

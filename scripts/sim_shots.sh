@@ -7,7 +7,7 @@
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
 # -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo; the cartridge page: -sheetpage cart, DEBUG's -cartdemo) and saves a PNG
 # per state ("name@s": that shot waits s seconds). The iPhone fixes: -sheetpage keychannel | midimode, DEBUG's
-# -firmwareedit [ask], -askreset, -safetydemo (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
+# -firmwareedit [ask], -askreset, -safetydemo, -statesdemo, -statessave (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
 # install | unanswered | bluetooth | update. The core runs (ChoralRoot by default) so the real framebuffer shows;
 # "-source fm1" uses the fake unit (the simulator's default backend), whose demo input presses keys by itself. A
 # simulator this script booted is shut
@@ -70,6 +70,9 @@ PHONE_SHOTS=(
     # PLAN.md section 18: Reset firmware… asked; the Safety copies page (DEBUG -safetydemo: made-up copies)
     "phone-firmware-reset|-source phone -view full -sheetpage firmware -sheetscroll reset -askreset -orientation portrait"
     "phone-safety-copies|-source phone -view full -sheetpage safetycopies -safetydemo -orientation portrait"
+    # section 18 step 2: the States page (DEBUG -statesdemo: made-up states, one of another version; -statessave: Save as… open)
+    "phone-states|-source phone -view full -sheetpage states -statesdemo -orientation portrait"
+    "phone-states-save|-source phone -view full -sheetpage states -statessave -orientation portrait"
     "phone-firmware-fwedit-ask|-source phone -view full -firmwareedit ask -orientation portrait"
     "phone-prompt-install|-source fm1 -view full -fm1prompt install -orientation portrait"
     "phone-prompt-unanswered|-source fm1 -view full -fm1prompt unanswered -orientation portrait"

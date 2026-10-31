@@ -6,11 +6,13 @@
 //                 SHA-256), the old file kept as <name>.prev, the temp file renamed in. A sidecar <name>.json says
 //                 which firmware version wrote it (a version change is seen at the next boot). A read that finds the
 //                 file missing or damaged (unreadable, not the firmware's flash size) uses <name>.prev and says so.
-//   FlashHistory  the safety copies, per firmware id: <root>/<id>/index.json and <uuid>.bin. Copies taken before
+//   FlashHistory  the safety copies, per firmware id: <root>/<id>/<uuid>.bin and <uuid>.json (one file per copy, no
+//                 index: the app and every AU instance write the same folder; step 1's index.json is split once). Copies taken before
 //                 something risky (an update, a delete, a reset, a restore; later steps: loading a state, a web
 //                 manager's write) are kept (the newest 30); rolling copies of the saves: the last 10 distinct ones
 //                 and the newest of each day for 7 days. A copy identical to the newest one is not kept twice. The
-//                 root is Application Support/FlashHistory for now; step 2 points it at the App Group (`root`).
+//                 root (step 2) is the App Group's FlashHistory (the app's and the extension's step-1 copies moved in
+//                 once, `shared`); a process without the group: its Application Support/FlashHistory.
 
 import CryptoKit
 import Foundation
@@ -48,7 +50,7 @@ public enum FlashFile {
 
     /// data written safely to url (see the top); meta: the sidecar's firmware id and version (nil: left as it is)
     public static func write(_ data: Data, to url: URL, firmwareID: String? = nil, version: String? = nil,
-                             now: Date = Date()) throws {
+                             now: Date = Date(), keepPrev: Bool = true) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
@@ -71,11 +73,15 @@ public enum FlashFile {
             throw WriteError.verify("\(url.lastPathComponent): read back \(back.count) of \(data.count) bytes, not the same")
         }
         let prev = prevURL(url)
-        if fm.fileExists(atPath: url.path) {                        // (the previous good file kept)
+        if keepPrev && fm.fileExists(atPath: url.path) {            // (the previous good file kept)
             try? fm.removeItem(at: prev)
             try fm.moveItem(at: url, to: prev)
         }
-        try fm.moveItem(at: tmp, to: url)
+        if fm.fileExists(atPath: url.path) {
+            _ = try fm.replaceItemAt(url, withItemAt: tmp)
+        } else {
+            try fm.moveItem(at: tmp, to: url)
+        }
         if let firmwareID, let version {
             let m = Meta(firmwareID: firmwareID, version: version, size: data.count, sha256: hash, date: now)
             try? writeMeta(m, for: url)
@@ -184,10 +190,59 @@ public final class FlashHistory: @unchecked Sendable {
         self.now = now
     }
 
-    /// Application Support/FlashHistory (step 2: the App Group's)
+    /// the App Group's FlashHistory (one history per firmware for the app and every AU instance); no group: this
+    /// process's Application Support/FlashHistory
     public static func defaultRoot() -> URL {
+        RFMShared.groupContainer()?.appendingPathComponent("FlashHistory") ?? localRoot()
+    }
+
+    /// step 1's root: this process's own Application Support/FlashHistory
+    public static func localRoot() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FlashHistory")
+    }
+
+    /// the process's history in the default root; made the first time, this process's step-1 copies moved in
+    public static let shared: FlashHistory = {
+        let root = defaultRoot(), local = localRoot()
+        if root.standardizedFileURL != local.standardizedFileURL { migrate(from: local, to: root) }
+        return FlashHistory(root: root)
+    }()
+
+    /// copies kept under `old` (step 1: index.json, or files per copy) moved into `new`, each firmware's folder
+    /// merged (a copy already there is kept); `old` removed when emptied. Safe to run twice, or from two processes
+    public static func migrate(from old: URL, to new: URL) {
+        let fm = FileManager.default
+        guard let ids = try? fm.contentsOfDirectory(atPath: old.path) else { return }
+        for id in ids where !id.hasPrefix(".") {
+            let src = old.appendingPathComponent(id), dst = new.appendingPathComponent(id)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: src.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            splitIndex(src)
+            try? fm.createDirectory(at: dst, withIntermediateDirectories: true)
+            let names = (try? fm.contentsOfDirectory(atPath: src.path)) ?? []
+            // the copies' bytes first, their entries after (an entry names a file that is there)
+            for n in names.filter({ $0.hasSuffix(".bin") }) + names.filter({ $0.hasSuffix(".json") }) {
+                let to = dst.appendingPathComponent(n)
+                if fm.fileExists(atPath: to.path) { try? fm.removeItem(at: src.appendingPathComponent(n)) }
+                else { try? fm.moveItem(at: src.appendingPathComponent(n), to: to) }
+            }
+            if (try? fm.contentsOfDirectory(atPath: src.path))?.isEmpty ?? false { try? fm.removeItem(at: src) }
+        }
+        if (try? fm.contentsOfDirectory(atPath: old.path))?.isEmpty ?? false { try? fm.removeItem(at: old) }
+        RFMShared.log("flash").info("history moved from \(old.path, privacy: .public)")
+    }
+
+    /// step 1's index.json of a firmware folder split into a <uuid>.json per copy, then removed
+    static func splitIndex(_ dir: URL) {
+        let index = dir.appendingPathComponent("index.json")
+        guard let d = try? Data(contentsOf: index) else { return }
+        let list = (try? FlashFile.decoder.decode([Snapshot].self, from: d)) ?? []
+        for s in list {
+            let u = dir.appendingPathComponent("\(s.id).json")
+            if !FileManager.default.fileExists(atPath: u.path) { try? FlashFile.encoder.encode(s).write(to: u, options: .atomic) }
+        }
+        try? FileManager.default.removeItem(at: index)
     }
 
     /// the copies of a firmware, newest first
@@ -215,7 +270,8 @@ public final class FlashHistory: @unchecked Sendable {
                 if reason.kind == .event && list[i].kind != .event {
                     list[i].kind = .event
                     list[i].reason = reason.text
-                    save(list, firmwareID)
+                    writeEntry(list[i])
+                    StateLibrary.postChange()
                 }
                 return reason.kind == .event ? list[i] : nil
             }
@@ -228,18 +284,21 @@ public final class FlashHistory: @unchecked Sendable {
             do {
                 try FileManager.default.createDirectory(at: dir(firmwareID), withIntermediateDirectories: true)
                 try data.write(to: dir(firmwareID).appendingPathComponent("\(s.id).bin"), options: .atomic)
+                try FlashFile.encoder.encode(s).write(to: entryURL(s), options: .atomic)  // (after its bytes)
             } catch {
                 RFMShared.log("flash").error("history \(firmwareID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 return nil
             }
             list.append(s)
-            save(prune(list), firmwareID)
+            _ = prune(list)
+            StateLibrary.postChange()
             return s
         }
     }
 
     /// the rules: every event copy up to keepEvents; the last keepRolling rolling copies; the newest of each of the
-    /// last keepDays days (as "daily"); the rest removed
+    /// last keepDays days (as "daily"); the rest removed (entry first, then bytes). Only entries whose label changed
+    /// are written: another writer's newer copies (not in `list`) are never touched
     func prune(_ list: [Snapshot]) -> [Snapshot] {
         let t = now()
         let events = list.filter { $0.kind == .event }.sorted { $0.date > $1.date }
@@ -257,31 +316,42 @@ public final class FlashHistory: @unchecked Sendable {
         var out: [Snapshot] = []
         for var s in list {
             if keep.contains(s.id) {
+                let was = s
                 if s.kind != .event { s.kind = recent.contains(s.id) ? .rolling : .daily; s.reason = s.kind.rawValue }
+                if s != was { writeEntry(s) }
                 out.append(s)
             } else {
+                try? FileManager.default.removeItem(at: entryURL(s))
                 try? FileManager.default.removeItem(at: dir(s.firmwareID).appendingPathComponent("\(s.id).bin"))
             }
         }
         return out
     }
 
-    /// oldest first (the order kept for copies of the same moment)
+    /// oldest first (copies of the same moment: by id, so every reader agrees)
     private func ordered(_ l: [Snapshot]) -> [Snapshot] {
-        l.enumerated().sorted { ($0.element.date, $0.offset) < ($1.element.date, $1.offset) }.map(\.element)
+        l.sorted { ($0.date, $0.id) < ($1.date, $1.id) }
     }
 
     func dir(_ firmwareID: String) -> URL {
         root.appendingPathComponent(firmwareID.replacingOccurrences(of: "/", with: "_"))
     }
 
+    private func entryURL(_ s: Snapshot) -> URL { dir(s.firmwareID).appendingPathComponent("\(s.id).json") }
+
+    /// every copy's entry in the folder (any writer's; a step-1 index split first)
     private func load(_ firmwareID: String) -> [Snapshot] {
-        (try? Data(contentsOf: dir(firmwareID).appendingPathComponent("index.json")))
-            .flatMap { try? FlashFile.decoder.decode([Snapshot].self, from: $0) } ?? []
+        let d = dir(firmwareID)
+        Self.splitIndex(d)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []
+        return names.filter { $0.hasSuffix(".json") && !$0.hasPrefix(".") }.compactMap {
+            (try? Data(contentsOf: d.appendingPathComponent($0))).flatMap { try? FlashFile.decoder.decode(Snapshot.self, from: $0) }
+        }
     }
 
-    private func save(_ list: [Snapshot], _ firmwareID: String) {
-        try? FileManager.default.createDirectory(at: dir(firmwareID), withIntermediateDirectories: true)
-        try? FlashFile.encoder.encode(list).write(to: dir(firmwareID).appendingPathComponent("index.json"), options: .atomic)
+    /// (a relabel) the entry written again, unless another writer removed the copy meanwhile
+    private func writeEntry(_ s: Snapshot) {
+        guard FileManager.default.fileExists(atPath: entryURL(s).path) else { return }
+        try? FlashFile.encoder.encode(s).write(to: entryURL(s), options: .atomic)
     }
 }

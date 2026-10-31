@@ -18,6 +18,8 @@
 // .prev, which a boot uses when the file is damaged); each write may also be a rolling safety copy (FlashHistory). A
 // boot whose flash file was written by another version of the firmware (the sidecar's) keeps a copy first ("before
 // update"). resetFlash, restore and safetyCopy (the hook for later steps: loading a state, a manager's write).
+// Step 2 (StateLibrary.swift): saveState / loadState, the App Group's library the AU instances share; a load keeps
+// a safety copy first, then the flash, MASTER and the kept settings, the core rebooted.
 
 import AVFoundation
 import CoreGraphics
@@ -229,6 +231,11 @@ public final class CorePlayer {
     public let flashDir: URL
     /// (section 18) the safety copies
     public let history: FlashHistory
+    /// (section 18 step 2) the named states, shared with the AU instances
+    public let library: StateLibrary
+    /// moves on every change of the library or the safety copies (this process's or another's)
+    public private(set) var libraryGen = 0
+    @ObservationIgnored nonisolated(unsafe) private var libraryObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) let e: OpaquePointer
     @ObservationIgnored private let mapFollower: MidiMapFollower   // (M8) the global learned map
     @ObservationIgnored private let midiDefaults: UserDefaults
@@ -251,9 +258,12 @@ public final class CorePlayer {
     /// resolved in the catalog (the same file, else the same firmware with a note), before `selected`
     /// midiDefaults: where midiSettings is remembered
     public init(link: RemoteController?, slotsDir: String? = nil, flashDir: URL? = nil, selected: String? = nil,
-                ref: CoreRef? = nil, midiDefaults: UserDefaults = .standard, history: FlashHistory? = nil) {
+                ref: CoreRef? = nil, midiDefaults: UserDefaults = .standard, history: FlashHistory? = nil,
+                library: StateLibrary? = nil) {
         self.link = link
-        self.history = history ?? FlashHistory(root: flashDir?.appendingPathComponent(".history"))
+        // (a flashDir given, the tests': the copies and states beside it; else the App Group's, shared with the AU)
+        self.history = history ?? flashDir.map { FlashHistory(root: $0.appendingPathComponent(".history")) } ?? .shared
+        self.library = library ?? flashDir.map { StateLibrary(root: $0.appendingPathComponent(".states")) } ?? .shared
         self.midiDefaults = midiDefaults
         midiSettings = AUSettings(midiDefaults.dictionary(forKey: Self.midiSettingsKey))
         self.selected = selected ?? ""
@@ -277,6 +287,10 @@ public final class CorePlayer {
         }
         if cores.isEmpty { message = "no cores in the app (" + Self.text(rfms_dirs) + ")" }
         startPolling()
+        libraryObserver = NotificationCenter.default.addObserver(forName: StateLibrary.didChange, object: nil,
+                                                                 queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.libraryGen += 1 }
+        }
     }
 
     /// the cores' order in the picker and for a default: the first of these this build has
@@ -296,6 +310,7 @@ public final class CorePlayer {
     }
 
     deinit {
+        if let o = libraryObserver { NotificationCenter.default.removeObserver(o) }
         poller?.cancel()
         mapFollower.stop()
         rfme_free(e)
@@ -635,6 +650,7 @@ public final class CorePlayer {
     /// the safety copies of the selected firmware, newest first
     public var safetyCopies: [FlashHistory.Snapshot] {
         _ = saves                                       // (observed: a save may add one)
+        _ = libraryGen
         return current.map { history.list($0.firmwareID) } ?? []
     }
 
@@ -664,20 +680,92 @@ public final class CorePlayer {
             return false
         }
         await safetyCopy(.beforeRestore)
+        guard replaceFlash(d, c, failed: "Restore failed") else { return false }
+        message = "Restored the copy of \(s.date.formatted(date: .abbreviated, time: .shortened)) (\(s.reason))."
+        return true
+    }
+
+    /// (the flash's owner: a restore, a state's load) the selected firmware's file written, the core booted from it
+    private func replaceFlash(_ d: Data, _ c: CoreInfo, failed: String) -> Bool {
         let key = selected
         let wasBooted = bootedID == key
         if wasBooted { saveStopped(); rfme_unload(e); bootedID = nil }
         let url = flashURL(key)
         do { try io.sync { try FlashFile.write(d, to: url, firmwareID: c.firmwareID, version: c.version) } }
         catch {
-            message = "Restore failed: \(error.localizedDescription)"
+            message = "\(failed): \(error.localizedDescription)"
             if wasBooted || mode == .core { _ = bootSelected() }
             return false
         }
         if wasBooted || mode == .core { _ = bootSelected() }
-        message = "Restored the copy of \(s.date.formatted(date: .abbreviated, time: .shortened)) (\(s.reason))."
         saves += 1
         refresh()
+        return true
+    }
+
+    // MARK: named states (section 18 step 2)
+
+    /// the selected firmware's states in the library, newest first
+    public var states: [SavedState] {
+        _ = libraryGen
+        return current.map { library.list($0.firmwareID) } ?? []
+    }
+
+    /// the running firmware's memory (saved first), MASTER and the kept settings, as a new state; nil: nothing to
+    /// save (the message says why)
+    @discardableResult
+    public func saveState(name: String, note: String = "") async -> SavedState? {
+        guard let c = current else { return nil }
+        if bootedID == selected { await saveNow() }
+        guard let d = io.sync(execute: { FlashFile.read(flashURL(selected), expectedSize: 0).data }) else {
+            message = "\(c.name) has no memory saved yet: play it first."
+            return nil
+        }
+        var master: Int?
+        if bootedID == selected {
+            var p = rfme_panel_t()
+            if rfme_panel(e, &p) != 0, p.booted != 0 { master = Int(p.master) }
+        }
+        do {
+            let s = try library.save(name: name, note: note, firmwareID: c.firmwareID, firmwareName: c.name, kind: c.kind,
+                                     version: c.version, sha256: c.sha256, flash: d, master: master,
+                                     settings: midiSettings, origin: "app")
+            message = "Saved \"\(s.name)\"."
+            libraryGen += 1
+            return s
+        } catch {
+            message = "Save failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// a state loaded into the selected firmware: a safety copy of the current memory ("before load state"), then
+    /// its flash written and the core rebooted from it, MASTER and the kept settings set. Another version's state
+    /// loads too (said so). false: another firmware's, or unreadable
+    @discardableResult
+    public func loadState(_ s: SavedState) async -> Bool {
+        guard let c = current, s.firmwareID == c.firmwareID else {
+            message = "That state is for another firmware."
+            return false
+        }
+        let d: Data
+        do { d = try library.flash(s) } catch {
+            message = error.localizedDescription
+            return false
+        }
+        if c.flashSize > 0 && d.count != Int(c.flashSize) {
+            message = "That state's memory is \(d.count) bytes; \(c.name) \(c.version)'s is \(c.flashSize)."
+            return false
+        }
+        await safetyCopy(.beforeLoadState)
+        guard replaceFlash(d, c, failed: "Load failed") else { return false }
+        if let m = s.master, bootedID == selected { _ = rfme_event(e, UInt8(RFMC_EV_MASTER), 0, Int16(max(0, min(1023, m)))) }
+        var ms = midiSettings
+        s.apply(to: &ms)
+        midiSettings = ms
+        let v = s.versionNote(running: c.version)
+        message = "Loaded \"\(s.name)\"" + (v.isEmpty ? "." : " (\(v)).") + " The memory before it is in Safety copies."
+        log.info("loaded state \(s.id, privacy: .public) into \(c.firmwareID, privacy: .public)")
         return true
     }
 

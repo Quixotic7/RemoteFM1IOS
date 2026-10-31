@@ -47,6 +47,8 @@ struct LaunchOptions {
                                                         // the first imported row asks "Delete?")
     var askReset = false                                // (DEBUG) -askreset: the Firmware page asks "Reset firmware?"
     var safetyDemo = false                              // (DEBUG) -safetydemo: a few made-up safety copies
+    var statesDemo = false                              // (DEBUG) -statesdemo: a few made-up states (one of another version)
+    var statesSave = false                              // (DEBUG) -statessave: the States page's Save as… field open
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -73,6 +75,8 @@ struct LaunchOptions {
         if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
         askReset = a.contains("-askreset")
         safetyDemo = a.contains("-safetydemo")
+        statesDemo = a.contains("-statesdemo")
+        statesSave = a.contains("-statessave")
         #endif
     }
 }
@@ -81,6 +85,7 @@ enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
     case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install, cart
     case keyChannel = "keychannel", midiMode = "midimode", safetyCopies = "safetycopies"
+    case states
 }
 
 struct MainScreen: View {
@@ -242,6 +247,7 @@ struct MainScreen: View {
         if options.cartDemo { CartSender.shared(for: controller).addDemo() }
         if options.askReset { askReset = true }
         if options.safetyDemo { safetyDemo() }
+        if options.statesDemo { statesDemo() }
         #endif
         if options.themeEditor { ui.editorOpen = true }
         if options.demoMap { midi.demoMap() }
@@ -306,6 +312,7 @@ struct MainScreen: View {
         switch page {
         case .firmware: firmwarePage
         case .safetyCopies: safetyCopiesPage
+        case .states: statesPage
         case .getFirmware:
             GetFirmwarePage(store: catalog, builtIn: builtIn, scrollTo: options.sheetScroll, back: { page = .firmware }) { id in
                 catalogItem = id
@@ -502,6 +509,8 @@ struct MainScreen: View {
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)
                 SheetRow("Restart the firmware", chevron: false) { player.powerCycle() }
+                SheetRow("States", value: "\(player.states.count)") { page = .states }
+                    .disabled(player.current == nil)
                 SheetRow("Safety copies", value: "\(player.safetyCopies.count)") { page = .safetyCopies }
                     .disabled(player.current == nil)
                 ResetFirmwareRow(name: player.current?.name ?? "the firmware", asking: $askReset, divider: false) {
@@ -539,7 +548,43 @@ struct MainScreen: View {
         }
     }
 
+    /// the selected firmware's named states (PLAN.md section 18 step 2): the App Group's library, the AU's too
+    private var statesPage: some View {
+        let c = player.current
+        return SheetPage("States", backTitle: "Firmware", back: { page = .firmware }) {
+            SheetSectionTitle(c.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
+            StatesList(firmware: c?.name ?? "", version: c?.version ?? "", states: player.states,
+                       startSaving: options.statesSave,
+                       save: { n in Task { await player.saveState(name: n) } },
+                       load: { s in Task { await player.loadState(s) } },
+                       rename: { s, n in _ = try? player.library.rename(s, to: n) },
+                       delete: { s in player.library.delete(s) })
+            SheetNote("A state is the firmware's memory (its patches, banks, sequences) with MASTER, the octave and the "
+                      + "keys' touch, under a name. The app and every AU instance share them: a state saved here loads "
+                      + "in the AU instrument, and the other way. Loading keeps a safety copy of the current memory first.")
+            SheetList {
+                SheetRow("Safety copies", value: "\(player.safetyCopies.count)", divider: false) { page = .safetyCopies }
+            }
+            .padding(.top, 12)
+            if !player.message.isEmpty { SheetNote(player.message) }
+        }
+    }
+
     #if DEBUG
+    /// (-statesdemo) made-up states of the selected firmware, for screenshots
+    private func statesDemo() {
+        guard let c = player.current else { return }
+        let size = max(Int(c.flashSize), 1024)
+        let lib = player.library
+        guard lib.list(c.firmwareID).isEmpty else { return }
+        for (i, (n, v, ago)) in [("Pads for the bridge", "1.0.0", 86400.0 * 9), ("Live set, Friday", c.version, 86400 * 2),
+                                  ("Bass sketches", c.version, 3600)].enumerated() {
+            let l = StateLibrary(root: lib.root, now: { Date().addingTimeInterval(-ago) })
+            _ = try? l.save(name: n, firmwareID: c.firmwareID, firmwareName: c.name, kind: c.kind, version: v,
+                            flash: Data(repeating: UInt8(i + 1), count: size), master: 800, origin: i == 1 ? "au" : "app")
+        }
+    }
+
     /// (-safetydemo) made-up copies of the selected firmware's flash, for screenshots
     private func safetyDemo() {
         guard let c = player.current else { return }
@@ -555,6 +600,7 @@ struct MainScreen: View {
     }
     #else
     private func safetyDemo() {}
+    private func statesDemo() {}
     #endif
 
     private var midiPage: some View {

@@ -46,6 +46,7 @@ struct AUSheet: View {
     @Bindable var model: AUViewModel
     private let store = ThemeStore.shared
     @State private var askReset = false         // (section 18) Reset firmware… asked inline
+    @State private var askRestore: String?      // the safety copy whose row asks "Restore?"
 
     var body: some View {
         sheet.onChange(of: model.ui.sheetOpen) { _, open in
@@ -60,6 +61,7 @@ struct AUSheet: View {
     @ViewBuilder private var sheet: some View {
         switch model.page {
         case .firmware: firmwarePage
+        case .states: statesPage
         case .midi: midiPage
         case .keyChannel: keyChannelPage
         case .midiMode: modePage
@@ -223,6 +225,8 @@ struct AUSheet: View {
             SheetList {
                 SheetRow("About this firmware") { model.onAbout?(model.current) }
                 SheetRow("Restart the firmware", chevron: false) { model.restart() }
+                SheetRow("States & safety copies") { model.reloadStates(); model.stateMessage = ""; model.page = .states }
+                    .disabled(!model.status.core.booted)
                 ResetFirmwareRow(name: model.status.coreName.isEmpty ? "the firmware" : model.status.coreName,
                                  asking: $askReset, divider: false) { model.resetFlash() }
             }
@@ -239,6 +243,23 @@ struct AUSheet: View {
             if !model.perfNote.isEmpty { SheetNote(model.perfNote, color: .orange) }
             SheetNote(s.booted ? "\(model.status.coreName)\(s.slot > 0 ? ", slot \(s.slot)" : " (imported)") · instance \(model.instance)"
                       : "No firmware running · instance \(model.instance)")
+        }
+    }
+
+    /// (section 18 step 2) the library's states of this instance's firmware (the app's too) and its safety copies
+    private var statesPage: some View {
+        let name = model.status.coreName
+        return SheetPage("States", backTitle: "Firmware", back: { askRestore = nil; model.page = .firmware }) {
+            SheetSectionTitle("\(name.isEmpty ? "Firmware" : name) \(model.status.coreVersion)", top: 12)
+            StatesList(firmware: name, version: model.status.coreVersion, states: model.states,
+                       saveTitle: "Save to library…", save: { model.saveState($0) }, load: { model.loadState($0) },
+                       rename: { model.renameState($0, $1) }, delete: { model.deleteState($0) })
+            SheetNote("Save to library keeps this instance's memory, MASTER, the octave and the keys' touch under a name; "
+                      + "the RemoteFM1 app and every AU instance share the library. Loading replaces this instance's "
+                      + "memory (a safety copy is kept first); the host keeps it in the project at its next save.")
+            if !model.stateMessage.isEmpty { SheetNote(model.stateMessage, color: .orange) }
+            SheetSectionTitle("Safety copies")
+            SafetyCopiesList(copies: model.copies, asking: $askRestore) { model.restore($0) }
         }
     }
 
