@@ -22,6 +22,18 @@ and the lease, "Use this FM-1", Bluetooth), View, Theme (five presets from `desi
 theme shared with the AU through the App Group), Firmware, MIDI & audio, Settings (Diagnostics: the former debug
 screen, the test pattern and the AU test).
 
+## The faceplate's shortcuts
+
+- The sheet (the top line's grabber) starts with the running firmware's data: Save state…, States, Safety copies, Back
+  up everything (the app; the AU has no backups), Reset firmware…. The firmware's name at the top right (REMOTE FM1
+  when none runs; `FaceplateUI.word`) opens the sheet on the Firmware panel: the same rows, About, Restart, then the
+  installed firmwares to switch. The AU's view does the same.
+- A double tap on the display shows it alone: black, square (240 × 240 scaled), as large as fits, the status bar
+  hidden in the app; a double tap or a swipe down closes it. The display takes no single taps.
+- The screen protector: the FM-1's red film, faintly over the display, its red tab at the corner toward KN1. Drag the
+  tab across the screen to peel it (let go early: back on; past a third: off). Remembered (UserDefaults; the AU's for
+  every instance); Controls › View › Screen protector puts it back. Only the tab takes touches.
+
 ## Layout
 
 - `App/`: the SwiftUI app (`MainScreen`: the faceplate and its sheet; `DiagnosticsScreen`), and the AU tests (`AUTestHost`, `AUTestView`; M4's `AUCoreTest`): the app as
@@ -317,6 +329,8 @@ off (PLAN.md section 17).
   - `-theme Tangerine|Midnight|Mint|Lilac|Cream`: a theme for this launch (not stored).
   - `-orientation portrait|landscape`: asks the scene for it (`requestGeometryUpdate`).
   - `-steps`: the step numbers 1–16 on the lower keys.
+  - `-displayalone`: the display alone, full size; `-protector on|off`: the screen protector put on or taken off
+    (stored); `-peel 0.3`: the film drawn that far peeled (`MATCH=protector`, `MATCH=display-alone`).
 - `-device`: in the simulator, use CoreMIDI (the simulator uses the fake otherwise, as its CoreMIDI may see the
   Mac's MIDI devices); without it the MIDI input starts with no source connected. On a device CoreMIDI is the default.
 - `-autest -aupage midi|keychannel|midimode|learn|learn:KN1|sheet:midi`: the AU test, then that page of the AU's view (`AUPAGE=...

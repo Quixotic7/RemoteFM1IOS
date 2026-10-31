@@ -7,7 +7,7 @@
 # -learn, -learnpick, -sheetscroll; Get firmware: -sheetpage getfirmware, and in Debug builds -catalogitem <id> and
 # -catalogget <id>, which download from the live list; the installer: -sheetpage install, -installdemo; the cartridge page: -sheetpage cart, DEBUG's -cartdemo) and saves a PNG
 # per state ("name@s": that shot waits s seconds). The iPhone fixes: -sheetpage keychannel | midimode, DEBUG's
-# -firmwareedit [ask], -askreset, -safetydemo, -statesdemo, -statessave, -statesshare <name>, -backupdemo (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
+# -firmwareedit [ask], -askreset, -safetydemo, -statesdemo, -statessave, -statesshare <name>, -backupdemo; -displayalone, -protector on|off, -peel f (a "-fwedit" shot first copies the AMB test file into Documents/Firmware) and -fm1prompt
 # install | unanswered | bluetooth | update. The core runs (ChoralRoot by default) so the real framebuffer shows;
 # "-source fm1" uses the fake unit (the simulator's default backend), whose demo input presses keys by itself. A
 # simulator this script booted is shut
@@ -76,6 +76,16 @@ PHONE_SHOTS=(
     # section 18 step 3: a state's … with Share… (-statesshare <name start>); Settings › Your data after a backup
     "phone-states-share|-source phone -view full -sheetpage states -statesdemo -statesshare Bass -orientation portrait"
     "phone-settings-backup@8|-source phone -view full -sheetpage settings -sheetscroll data -statesdemo -backupdemo -orientation portrait"
+    # the firmware's data on top of the sheet; the Firmware panel (a tap on the firmware's name); the display alone;
+    # the screen protector (-protector on|off, -peel f: drawn that far folded)
+    "phone-sheet-data|-source phone -view full -sheet -protector on -orientation portrait"
+    "phone-firmware-panel|-source phone -view full -sheetpage firmware -orientation portrait"
+    "phone-display-alone|-source phone -view full -displayalone -orientation portrait"
+    "phone-display-alone-landscape|-source phone -view full -displayalone -orientation landscape"
+    "phone-protector-on|-source phone -view full -protector on -orientation portrait"
+    "phone-protector-peel|-source phone -view full -protector on -peel 0.3 -orientation portrait"
+    "phone-protector-peel-landscape|-source phone -view full -protector on -peel 0.3 -orientation landscape"
+    "phone-protector-off|-source phone -view full -protector off -orientation portrait"
     "phone-firmware-fwedit-ask|-source phone -view full -firmwareedit ask -orientation portrait"
     "phone-prompt-install|-source fm1 -view full -fm1prompt install -orientation portrait"
     "phone-prompt-unanswered|-source fm1 -view full -fm1prompt unanswered -orientation portrait"
