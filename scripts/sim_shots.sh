@@ -86,6 +86,8 @@ PHONE_SHOTS=(
     "phone-protector-peel|-source phone -view full -protector on -peel 0.3 -orientation portrait"
     "phone-protector-peel-landscape|-source phone -view full -protector on -peel 0.3 -orientation landscape"
     "phone-protector-off|-source phone -view full -protector off -orientation portrait"
+    "phone-protector-on-landscape|-source phone -view full -protector on -orientation landscape"
+    "phone-protector-off-landscape|-source phone -view full -protector off -orientation landscape"
     "phone-firmware-fwedit-ask|-source phone -view full -firmwareedit ask -orientation portrait"
     "phone-prompt-install|-source fm1 -view full -fm1prompt install -orientation portrait"
     "phone-prompt-unanswered|-source fm1 -view full -fm1prompt unanswered -orientation portrait"

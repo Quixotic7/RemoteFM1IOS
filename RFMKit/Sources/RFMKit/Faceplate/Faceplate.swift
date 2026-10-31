@@ -279,16 +279,16 @@ struct FullView: View {
                 .place(m.rect(o.x, o.y, o.width, o.height))
             // the display
             let ds = L.displaySize * s
-            ProtectedDisplay(feed: feed, theme: theme, size: ds, ui: ui, flipped: kind != .phonePortrait)
-                .position(x: m.x(L.display.x) + L.displaySize * m.sx / 2, y: m.y(L.display.y) + ds / 2)
-            // the red LED and KN1-4
+            let dr = CGRect(x: m.x(L.display.x) + L.displaySize * m.sx / 2 - ds / 2, y: m.y(L.display.y),
+                            width: ds, height: ds)
+            ProtectedDisplay(feed: feed, theme: theme, size: ds, ui: ui)
+                .position(x: dr.midX, y: dr.midY)
+            // KN1-4
             switch L.kn {
             case .row(let x, let y, let w, let knob, let led):
                 KnRow(m: m, x: x, y: y, width: w, knob: knob, led: led, theme: theme, feed: feed)
-            case .grid(let c, let lx, let ly, let led):
+            case .grid(let c, _, _, _):
                 KnobGrid(knobs: PanelFeed.Knob.kn, c: c, m: m, theme: theme, feed: feed)
-                IndicatorLED(lights: feed.lights, size: led * s)
-                    .position(x: m.x(lx) + led * s / 2, y: m.y(ly) + led * s / 2)
             }
             // the buttons
             let b = L.buttons
@@ -306,6 +306,9 @@ struct FullView: View {
                 PageDots(theme: theme, ui: ui, scale: s)
                     .position(x: size.width / 2, y: size.height - 18 * m.sy - 12)
             }
+            // the screen protector: its film over the display, its red tab beside the screen
+            ScreenFilm(geo: FilmGeometry(display: dr, radius: max(10, (ds * 0.09).rounded()),
+                                         tab: FilmGeometry.tab(display: dr, below: kind == .phonePortrait)))
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
     }
@@ -332,7 +335,8 @@ struct KnobGrid: View {
     }
 }
 
-/// the red LED then KN1-4, spread across a width (the canvas's space-between row)
+/// KN1-4 spread across a width (the canvas's space-between row; its first slot, led wide, left empty: the FM-1's
+/// red square there is the screen protector's tab, see ScreenFilm)
 struct KnRow: View {
     let m: FaceplateLayout.Mapper
     let x: CGFloat, y: CGFloat, width: CGFloat, knob: CGFloat, led: CGFloat
@@ -346,7 +350,6 @@ struct KnRow: View {
         let ledW = led * m.s
         let gap = (w - ledW - 4 * cell.width) / 4
         let cy = m.y(y) + cell.height / 2
-        IndicatorLED(lights: feed.lights, size: ledW).position(x: m.x(x) + ledW / 2, y: cy)
         ForEach(Array(PanelFeed.Knob.kn.enumerated()), id: \.offset) { i, k in
             KnobView(knob: k, size: size, theme: theme, feed: feed, labelWidth: cell.width + gap)
                 .position(x: m.x(x) + ledW + gap * CGFloat(i + 1) + cell.width * (CGFloat(i) + 0.5), y: cy)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // The faceplate's parts (design/README.md section 5, canvas/Screen, Knob, Buttons, Keys): the display, a knob, the
-// 6 x 2 button grid, the OCT well, the indicator LED. Each draws from the theme and reads only the part of the
+// 6 x 2 button grid, the OCT well. Each draws from the theme and reads only the part of the
 // PanelFeed it shows, so an LED or a knob changing redraws that part alone. Touches go to the feed (the core).
 
 #if os(iOS)
@@ -449,27 +449,4 @@ public struct OctWell: View {
     }
 }
 
-// MARK: - 5.6 Indicator LED
-
-/// the red LED left of KN1. No firmware LED drives it (RemoteFM1's keymap gives every matrix LED to a key or a
-/// button; the FM-1's red LED is outside the panel's LED matrix), so it shows that a core is running: lit while one
-/// is booted, dark otherwise.
-public struct IndicatorLED: View {
-    let lights: PanelLights
-    let size: CGFloat
-
-    public init(lights: PanelLights, size: CGFloat) {
-        self.lights = lights
-        self.size = size
-    }
-
-    public var body: some View {
-        let on = lights.booted
-        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-            .fill(Palette.indicatorLed.opacity(on ? 1 : 0.3))
-            .shadow(color: on ? Palette.indicatorLed : .clear, radius: on ? size * 0.4 : 0)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-}
 #endif

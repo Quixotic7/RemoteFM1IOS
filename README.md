@@ -30,8 +30,9 @@ screen, the test pattern and the AU test).
   installed firmwares to switch. The AU's view does the same.
 - A double tap on the display shows it alone: black, square (240 × 240 scaled), as large as fits, the status bar
   hidden in the app; a double tap or a swipe down closes it. The display takes no single taps.
-- The screen protector: the FM-1's red film, faintly over the display, its red tab at the corner toward KN1. Drag the
-  tab across the screen to peel it (let go early: back on; past a third: off). Remembered (UserDefaults; the AU's for
+- The screen protector: the FM-1's clear film, a faint sheen over the display, its solid red tab (the red square: not
+  an LED) beside the screen's corner nearest KN1 (landscape: right of the screen, level with its top; phone portrait:
+  under its bottom-leading corner). No red square once it's peeled. Drag the tab across the screen to peel it (let go early: back on; past a third: off). Remembered (UserDefaults; the AU's for
   every instance); Controls › View › Screen protector puts it back. Only the tab takes touches.
 
 ## Layout
