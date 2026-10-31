@@ -26,6 +26,12 @@ set(RFM_CORES "choralroot;felucca;melodee;fizz;saadet;boardwalk;loom" CACHE STRI
 set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers; cores/fizz)")
 
 include(${RFM_FM1VST}/cmake/FM1Cores.cmake)
+# iOS: FM1VST's coroutine (core-glue/common/coro.c) switches stacks with ucontext, which an iPhone doesn't run (Melodee
+# stayed on its splash there); cores/ios/coro_arm64.c is the same API with an arm64 switch of its own
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    list(REMOVE_ITEM FM1_COMMON_SOURCES ${FM1_COMMON_DIR}/coro.c)
+    list(APPEND FM1_COMMON_SOURCES ${RFM_OWN}/ios/coro_arm64.c)
+endif()
 set(_glue ${RFM_FM1VST}/core-glue)
 # (crf.cmake's golden tests are deferred to the end of this directory; they need FM1VST's reference emulator target,
 # which is not here, so they skip themselves)
