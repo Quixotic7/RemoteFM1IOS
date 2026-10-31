@@ -41,7 +41,7 @@ screen, the test pattern and the AU test).
   build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
   profiler).
 - `RFMKit/`: a Swift package.
-  - `CRemoteFM1`: libremotefm1 (`vendor/RemoteFM1`: RemoteFM1's `standalone` branch at fa97a90, with MIDI_IN, the TRS jack's MIDI), its macOS glue `host.c` and FM1VST's CoreMIDI back end
+  - `CRemoteFM1`: libremotefm1 (`vendor/RemoteFM1`: RemoteFM1 0.3.1, tag v0.3.1 at e6fa19d: MIDI_IN (the TRS jack's MIDI), TOUCH, SA_INFO), its macOS glue `host.c` and FM1VST's CoreMIDI back end
     `RemoteMidi.c`, compiled in place from `vendor/` through the `RFMKit/vendor` symlink. Built with `RFM_NO_LIBUSB`.
   - `CWasm3`: wasm3 v0.5.0 (MIT, unchanged; its README says from where), the interpreter for imported firmware.
   - `RFMCore`: a copy of FM1VST's `RemoteLink` (its header says what changed), fm1remote's test patterns, and a C API
@@ -58,7 +58,7 @@ screen, the test pattern and the AU test).
     `CoreState`) and the probes (`Probe`, `ProbeReport`); `UI/`: the Bluetooth panel, About this firmware and the
     Diagnostics view; `Install/`: installing RemoteFM1 on the FM-1 with FM1Kit (the releases, the package checks,
     `FirmwareInstaller`, its page; tested by `FirmwareInstallTests` on FM1Kit's SimulatedFM1).
-- `vendor/RemoteFM1`: RemoteFM1 (host library MPL-2.0) at fa97a90 (`standalone`: MIDI_IN) as a git submodule, for
+- `vendor/RemoteFM1`: RemoteFM1 (host library MPL-2.0) at 0.3.1 (tag v0.3.1, e6fa19d) as a git submodule, for
   libremotefm1 and fm1remote's patterns. Read-only.
 - `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`plugin/RemoteMidi.c` and `cores/ChoralRootFM1`, `cores/Felucca`
   with its `firmware/engines`, `cores/melodee`). Read-only.
@@ -282,8 +282,7 @@ With RemoteFM1 0.3.1 or later on the FM-1, "Velocity & pressure from my FM-1" (o
 page, the AU's MIDI section, kept per AU instance) asks the FM-1 for its keys' own velocity and pressure (TOUCH) and
 gives them to the firmware as `key_vel` / `key_lean`. Diagnostics' "touch" row shows whether the firmware has it and
 what the FM-1 confirms. Only cores that read velocity use it (ChoralRoot 0.25.1+, a full build); the store cores play
-as before. The host library's TOUCH code is carried in `vendor/RemoteFM1-touch` until RemoteFM1 9c41a14 is pushed
-(PLAN.md section 16).
+as before. The host library's TOUCH code comes from RemoteFM1 0.3.1 (PLAN.md section 16).
 
 ## Launch arguments
 

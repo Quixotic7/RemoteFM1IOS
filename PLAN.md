@@ -17,7 +17,7 @@ One app, two forms: a standalone app and an AUv3 instrument (AUM, Logic for iPad
 
 | Piece | From | On iOS |
 | --- | --- | --- |
-| libremotefm1: codec, screen encoder, panel, session, fake unit (`host/src/*.c`, `host/include/rfm`, `proto/rfm1.h`) | RemoteFM1 `standalone` (fa97a90, MPL-2.0; `vendor/RemoteFM1`, its own submodule) | as is: portable C99, no OS calls. Bluetooth pacing, lossy tiles and HOLD (whole screen changes) are already in it; 0.3's MIDI_IN (the TRS jack's MIDI) too |
+| libremotefm1: codec, screen encoder, panel, session, fake unit (`host/src/*.c`, `host/include/rfm`, `proto/rfm1.h`) | RemoteFM1 0.3.1 (tag v0.3.1, e6fa19d, MPL-2.0; `vendor/RemoteFM1`, its own submodule) | as is: portable C99, no OS calls. Bluetooth pacing, lossy tiles and HOLD (whole screen changes) are already in it; 0.3's MIDI_IN (the TRS jack's MIDI) and 0.3.1's TOUCH and SA_INFO (user banks) too |
 | CoreMIDI back end (`plugin/RemoteMidi.c` + `RemoteCandidates.h`, RemoteFM1's `host/src/macos/host.c` glue) | FM1VST 0.6.2 | CoreMIDI's API is the same on iOS; built with `RFM_NO_LIBUSB` (no vendor bulk on iOS: SysEx only, over Bluetooth or USB) |
 | `RemoteLink` (session thread, event queue, triple buffer) | FM1VST `plugin/RemoteLink.*` (no JUCE) | as is, except its unit lock (flock), which is replaced by the lease in section 4 |
 | Device (clock, resampler), core descriptor ABI 6 (`engine/`, `core-api/fm1core.h`) | FM1VST | as is |
@@ -595,12 +595,9 @@ RemoteFM1 0.3.1 (standalone 9c41a14, docs/VELOCITY-HOSTS.md there): HELLO_R caps
 SESSION start's ACK the host sends TOUCH (0x14, flags8: bit 0 velocity, bit 1 pressure); PANEL_R's flags bits 1 / 2
 confirm it; then a key arrives as `9F 53+k v` (its own velocity) and its pressure as poly aftertouch `AF 53+k p`.
 
-- **The host library.** 9c41a14 is not pushed, so the submodule stays at fa97a90. Its changed host files (codec.c,
-  fake.c, panel.c, session.c, every `host/include/rfm/*.h`, `proto/rfm1.h`) are carried unchanged in
-  `vendor/RemoteFM1-touch/` (a plain copy of 9c41a14, nothing edited); `RFMKit/Package.swift` compiles those four
-  sources from there and puts its include and proto paths before the submodule's. Everything else (host.c, screen.c,
-  tiles_ref.c, the fm1remote headers) still comes from the submodule, unchanged in 9c41a14. **When 9c41a14 (or later)
-  is pushed:** move the submodule to it, delete `vendor/RemoteFM1-touch/`, and drop the `touch` lines in Package.swift.
+- **The host library.** RemoteFM1 0.3.1 (tag v0.3.1, e6fa19d) has 9c41a14's TOUCH code unchanged; the submodule is
+  at it and every host source comes from it again. (Until it was released the four changed sources and their headers
+  were carried in a temporary `vendor/RemoteFM1-touch/` overlay; it is gone.)
 - **Where it is wired.** RemoteLink: `setKeyTouch` (an atomic; the session thread gives it to the session's
   `cfg.key_touch` at each run and `rfm_session_set_key_touch` when it changes); status touch wanted / in force (PANEL_R)
   / sent. rfmc: `rfmc_set_key_touch`, `rfmc_status_t.touch*`, `rfmc_event_t.vel`, `RFMC_EV_PRESS`, the fake's
