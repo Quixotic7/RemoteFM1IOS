@@ -13,6 +13,7 @@
 //                    is wanted it takes the unit lock, runs libremotefm1 (rfm_session over the CoreMIDI and libusb
 //                    back ends, or over the in-process fake unit), and polls it every 1-2 ms; when not wanted it sleeps
 //                    on a condition variable. start() / stop() only set a flag and return at once.
+// (RemoteFM1 iOS, TOUCH) panel events carry a key's velocity (rfm_event_t.vel) and RFM_EV_PRESS its pressure
 //   audio thread     (the processor, devLock_ held) pops panel events (popEvent) and publishes the LCD + LEDs
 //                    (back() .. publish()). Both are lock-free, allocation-free and bounded.
 //   message thread   start / stop / status / options (the editor, the state).
@@ -85,6 +86,8 @@ public:
         // label names this link in the shared fake's record of who sent what
         bool sharedFake = false;
         std::string fakeLabel;
+        // (tests) the fake unit as one before RemoteFM1 0.3.1: no RFM_CAP_TOUCH
+        bool fakeNoTouch = false;
     };
     explicit RemoteLink(const Options &o);
     ~RemoteLink();                                  // stop(), then the thread joined (<= kStopMs + a poll)
@@ -130,6 +133,9 @@ public:
         uint32_t drops = 0, gateBlocked = 0;        // (M4) runs dropped; shared-fake writes the gate refused
         // (RemoteFM1 0.3, RFM_CAP_MIDI_IN) the unit's TRS MIDI in: messages queued for the core, lost (queue full)
         uint32_t trsMidiIn = 0, trsMidiDropped = 0;
+        // (RemoteFM1 0.3.1, RFM_CAP_TOUCH) TOUCH: what this link asks (RFM_TOUCH_F_*), what the unit's PANEL_R says
+        // is in force, TOUCH messages sent
+        uint32_t touchWanted = 0, touch = 0, touchSent = 0;
     };
     Status status() const;
     static const char *stateName(State s);
@@ -154,6 +160,12 @@ public:
     RemoteSnapshot &back() { return tb_.back(); }
     void publish() { tb_.publish(); }
     static constexpr uint32_t kPeriodMs = 50;       // the audio thread publishes at most every kPeriodMs device ms
+
+    // ---- any thread: TOUCH (velocity and pressure from the unit's keys, RFM_TOUCH_F_*; the default both). Sent after
+    // each SESSION start's ACK to a unit with RFM_CAP_TOUCH, and at once in a session when it changes; 0: not asked
+    // (the keys at velocity 100, no pressure, as before)
+    void setKeyTouch(uint32_t flags) { touchWant_.store(flags & (RFM_TOUCH_F_VEL | RFM_TOUCH_F_PRESS)); }
+    uint32_t keyTouch() const { return touchWant_.load(); }
 
     // ---- any thread: CoreMIDI's setup changed (a Bluetooth device came or went): the session thread rescans
     void requestRescan() { rescan_.store(true, std::memory_order_release); }
@@ -270,6 +282,8 @@ private:
     std::atomic<DropFn> onDrop_{nullptr};
     std::atomic<void *> gateCtx_{nullptr};
     std::atomic<bool> dropReq_{false};
+    std::atomic<uint32_t> touchWant_{RFM_TOUCH_F_VEL | RFM_TOUCH_F_PRESS};
+    uint32_t touchApplied_ = 0;                     // (the session thread's) what the session was last given
     std::atomic<uint32_t> drops_{0}, gateBlocked_{0};
     std::vector<uint8_t> loopBuf_;
     int lastState_ = -1;

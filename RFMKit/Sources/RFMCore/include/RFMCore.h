@@ -21,7 +21,9 @@ enum { RFMC_OFF = 0, RFMC_IN_USE, RFMC_SEARCHING, RFMC_CONNECTED, RFMC_LOST, RFM
 // rfm_session_state (RFM_S_*), -1 no session
 enum { RFMC_S_DISCOVER = 0, RFMC_S_STARTING, RFMC_S_ACTIVE, RFMC_S_STOPPING, RFMC_S_STOPPED };
 // rfm_event_t types, and RemoteLink::kEvRelease (everything the unit held is up)
-enum { RFMC_EV_KEY = 1, RFMC_EV_BUTTON = 2, RFMC_EV_ENC = 3, RFMC_EV_MASTER = 4, RFMC_EV_RELEASE = 0x80 };
+enum { RFMC_EV_KEY = 1, RFMC_EV_BUTTON = 2, RFMC_EV_ENC = 3, RFMC_EV_MASTER = 4, RFMC_EV_PRESS = 5, RFMC_EV_RELEASE = 0x80 };
+// TOUCH (RemoteFM1 0.3.1): HELLO_R caps bit, rfmc_set_key_touch flags, PANEL_R in force (rfmc_status_t.touch)
+enum { RFMC_CAP_TOUCH = 1u << 10, RFMC_TOUCH_VEL = 1u << 0, RFMC_TOUCH_PRESS = 1u << 1 };
 #define RFMC_W 240
 #define RFMC_H 240
 
@@ -34,6 +36,7 @@ typedef struct {
     const char *host_name;      // HELLO's body, at most 16 bytes
     int shared_fake;            // (M4, RFMC_FAKE) the process-wide shared fake unit instead of this link's own
     const char *label;          // (M4) this link's name in the shared fake's record
+    int fake_no_touch;          // (tests, RFMC_FAKE) the fake as a unit before 0.3.1 (no RFMC_CAP_TOUCH)
 } rfmc_cfg_t;
 
 typedef struct rfmc rfmc_t;
@@ -44,6 +47,9 @@ void rfmc_start(rfmc_t *c);
 void rfmc_stop(rfmc_t *c);
 void rfmc_set_pattern(rfmc_t *c, int on);
 void rfmc_rescan(rfmc_t *c);    // CoreMIDI's setup changed
+// TOUCH: velocity and pressure from the FM-1's keys (RFMC_TOUCH_*; default both). Asked after each SESSION start's
+// ACK from a unit with RFMC_CAP_TOUCH, and at once when changed; 0: not asked (velocity 100, no pressure, as before)
+void rfmc_set_key_touch(rfmc_t *c, uint32_t flags);
 
 // ---- the lease (M4, PLAN.md section 4; RFMLease.h). With a lease the link runs only while the lease's epoch is this
 // client's: the session thread checks it before it sends (RemoteLink's gate) and heartbeats about once a second; on a
@@ -74,13 +80,16 @@ typedef struct {
     // the unit's TRS MIDI in (RemoteFM1 0.3: caps RFM_CAP_MIDI_IN, MIDI_IN in a session): messages queued for the
     // attached engine's core (its MIDI in, as the website's), lost (queue full)
     uint32_t trs_midi_in, trs_midi_dropped;
+    // TOUCH: asked (RFMC_TOUCH_*), in force as the unit's PANEL_R says, TOUCH messages sent
+    uint32_t touch_wanted, touch, touch_sent;
 } rfmc_status_t;
 void rfmc_status(rfmc_t *c, rfmc_status_t *st);
 
 typedef struct {
     uint32_t seq;               // 1, 2, .. in arrival order
     uint8_t type, index, source; // RFMC_EV_*; key 0..26 / button 0..13 / encoder 0..6; 0 MIDI, 1 PANEL_R correction
-    int16_t value;              // key / button 1 down 0 up; encoder detents; MASTER 0..1023
+    int16_t value;              // key / button 1 down 0 up; encoder detents; MASTER 0..1023; PRESS 0..127
+    uint8_t vel;                // a key down: its velocity 1..127 (TOUCH), 0 none given
 } rfmc_event_t;
 // the events after seq `after` (the newest `max` of them, oldest first); returns how many were copied
 uint32_t rfmc_events(rfmc_t *c, uint32_t after, rfmc_event_t *out, uint32_t max);
@@ -96,11 +105,15 @@ void rfmc_fake_key(rfmc_t *c, uint32_t k, int down);
 void rfmc_fake_button(rfmc_t *c, uint32_t b, int down);
 void rfmc_fake_enc(rfmc_t *c, uint32_t e, int32_t detents);
 void rfmc_fake_master(rfmc_t *c, uint32_t adc);
+// TOUCH: a key pressed at vel (sent as vel when the session asked for velocity, else 100); a held key's pressure 0..127
+void rfmc_fake_key_vel(rfmc_t *c, uint32_t k, int down, uint32_t vel);
+void rfmc_fake_press(rfmc_t *c, uint32_t k, uint32_t p);
 // MIDI into the fake's TRS jack (whole messages with their status): MIDI_IN to the host while a session runs
 void rfmc_fake_trs(rfmc_t *c, const uint8_t *msgs, uint32_t n);
 typedef struct {
     int session;                // 0 none, 1 SysEx, 2 bulk
     uint32_t frames, acks, held_frames, hellos;
+    uint32_t touch, touch_msgs; // TOUCH in force on the fake (RFMC_TOUCH_*), TOUCH messages it took
     uint8_t lit[11];            // the LEDs it shows lit (LEDS' lit plane, packed row bits per column)
 } rfmc_fake_t;
 int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out);   // 0: not the fake backend

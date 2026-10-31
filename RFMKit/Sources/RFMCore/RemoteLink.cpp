@@ -73,6 +73,8 @@ RemoteLink::RemoteLink(const Options &o) : opt_(o), t0_(std::chrono::steady_cloc
             fc.has_bulk = 0;
             fc.sx_rate_bps = 6000;
         }
+        if (opt_.fakeNoTouch)
+            fc.touch = 0;
         fake_ = rfm_fake_new(&fc);
         loopBuf_.resize(1u << 18);
     }
@@ -266,6 +268,7 @@ void RemoteLink::runOnce()
     sc.fps = opt_.fps;
     sc.host_name = opt_.hostName.c_str();
     sc.transport = RFM_T_AUTO;
+    sc.key_touch = touchApplied_ = touchWant_.load();
     const rfm_session_cb_t cb{this, cbEvent, cbState, cbRescan, cbLog, cbMidiIn};
     lastState_ = -1;
     wasConnected_ = false;
@@ -361,6 +364,10 @@ void RemoteLink::runOnce()
             dropped = true;
             break;
         }
+        if (const uint32_t tw = touchWant_.load(); tw != touchApplied_) {
+            rfm_session_set_key_touch(s_, tw);   // (in a session with a TOUCH unit: sent at once)
+            touchApplied_ = tw;
+        }
         rfm_session_poll(s_, t);
         if (fakePath)
             pumpFake(t);
@@ -438,6 +445,9 @@ void RemoteLink::updateStatus(uint32_t t)
     st_.hold = ss.hold;
     st_.wireCap = ss.wire_cap;
     st_.frameMs = ss.frame_ms;
+    st_.touchWanted = touchApplied_;
+    st_.touch = ss.touch;
+    st_.touchSent = ss.touch_sent;
     if (const rfm_hello_t *h = rfm_session_hello(s_); h && h->name[0]) {
         st_.hello = *h;
         st_.haveHello = true;

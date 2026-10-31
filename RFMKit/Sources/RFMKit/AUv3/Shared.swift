@@ -152,7 +152,13 @@ public struct AUSettings: Equatable, Sendable {
     public var keyNotesToFirmware = false       // the notes that played a key also go to the firmware's MIDI in
     public var useLearnedMap = true             // MIDI learn's knobs and buttons play (off: kept, their messages flow on)
     public var hostClock = true                 // the host's tempo and transport as MIDI clock to the firmware
+    /// TOUCH (RemoteFM1 0.3.1+): the FM-1's keys' own velocity and pressure (poly aftertouch) to the firmware; off, or
+    /// older firmware: velocity 100, no pressure, as before
+    public var keyTouch = true
     public init() {}
+
+    /// rfmc_set_key_touch's flags
+    public var keyTouchFlags: UInt32 { keyTouch ? 3 : 0 }        // RFMC_TOUCH_VEL | RFMC_TOUCH_PRESS
 
     /// notes play keys at all (the old on/off)
     public var notesPlayKeys: Bool { keyChannel != .off }
@@ -167,12 +173,14 @@ public struct AUSettings: Equatable, Sendable {
         keyNotesToFirmware = (d?["keyNotesToFirmware"] as? NSNumber)?.boolValue ?? false
         useLearnedMap = (d?["useLearnedMap"] as? NSNumber)?.boolValue ?? true
         hostClock = (d?["hostClock"] as? NSNumber)?.boolValue ?? true
+        keyTouch = (d?["keyTouch"] as? NSNumber)?.boolValue ?? true
     }
 
     /// (notesPlayKeys too, for an older build reading it)
     var dict: [String: Any] {
         ["keyChannel": Int(keyChannel.engineValue), "notesPlayKeys": notesPlayKeys, "transpose": transpose,
-         "keyNotesToFirmware": keyNotesToFirmware, "useLearnedMap": useLearnedMap, "hostClock": hostClock]
+         "keyNotesToFirmware": keyNotesToFirmware, "useLearnedMap": useLearnedMap, "hostClock": hostClock,
+         "keyTouch": keyTouch]
     }
 }
 

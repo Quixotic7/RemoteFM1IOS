@@ -363,6 +363,7 @@ public final class CorePlayer {
     private func applyMidiSettings() {
         let m = midiSettings
         rfme_set_midi(e, m.keyChannel.engineValue, Int32(m.transpose), m.keyNotesToFirmware ? 1 : 0, m.useLearnedMap ? 1 : 0)
+        if let core = link?.core { rfmc_set_key_touch(core, m.keyTouchFlags) }
     }
 
     public func setAudio(_ on: Bool) {

@@ -9,6 +9,11 @@ import PackageDescription
 let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 0.3 (standalone, fa97a90: MIDI_IN), its own submodule
 let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
+// TOUCH (velocity and pressure from the FM-1's keys): RemoteFM1 standalone 9c41a14's codec / fake / panel / session and
+// their headers, carried in vendor/RemoteFM1-touch (PLAN.md section 16) until 9c41a14 is pushed and the submodule moves to it;
+// then these overlay lines go and the sources come from \(rfm) again. Its paths come before the submodule's.
+let touch = "RemoteFM1-touch"
+let vendorTouch = "../../vendor/RemoteFM1-touch"
 
 let package = Package(
     name: "RFMKit",
@@ -28,18 +33,20 @@ let package = Package(
             name: "CRemoteFM1",
             path: "vendor",
             sources: [
-                "\(rfm)/host/src/codec.c",
-                "\(rfm)/host/src/fake.c",
-                "\(rfm)/host/src/panel.c",
+                "\(touch)/host/src/codec.c",
+                "\(touch)/host/src/fake.c",
+                "\(touch)/host/src/panel.c",
                 "\(rfm)/host/src/screen.c",
-                "\(rfm)/host/src/session.c",
+                "\(touch)/host/src/session.c",
                 "\(rfm)/host/src/tiles_ref.c",
                 "\(rfm)/host/src/macos/host.c",
                 "\(rfm)/host/src/macos/usb.c",
                 "FM1VST/plugin/RemoteMidi.c",
             ],
-            publicHeadersPath: "\(rfm)/host/include",
+            publicHeadersPath: "\(touch)/host/include",
             cSettings: [
+                .headerSearchPath("\(touch)/host/include"),
+                .headerSearchPath("\(touch)/proto"),
                 .headerSearchPath("\(rfm)/host/include"),
                 .headerSearchPath("\(rfm)/proto"),
                 .headerSearchPath("\(rfm)/firmware/src"),
@@ -75,6 +82,8 @@ let package = Package(
                 .headerSearchPath("\(vendorFM1)/engine"),
                 .headerSearchPath("\(vendorFM1)/plugin"),        // RemoteCandidates.h (RFMMidiMap.cpp)
                 .headerSearchPath("\(vendorFM1)/core-api"),
+                .headerSearchPath("\(vendorTouch)/host/include"),
+                .headerSearchPath("\(vendorTouch)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/include"),
                 .headerSearchPath("\(vendorRFM)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),

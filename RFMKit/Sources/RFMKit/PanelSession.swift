@@ -32,6 +32,7 @@ public struct PanelStatus: Sendable, Equatable {
     public var epoch: UInt64 = 0
     public var link: LinkState = .stopped("")
     public var linkText = ""
+    public var touchText = "–"              // TOUCH: the firmware's cap, what was asked, what PANEL_R confirms
     public var linkRunning = false
     public var drops: UInt32 = 0
     public var gateBlocked: UInt32 = 0
@@ -341,6 +342,8 @@ public final class PanelSession: @unchecked Sendable {
         p.linkRunning = st.wanted != 0
         p.drops = st.drops
         p.gateBlocked = st.gate_blocked
+        p.touchText = LinkStats.touchText(caps: st.have_hello != 0 ? st.caps : nil, wanted: st.touch_wanted,
+                                          inForce: st.touch, sent: st.touch_sent)
         if st.have_hello != 0 {
             let h = RemoteController.hello(of: st)
             p.hello = h

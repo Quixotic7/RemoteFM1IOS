@@ -276,6 +276,15 @@ FM-1 while it sends. USB is preferred; Bluetooth MIDI is paced. Screenshot: `MAT
 With RemoteFM1 0.3.1 the page lists the FM-1's user banks (up to 16) and replaces, removes or renames each; 0.3.0
 (no reply) gets the plain send.
 
+## Velocity and pressure from the FM-1
+
+With RemoteFM1 0.3.1 or later on the FM-1, "Velocity & pressure from my FM-1" (on by default; the app's MIDI & audio
+page, the AU's MIDI section, kept per AU instance) asks the FM-1 for its keys' own velocity and pressure (TOUCH) and
+gives them to the firmware as `key_vel` / `key_lean`. Diagnostics' "touch" row shows whether the firmware has it and
+what the FM-1 confirms. Only cores that read velocity use it (ChoralRoot 0.25.1+, a full build); the store cores play
+as before. The host library's TOUCH code is carried in `vendor/RemoteFM1-touch` until RemoteFM1 9c41a14 is pushed
+(PLAN.md section 16).
+
 ## Launch arguments
 
 - `-fake`: the fake unit inside the app (it also presses keys by itself, so the panel path shows).

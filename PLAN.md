@@ -588,3 +588,31 @@ headphones, or the FM-1. A note under it says when the sound goes to USB. We nev
 routeChangeNotification the name is read again and, when the engine stopped (the device in use gone), a new engine is
 started (AudioRoute.action); a rate or buffer change posts AVAudioEngineConfigurationChange as before, which rebuilds the
 engine at the new rate and the core's render-ahead with it. Not in the AU (the host owns its audio).
+
+## 16. Velocity and pressure from the FM-1's keys (TOUCH)
+
+RemoteFM1 0.3.1 (standalone 9c41a14, docs/VELOCITY-HOSTS.md there): HELLO_R caps bit 10 `RFM_CAP_TOUCH`; after each
+SESSION start's ACK the host sends TOUCH (0x14, flags8: bit 0 velocity, bit 1 pressure); PANEL_R's flags bits 1 / 2
+confirm it; then a key arrives as `9F 53+k v` (its own velocity) and its pressure as poly aftertouch `AF 53+k p`.
+
+- **The host library.** 9c41a14 is not pushed, so the submodule stays at fa97a90. Its changed host files (codec.c,
+  fake.c, panel.c, session.c, every `host/include/rfm/*.h`, `proto/rfm1.h`) are carried unchanged in
+  `vendor/RemoteFM1-touch/` (a plain copy of 9c41a14, nothing edited); `RFMKit/Package.swift` compiles those four
+  sources from there and puts its include and proto paths before the submodule's. Everything else (host.c, screen.c,
+  tiles_ref.c, the fm1remote headers) still comes from the submodule, unchanged in 9c41a14. **When 9c41a14 (or later)
+  is pushed:** move the submodule to it, delete `vendor/RemoteFM1-touch/`, and drop the `touch` lines in Package.swift.
+- **Where it is wired.** RemoteLink: `setKeyTouch` (an atomic; the session thread gives it to the session's
+  `cfg.key_touch` at each run and `rfm_session_set_key_touch` when it changes); status touch wanted / in force (PANEL_R)
+  / sent. rfmc: `rfmc_set_key_touch`, `rfmc_status_t.touch*`, `rfmc_event_t.vel`, `RFMC_EV_PRESS`, the fake's
+  `rfmc_fake_key_vel` / `rfmc_fake_press` / `fake_no_touch`. RFMEngine: a key's down event's `vel` becomes its
+  `key_vel` (0: 100 as before); `RFM_EV_PRESS` p becomes `key_lean` = (p * 100 + 63) / 127, 0 when the key is let go
+  or the session ends; `rfme_status_t.key_vel_last` / `key_lean_last` for tests.
+- **The setting.** `AUSettings.keyTouch` ("Velocity & pressure from my FM-1", default on; fullState's settings, the
+  app's defaults): the app's MIDI & audio page, the AU sheet's MIDI section. Off: TOUCH 0 in a session (none sent at
+  a start); the keys at velocity 100, no pressure. Diagnostics (app and AU): "touch": the firmware's cap, what was
+  asked, what PANEL_R confirms. Firmware before 0.3.1: no cap, nothing sent, nothing changes.
+- **Which cores use it.** Only cores that read `fm1panel_t.key_vel` / `key_lean`: ChoralRoot 0.25.1+ (full builds;
+  not in the store build) and fm1-base apps with APP_TOUCH. The store build's cores (FIZZ, Saadet, Boardwalk, Loom)
+  read keys on / off only, so they sound the same either way.
+- Tests: TouchTests (TOUCH after the ACK only with the cap and the setting on, PANEL_R's confirmation, 9F / AF to
+  key_vel / key_lean on the echo core, off in a session, a unit before 0.3.1).

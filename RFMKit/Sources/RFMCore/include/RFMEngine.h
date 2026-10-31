@@ -195,6 +195,8 @@ void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out);
 // a panel event as the FM-1 sends it (RFMC_EV_KEY / BUTTON / ENC / MASTER, matrix ids; any thread but the clock's,
 // one producer), applied in the clock's between hook like the unit's. 0: the queue is full
 int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value);
+// the same with a key down's velocity (TOUCH: 1..127; 0 none given, kRemoteVel 100)
+int rfme_event_vel(rfme_t *e, uint8_t type, uint8_t index, int16_t value, uint8_t vel);
 int rfme_matrix_button(rfme_t *e, int label);   // the matrix id of a label (after boot), -1
 int rfme_matrix_encoder(rfme_t *e, int role);   // the matrix encoder of a knob role (after boot), -1
 
@@ -224,6 +226,7 @@ typedef struct {
     int slot;                   // 1..4, 0 none (or a Wasm core: no slots)
     char core_id[32];
     uint32_t dev_ms, lcd_writes, snapshots, events_applied, events_dropped, keys_pressed, midi_out;
+    uint32_t key_vel_last, key_lean_last;   // (TOUCH) key << 8 | the key_vel / key_lean last given the core
     uint32_t midi_in, midi_notes, midi_in_dropped;  // (M4) host MIDI messages; of them notes that played a key; lost
     uint32_t shed, cpu_pct, have_stats;   // the core's stats(), read every 500 device ms
     uint64_t renders, render_frames;

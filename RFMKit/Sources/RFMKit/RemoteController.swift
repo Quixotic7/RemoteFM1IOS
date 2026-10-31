@@ -316,20 +316,26 @@ public final class RemoteController {
         s.eventsDropped = st.events_dropped
         s.trsMidiIn = st.trs_midi_in
         s.trsMidiDropped = st.trs_midi_dropped
+        s.touchWanted = st.touch_wanted
+        s.touch = st.touch
+        s.touchSent = st.touch_sent
         s.snapshots = st.snapshots
         return s
     }
 
-    static func event(of e: rfmc_event_t) -> PanelEvent {
+    nonisolated static func event(of e: rfmc_event_t) -> PanelEvent {
         let kind: PanelEvent.Kind
         switch Int(e.type) {
         case RFMC_EV_KEY: kind = .key
         case RFMC_EV_BUTTON: kind = .button
         case RFMC_EV_ENC: kind = .encoder
         case RFMC_EV_MASTER: kind = .master
+        case RFMC_EV_PRESS: kind = .pressure
         default: kind = .release
         }
-        return PanelEvent(id: e.seq, kind: kind, index: Int(e.index), value: Int(e.value), resync: e.source != 0)
+        var p = PanelEvent(id: e.seq, kind: kind, index: Int(e.index), value: Int(e.value), resync: e.source != 0)
+        p.velocity = Int(e.vel)
+        return p
     }
 
     /// a fixed-size C char array (imported as a tuple), up to its NUL

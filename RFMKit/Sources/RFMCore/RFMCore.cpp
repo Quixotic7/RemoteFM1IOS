@@ -116,6 +116,7 @@ struct rfmc {
         r.index = e.index;
         r.source = e.source;
         r.value = e.value;
+        r.vel = e.vel;
         log.push_back(r);
         if (log.size() > kLog)
             log.pop_front();
@@ -266,6 +267,7 @@ rfmc_t *rfmc_new(const rfmc_cfg_t *cfg)
     o.hostName = cfg->host_name && *cfg->host_name ? cfg->host_name : "RemoteFM1 iOS";
     o.sharedFake = cfg->shared_fake != 0;
     o.fakeLabel = cfg->label ? cfg->label : "";
+    o.fakeNoTouch = cfg->fake_no_touch != 0;
     rfmc_t *c = new rfmc(o);
     c->period = 1000u / (o.fps < 1 || o.fps > 60 ? 20u : o.fps);
     c->th = std::thread([c] { c->threadMain(); });
@@ -405,6 +407,9 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
     st->events_in = s.eventsIn;
     st->trs_midi_in = s.trsMidiIn;
     st->trs_midi_dropped = s.trsMidiDropped;
+    st->touch_wanted = s.touchWanted;
+    st->touch = s.touch;
+    st->touch_sent = s.touchSent;
     st->events_dropped = s.eventsDropped;
     st->snapshots = s.snapshotsTaken;
     st->colors = s.colors;
@@ -496,6 +501,21 @@ void rfmc_fake_key(rfmc_t *c, uint32_t k, int down)
     c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_key(f, k, down); });
 }
 
+void rfmc_fake_key_vel(rfmc_t *c, uint32_t k, int down, uint32_t vel)
+{
+    c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_key_vel(f, k, down, vel); });
+}
+
+void rfmc_fake_press(rfmc_t *c, uint32_t k, uint32_t p)
+{
+    c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_press(f, k, p); });
+}
+
+void rfmc_set_key_touch(rfmc_t *c, uint32_t flags)
+{
+    c->link.setKeyTouch(flags);
+}
+
 void rfmc_fake_button(rfmc_t *c, uint32_t b, int down)
 {
     c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_button(f, b, down); });
@@ -530,6 +550,9 @@ int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out)
         out->acks = fs.acks;
         out->held_frames = fs.held_frames;
         out->hellos = fs.hellos;
+        const uint32_t t = rfm_fake_touch(f);
+        out->touch = t & 0xFFu;
+        out->touch_msgs = t >> 8;
         std::memcpy(out->lit, rfm_fake_leds(f)->lit, sizeof out->lit);
         ok = 1;
     });

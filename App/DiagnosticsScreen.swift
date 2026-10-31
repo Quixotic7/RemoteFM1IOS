@@ -291,6 +291,7 @@ struct LinkCard: View {
                 ("held", "\(s.held), reduced \(s.reduced), refined \(s.refined)"),
                 ("sessions", "\(s.sessions), discoveries \(s.discoveries), runs \(s.runs)"),
                 ("events", "\(s.eventsIn), dropped \(s.eventsDropped)"),
+                ("touch", s.touchText(hello: controller.hello)),
                 ("TRS MIDI in", "\(s.trsMidiIn)" + (s.trsMidiDropped > 0 ? ", dropped \(s.trsMidiDropped)" : "")),
                 ("MIDI setup", "\(controller.midiSetupChanges) changes"),
             ])

@@ -60,7 +60,7 @@ public struct UnitHello: Sendable, Equatable {
     }
     public var capNames: String {
         Self.bits(Int(caps), ["shadow", "COPY", "RLE", "PAL", "battery", "PLAY green", "5 LED levels", "HOLD",
-                              "BLE fast"])
+                              "BLE fast", "MIDI in", "TOUCH"])
     }
     static func bits(_ v: Int, _ names: [String]) -> String {
         let on = names.indices.filter { v & (1 << $0) != 0 }.map { names[$0] }
@@ -80,16 +80,38 @@ public struct LinkStats: Sendable, Equatable {
     public var held: UInt32 = 0, reduced: UInt32 = 0, refined: UInt32 = 0, colors: UInt32 = 0
     public var eventsIn: UInt32 = 0, eventsDropped: UInt32 = 0, snapshots: UInt32 = 0
     public var trsMidiIn: UInt32 = 0, trsMidiDropped: UInt32 = 0   // the unit's TRS MIDI in (RFM_CAP_MIDI_IN) to the core
+    // TOUCH (RemoteFM1 0.3.1): asked (RFMC_TOUCH_*), in force as the unit's PANEL_R confirms, TOUCH messages sent
+    public var touchWanted: UInt32 = 0, touch: UInt32 = 0, touchSent: UInt32 = 0
     public init() {}
+
+    /// the Diagnostics line: whether the firmware has TOUCH (HELLO_R caps), what was asked, what PANEL_R confirms
+    public func touchText(hello: UnitHello?) -> String {
+        Self.touchText(caps: hello?.caps, wanted: touchWanted, inForce: touch, sent: touchSent)
+    }
+
+    public static func touchText(caps: UInt16?, wanted: UInt32, inForce: UInt32, sent: UInt32) -> String {
+        func names(_ f: UInt32) -> String {
+            let n = [f & 1 != 0 ? "velocity" : nil, f & 2 != 0 ? "pressure" : nil].compactMap { $0 }
+            return n.isEmpty ? "none" : n.joined(separator: " + ")
+        }
+        guard let caps else { return wanted == 0 ? "off" : "on (no FM-1 yet)" }
+        guard caps & 0x400 != 0 else {
+            return "not in this firmware (RemoteFM1 0.3.1+): velocity 100, no pressure"
+        }
+        if wanted == 0 { return "off: velocity 100, no pressure (firmware has TOUCH)" }
+        return "asked \(names(wanted)); FM-1 confirms \(names(inForce))" + (inForce == wanted ? "" : " (not yet)")
+            + ", \(sent) sent"
+    }
 }
 
 /// One panel event from the unit (matrix numbers, as the protocol has them).
 public struct PanelEvent: Sendable, Equatable, Identifiable {
-    public enum Kind: Sendable, Equatable { case key, button, encoder, master, release }
+    public enum Kind: Sendable, Equatable { case key, button, encoder, master, pressure, release }
     public let id: UInt32               // arrival order
     public let kind: Kind
     public let index: Int
-    public let value: Int               // key / button 1 down 0 up; encoder detents; MASTER 0..1023
+    public let value: Int               // key / button 1 down 0 up; encoder detents; MASTER 0..1023; pressure 0..127
+    public var velocity = 0             // a key down: its velocity (TOUCH), 0 none given
     public let resync: Bool             // a PANEL_R correction, not a MIDI event
 
     public static let buttonNames = ["OCT-", "OCT+", "FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP",
@@ -105,7 +127,9 @@ public struct PanelEvent: Sendable, Equatable, Identifiable {
     public var text: String {
         let r = resync ? " (PANEL_R)" : ""
         switch kind {
-        case .key: return "key \(index) \(Self.keyName(index)) \(value != 0 ? "down" : "up")\(r)"
+        case .key: return "key \(index) \(Self.keyName(index)) \(value != 0 ? "down" : "up")"
+            + (value != 0 && velocity > 0 ? " vel \(velocity)" : "") + r
+        case .pressure: return "key \(index) \(Self.keyName(index)) pressure \(value)\(r)"
         case .button:
             let n = index < Self.buttonNames.count ? Self.buttonNames[index] : "\(index)"
             return "button \(n) \(value != 0 ? "down" : "up")\(r)"

@@ -526,12 +526,14 @@ struct MainScreen: View {
                 SheetStepper("Transpose", value: m.transpose, in: -2...2) { t in
                     t == 0 ? "0" : "\(t > 0 ? "+" : "−")\(abs(t)) oct"
                 }
+                SheetToggle("Velocity & pressure from my FM-1", on: m.keyTouch)
                 SheetRow("Bluetooth MIDI devices") { showBluetooth = true }
                 SheetRow("Look for the FM-1 again", divider: false, chevron: false) { controller.rescan() }
             }
             SheetNote("Keys from MIDI: notes on that channel (or any) play the keys, transposed by octaves. Notes on "
                       + "other channels, notes outside the keys, every note when Off, and whatever the learned knobs "
-                      + "don't take go to the firmware's MIDI in.")
+                      + "don't take go to the firmware's MIDI in. Velocity & pressure: the FM-1's keys play at their own "
+                      + "velocity and send their pressure to the firmware (RemoteFM1 0.3.1 or later; off: velocity 100).")
             SheetNote("FM-1 link: \(controller.statusText)")
             MidiMapSection(useMap: m.useLearnedMap, pickMode: { src in
                 modeSource = src

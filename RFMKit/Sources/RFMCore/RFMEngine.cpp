@@ -38,7 +38,7 @@
 
 static_assert(RFME_B_OCTUP == FM1P_B_OCTUP && RFME_B_SAVE == FM1P_B_SAVE && RFME_E_K4 == FM1P_E_K4, "labels");
 static_assert(RFMC_EV_KEY == RFM_EV_KEY && RFMC_EV_BUTTON == RFM_EV_BUTTON && RFMC_EV_ENC == RFM_EV_ENC &&
-                  RFMC_EV_MASTER == RFM_EV_MASTER && RFMC_EV_RELEASE == RemoteLink::kEvRelease,
+                  RFMC_EV_MASTER == RFM_EV_MASTER && RFMC_EV_PRESS == RFM_EV_PRESS && RFMC_CAP_TOUCH == RFM_CAP_TOUCH && RFMC_EV_RELEASE == RemoteLink::kEvRelease,
               "event types");
 static_assert(sizeof(RemoteSnapshot::lcd) == sizeof(fm1panel_t::lcd), "the LCD layouts differ");
 
@@ -187,6 +187,7 @@ struct rfme final : rfm::HostParams::Panel {
 
     // the clock thread's own
     uint32_t noteKeys = 0, labels = 0, matrixButtons = 0;
+    uint8_t noteVel[FM1P_NKEY] = {};        // (TOUCH) each FM-1 key's press velocity, 0 none given (kRemoteVel)
     // host MIDI (the clock's own; FM1VST's midiKeys_, midiVel_, noteKey_, keyCount_, appliedKeys_, inRing_)
     uint32_t midiKeys = 0, appliedKeys = 0;
     uint8_t midiVel[FM1P_NKEY] = {};
@@ -243,6 +244,7 @@ struct rfme final : rfm::HostParams::Panel {
     // read by anyone
     std::atomic<bool> halted{false}, flashReady{false}, flashReq{false};
     std::atomic<uint32_t> haltCode{0}, devMs{0}, lcdWrites{0}, snapshots{0}, applied{0}, dropped{0}, keysPressed{0};
+    std::atomic<uint32_t> lastVel{0}, lastLean{0};  // (TOUCH) key << 8 | the key_vel / key_lean last given the core
     std::atomic<uint32_t> midiOut{0}, shed{0}, cpuPct{0}, haveStats{0}, flashCopies{0}, flashDirty{0};
     std::atomic<uint64_t> renders{0}, renderFrames{0}, renderTicks{0};
     std::atomic<uint32_t> renderLastUs{0}, renderMaxUs{0}, renderLastFrames{0};
@@ -374,8 +376,11 @@ struct rfme final : rfm::HostParams::Panel {
             return;
         const uint32_t down = m & ~appliedKeys;
         for (int k = 0; k < FM1P_NKEY; k++)
-            if ((down >> k) & 1u)
-                dev->key_vel(k, (midiKeys >> k) & 1u ? midiVel[k] : (noteKeys >> k) & 1u ? kRemoteVel : 0);
+            if ((down >> k) & 1u) {
+                const int v = (midiKeys >> k) & 1u ? midiVel[k] : (noteKeys >> k) & 1u ? (noteVel[k] ? noteVel[k] : kRemoteVel) : 0;
+                dev->key_vel(k, v);
+                lastVel.store((uint32_t)k << 8 | (uint32_t)v, std::memory_order_relaxed);
+            }
         dev->keys(m);
         appliedKeys = m;
     }
@@ -615,10 +620,19 @@ struct rfme final : rfm::HostParams::Panel {
                     if (!(noteKeys & bit))
                         keysPressed.fetch_add(1, std::memory_order_relaxed);
                     noteKeys |= bit;
+                    noteVel[e.index] = e.vel;                // (TOUCH: the key's own; 0: kRemoteVel)
                 } else {
                     noteKeys &= ~bit;
+                    h->key_lean[e.index] = 0;
                 }
                 pushKeys();                                  // (its velocity first; a key newly down also taps)
+            }
+            break;
+        case RFM_EV_PRESS:                                   // (TOUCH) a held key's pressure, as rfm_panel_lean
+            if (e.index < FM1P_NKEY) {
+                const int p = e.value < 0 ? 0 : e.value > 127 ? 127 : e.value;
+                h->key_lean[e.index] = (uint8_t)((p * 100 + 63) / 127);
+                lastLean.store((uint32_t)e.index << 8 | h->key_lean[e.index], std::memory_order_relaxed);
             }
             break;
         case RFM_EV_BUTTON:
@@ -652,6 +666,8 @@ struct rfme final : rfm::HostParams::Panel {
             break;
         case RemoteLink::kEvRelease:                         // the session ended: nothing is held any more
             noteKeys = labels = matrixButtons = 0;
+            for (int k = 0; k < FM1P_NKEY; k++)
+                h->key_lean[k] = 0;
             pushKeys();                                      // (the host's notes stay down)
             dev->buttons(hpLabels);                          // (and its parameters' buttons)
             break;
@@ -1453,7 +1469,13 @@ void rfme_run_ms(rfme_t *e, uint32_t ms, rfme_audio_t *out)
 
 int rfme_event(rfme_t *e, uint8_t type, uint8_t index, int16_t value)
 {
+    return rfme_event_vel(e, type, index, value, 0);
+}
+
+int rfme_event_vel(rfme_t *e, uint8_t type, uint8_t index, int16_t value, uint8_t vel)
+{
     rfm_event_t ev{};
+    ev.vel = vel;
     ev.type = type;
     ev.index = index;
     ev.value = value;
@@ -1493,6 +1515,8 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->events_applied = e->applied.load();
     st->events_dropped = e->dropped.load();
     st->keys_pressed = e->keysPressed.load();
+    st->key_vel_last = e->lastVel.load();
+    st->key_lean_last = e->lastLean.load();
     st->midi_out = e->midiOut.load();
     st->midi_in = e->midiInCount.load();
     st->midi_notes = e->midiNotes.load();

@@ -136,6 +136,8 @@ struct AUSheet: View {
                 }
                 SheetStepper("MIDI octave", value: Binding(get: { s.transpose }, set: { v in set { $0.transpose = v } }),
                              in: -2...2)
+                SheetToggle("Velocity & pressure from my FM-1", on: Binding(get: { s.keyTouch },
+                                                                           set: { v in set { $0.keyTouch = v } }))
                 SheetToggle("Send the host's clock and transport", on: Binding(get: { s.hostClock },
                                                                               set: { v in set { $0.hostClock = v } }))
                 SheetToggle("Use learned knobs", on: useMap)
@@ -144,7 +146,8 @@ struct AUSheet: View {
             }
             SheetNote("Keys from MIDI: notes on that channel (or any) play the keys. Notes on other channels, every "
                       + "note when Off (FIZZ's tracks), and whatever the learned knobs don't take go to the firmware's "
-                      + "MIDI in. Use learned knobs off: the mappings are kept but do nothing; Learn still works. The host's clock: its tempo, start, stop and position as MIDI clock (clock "
+                      + "MIDI in. Velocity & pressure: the FM-1's keys play at their own velocity, and their pressure "
+                      + "reaches the firmware (RemoteFM1 0.3.1 or later; off: velocity 100, as before). Use learned knobs off: the mappings are kept but do nothing; Learn still works. The host's clock: its tempo, start, stop and position as MIDI clock (clock "
                       + "in the host's MIDI is then dropped). The firmware's MIDI out is this instrument's MIDI output.")
         }
     }
@@ -288,6 +291,7 @@ struct AUSheet: View {
             r.append(("lease", "epoch \(p.epoch), \(p.owner ? "owner" : p.leaseEmpty ? "empty" : p.ownerStale ? "stale" : "held")"
                       + (p.ownerName.isEmpty ? "" : ": \(p.ownerName)")))
             r.append(("link", p.linkText))
+            r.append(("touch", p.touchText))
             if p.duplicate { r.append(("identity", "a duplicated state: a new UUID")) }
         }
         return r
