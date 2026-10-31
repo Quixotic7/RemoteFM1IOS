@@ -627,3 +627,27 @@ button parameters keep their printed names, their value text uses the firmware's
 `AUSettings.buttonNames` ("Firmware's button names", default on; the app's sheet and per AU instance, under View).
 Names today: ChoralRoot KEY BASS LOCK OPT PERF LOOP; FIZZ TRACKS MIX LATCH SHIFT SOUNDS MIDI FX PATTERNS; Felucca,
 Melodee, Saadet, Boardwalk, LOOM-8, AMB none. Tested by ButtonNamesTests (the echo core has names) and AUParamTests.
+
+## 18. Never losing a user's data: states, backups, reset, web managers (planned 2026-10-31)
+
+The owner's aim: a user never loses a jam, can back up and share firmware states, and uses the same state in the app
+and the AU. Today each firmware has one flash file (the app's Application Support; an AU instance's in the host's
+project), a new version boots the old version's flash (it may not read it, or wipe it), and an update of a downloaded
+firmware deletes the older .rfm1. Built in this order, each step usable by itself:
+
+1. **Safety copies and safe writes.** Before anything risky (a firmware version change, deleting a firmware, loading a
+   state, a reset, a restore, a web manager's bank write) the current flash is copied into a history; also a rolling
+   copy (the last 10 saves and one a day for a week, per firmware). Flash writes go to a new file, are checked, then
+   swapped in, the previous one kept. **Reset firmware…**: a safety copy, then a fresh flash.
+2. **Named states, shared.** A States page per firmware: Save as, Load, Rename, Delete, the safety history. A state:
+   the flash, the firmware's id and version, the date, the settings outside the flash (MASTER, ...). Kept in the App
+   Group, so the app and every AU instance see the same library (the AU's sheet: Save to library, Load from library).
+3. **Files.** `.rfm1state` (one file: a manifest and the flash) to share and import (Files, AirDrop); Back up
+   everything into the RemoteFM1 folder; the states mirrored there.
+4. **Versions.** A state remembers its firmware version; loading it into another version warns first (with a safety
+   copy); an update keeps the previous .rfm1 until the user removes it; a flash that looks wiped after a boot offers
+   the safety copy.
+5. **The firmware's own web managers.** As the website does (RemoteFM1 `web/managers/`: `fm1-shim.js` replaces Web
+   MIDI with a port named as the firmware's USB port, wired to the running firmware): a Manager page in a WKWebView
+   loading remotefm1.com's hosted manager with the same shim injected, bridged to the engine. Needs host SysEx into
+   the core's MIDI in (today only channel and system messages are passed) and the core's SysEx out back to the page.
