@@ -24,7 +24,7 @@ struct AUView: View {
             ZStack {
                 FaceplateView(feed: model.feed, ui: model.ui, theme: store.current, chip: model.chip)
                     .equatable()
-                if !model.ui.sheetOpen {
+                if !model.ui.sheetOpen && !model.ui.displayAlone {
                     VStack { Spacer(); PerfBanner(model.perfNote).padding(.bottom, 8) }
                 }
                 PullDownSheet(open: Binding(get: { model.ui.sheetOpen }, set: { model.ui.sheetOpen = $0 })) {
@@ -37,7 +37,14 @@ struct AUView: View {
             .onChange(of: geo.size) { _, s in model.fit(s) }
         }
         .ignoresSafeArea()
-        .onAppear { store.observe() }
+        .onAppear {
+            store.observe()
+            model.ui.onWord = { [model] in       // (the word: the firmware's name) the sheet on the Firmware page
+                model.page = .firmware
+                withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
+            }
+        }
+        .onChange(of: model.status.coreName, initial: true) { _, n in model.ui.firmwareName = n }
     }
 }
 
@@ -47,6 +54,8 @@ struct AUSheet: View {
     private let store = ThemeStore.shared
     @State private var askReset = false         // (section 18) Reset firmware… asked inline
     @State private var askRestore: String?      // the safety copy whose row asks "Restore?"
+    @State private var saveOpen = false         // Save state…: the States page with its field open
+    @State private var statesFromMain = false   // the States page goes back to the main sheet
 
     var body: some View {
         sheet.onChange(of: model.ui.sheetOpen) { _, open in
@@ -76,7 +85,10 @@ struct AUSheet: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        SheetSectionTitle("FM-1", top: 18)
+                        SheetSectionTitle(model.status.coreName.isEmpty ? "Firmware"
+                                          : "\(model.status.coreName) \(model.status.coreVersion)", top: 18)
+                        dataRows(fromMain: true)
+                        SheetSectionTitle("FM-1")
                         fm1Card
                         SheetSectionTitle("View · or swipe sideways")
                         ViewTiles(ui: model.ui) { model.userPicked = true }
@@ -84,9 +96,13 @@ struct AUSheet: View {
                             SheetToggle("Firmware's button names",
                                         on: Binding(get: { model.status.settings.buttonNames },
                                                     set: { v in model.changeSettings { $0.buttonNames = v } }),
+                                        divider: true)
+                            SheetToggle("Screen protector", on: Binding(get: { ScreenProtector.shared.on },
+                                                                        set: { ScreenProtector.shared.on = $0 }),
                                         divider: false)
                         }
                         .padding(.top, 12)
+                        SheetNote("Double-tap the display to see it alone; double-tap again or swipe down to close.")
                         if model.macWindow { windowSection.id("window") }
                         SheetSectionTitle("Theme")
                         ThemeSwatches(store: store, edit: nil)
@@ -114,6 +130,29 @@ struct AUSheet: View {
                 }
             }
         }
+    }
+
+    /// the firmware's data here: Save state…, States & safety copies, Reset firmware… (backups: the app)
+    @ViewBuilder private func dataRows(fromMain: Bool) -> some View {
+        let off = !model.status.core.booted
+        SheetList {
+            SheetRow("Save state…", chevron: false) { openStates(fromMain: fromMain, saving: true) }.disabled(off)
+            SheetRow("States & safety copies", value: "\(model.states.count) · \(model.copies.count)") {
+                openStates(fromMain: fromMain)
+            }
+            .disabled(off)
+            ResetFirmwareRow(name: model.status.coreName.isEmpty ? "the firmware" : model.status.coreName,
+                             asking: $askReset, divider: false) { model.resetFlash() }
+        }
+        .onAppear { model.reloadStates() }
+    }
+
+    private func openStates(fromMain: Bool, saving: Bool = false) {
+        model.reloadStates()
+        model.stateMessage = ""
+        statesFromMain = fromMain
+        saveOpen = saving
+        model.page = .states
     }
 
     /// (a Mac) the window's size: hosts that follow preferredContentSize resize at once, Ableton when reopened
@@ -198,8 +237,14 @@ struct AUSheet: View {
 
     private var firmwarePage: some View {
         let builtIn = model.cores.filter { !$0.imported }, imported = model.cores.filter(\.imported)
-        return SheetPage("Firmware", back: { model.page = nil }) {
-            SheetSectionTitle("Built in", top: 12)
+        return SheetPage(model.status.coreName.isEmpty ? "Firmware" : model.status.coreName, back: { model.page = nil }) {
+            SheetSectionTitle("This firmware", top: 12)
+            SheetList {
+                SheetRow("About this firmware") { model.onAbout?(model.current) }
+                SheetRow("Restart the firmware", divider: false, chevron: false) { model.restart() }
+            }
+            dataRows(fromMain: false).padding(.top, 12)
+            SheetSectionTitle("Built in")
             SheetList {
                 ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
                     SheetRow(c.name, value: c.version, divider: i < builtIn.count - 1, chevron: false,
@@ -222,15 +267,6 @@ struct AUSheet: View {
             }
             SheetNote("Add .rfm1 firmware in the RemoteFM1 app (Firmware › Add firmware…, or Files › RemoteFM1 › Firmware); "
                       + "open the app once after adding files so the instrument sees them.")
-            SheetList {
-                SheetRow("About this firmware") { model.onAbout?(model.current) }
-                SheetRow("Restart the firmware", chevron: false) { model.restart() }
-                SheetRow("States & safety copies") { model.reloadStates(); model.stateMessage = ""; model.page = .states }
-                    .disabled(!model.status.core.booted)
-                ResetFirmwareRow(name: model.status.coreName.isEmpty ? "the firmware" : model.status.coreName,
-                                 asking: $askReset, divider: false) { model.resetFlash() }
-            }
-            .padding(.top, 16)
             let s = model.status.core
             if s.halted {
                 SheetNote(s.haltCode == 0x200 ? "Firmware stopped: the WebAssembly module trapped"
@@ -249,10 +285,11 @@ struct AUSheet: View {
     /// (section 18 step 2) the library's states of this instance's firmware (the app's too) and its safety copies
     private var statesPage: some View {
         let name = model.status.coreName
-        return SheetPage("States", backTitle: "Firmware", back: { askRestore = nil; model.page = .firmware }) {
+        return SheetPage("States", backTitle: statesFromMain ? "Controls" : "Firmware",
+                         back: { askRestore = nil; model.page = statesFromMain ? nil : .firmware }) {
             SheetSectionTitle("\(name.isEmpty ? "Firmware" : name) \(model.status.coreVersion)", top: 12)
             StatesList(firmware: name, version: model.status.coreVersion, states: model.states,
-                       saveTitle: "Save to library…", save: { model.saveState($0) }, load: { model.loadState($0) },
+                       saveTitle: "Save to library…", startSaving: saveOpen, save: { model.saveState($0) }, load: { model.loadState($0) },
                        rename: { model.renameState($0, $1) }, delete: { model.deleteState($0) },
                        shareNote: "Share it from the RemoteFM1 app (Firmware › States); it's in Files › RemoteFM1 › States too.")
             SheetNote("Save to library keeps this instance's memory, MASTER, the octave and the keys' touch under a name; "

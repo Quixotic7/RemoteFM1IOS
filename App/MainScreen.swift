@@ -56,6 +56,9 @@ struct LaunchOptions {
     var statesSave = false                              // (DEBUG) -statessave: the States page's Save as… field open
     var statesShare: String?                            // (DEBUG) -statesshare <name>: that state's … open (Share…)
     var backupDemo = false                              // (DEBUG) -backupdemo: Back up everything run at launch
+    var displayAlone = false                            // -displayalone: the display alone, full size
+    var protector: Bool?                                // -protector on|off: the screen protector put on or taken off
+    var peel: Double?                                   // -peel 0.3: the film drawn that far peeled (screenshots)
 
     init(_ a: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ k: String) -> String? {
@@ -71,6 +74,9 @@ struct LaunchOptions {
         themeEditor = a.contains("-themeeditor")
         if let o = value("-orientation") { landscape = o == "landscape" }
         steps = a.contains("-steps")
+        displayAlone = a.contains("-displayalone")
+        if let p = value("-protector") { protector = p == "on" }
+        peel = value("-peel").flatMap(Double.init)
         learnPick = value("-learnpick")
         learn = a.contains("-learn") || learnPick != nil
         demoMap = a.contains("-demomap")
@@ -128,6 +134,8 @@ struct MainScreen: View {
     @State private var backingUp = false
     @State private var backupNote = ""
     @State private var lastBackup: URL?
+    @State private var dataBack: AppSheetPage? = .firmware   // where States and Safety copies go back to
+    @State private var saveOpen = false                 // Save state…: the States page with its field open
     @Environment(\.scenePhase) private var phase
     private static let mirror = StateMirror()
     private static let mirrorQueue = DispatchQueue(label: "rfm1.mirror", qos: .utility)
@@ -145,6 +153,7 @@ struct MainScreen: View {
         _prompter = State(initialValue: InstallPrompter(controller: controller, installer: .shared(for: controller)))
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
         _source = State(initialValue: LaunchOptions().source ?? saved ?? .fm1)
+        if let f = LaunchOptions().peel { ScreenProtector.shared.startFold = f }   // (before the film is first drawn)
     }
 
     var chip: PanelChip {
@@ -173,7 +182,7 @@ struct MainScreen: View {
             FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip)
                 .equatable()
                 .ignoresSafeArea()
-            if !ui.sheetOpen && !ui.editorOpen {
+            if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone {
                 VStack(spacing: 10) {
                     Spacer()
                     if !midi.learn.active {
@@ -196,6 +205,8 @@ struct MainScreen: View {
                 .zIndex(3)
         }
         .persistentSystemOverlays(.hidden)
+        .statusBarHidden(ui.displayAlone)
+        .onChange(of: player.current?.name, initial: true) { _, n in ui.firmwareName = n }
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
         .sheet(isPresented: $showAbout) {
@@ -251,6 +262,7 @@ struct MainScreen: View {
         launched = true
         store.observe()
         prompter.start()
+        ui.onWord = { openFirmwarePanel() }
         loadView(source)
         if let p = options.page { ui.page = p }
         if let d = options.deck { ui.deck = d }
@@ -280,6 +292,8 @@ struct MainScreen: View {
         if options.backupDemo { backUp() }
         #endif
         if options.themeEditor { ui.editorOpen = true }
+        if options.displayAlone { ui.displayAlone = true }
+        if let p = options.protector { ScreenProtector.shared.on = p }
         if options.demoMap { midi.demoMap() }
         if options.learn {
             midi.learn.start(ui)
@@ -375,6 +389,41 @@ struct MainScreen: View {
 
     private func close() { withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false } }
 
+    /// the status row's firmware name: the sheet opens on the Firmware panel
+    private func openFirmwarePanel() {
+        page = .firmware
+        withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+    }
+
+    /// States (Save state…: its field open) or Safety copies, back to `from`
+    private func openData(_ p: AppSheetPage, from: AppSheetPage?, saving: Bool = false) {
+        dataBack = from
+        saveOpen = saving
+        page = p
+    }
+
+    private var dataBackTitle: String { dataBack == nil ? "Controls" : "Firmware" }
+
+    /// the running firmware's data: Save state…, States, Safety copies, Back up everything, Reset firmware…
+    @ViewBuilder private func dataRows(from: AppSheetPage?) -> some View {
+        let none = player.current == nil
+        SheetList {
+            SheetRow("Save state…", chevron: false) { openData(.states, from: from, saving: true) }.disabled(none)
+            SheetRow("States", value: "\(player.states.count)") { openData(.states, from: from) }.disabled(none)
+            SheetRow("Safety copies", value: "\(player.safetyCopies.count)") { openData(.safetyCopies, from: from) }
+                .disabled(none)
+            SheetRow(backingUp ? "Backing up…" : "Back up everything", chevron: false) { if !backingUp { backUp() } }
+            if let lastBackup {
+                SheetRow("Share the backup…", chevron: false) { shareBackup(lastBackup) }
+            }
+            ResetFirmwareRow(name: player.current?.name ?? "the firmware", asking: $askReset, divider: false) {
+                Task { await player.resetFlash() }
+            }
+            .disabled(none)
+        }
+        if !backupNote.isEmpty { SheetNote(backupNote) }
+    }
+
     /// the prompt's Install: the sheet opens at the install page
     private func openInstall() {
         page = .install
@@ -386,7 +435,10 @@ struct MainScreen: View {
             SheetHeader("Controls", done: close)
             ScrollView {
                 VStack(spacing: 0) {
-                    SheetSectionTitle("Sound source", top: 18)
+                    SheetSectionTitle(player.current.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 18)
+                        .accessibilityLabel("This firmware")
+                    dataRows(from: nil)
+                    SheetSectionTitle("Sound source")
                     HStack(spacing: 8) {
                         SourceCard(title: "This iPhone", sub: "Emulator, play by touch", selected: source == .phone,
                                    dot: Palette.sheetAccent) { pick(.phone) }
@@ -399,9 +451,13 @@ struct MainScreen: View {
                     SheetList {
                         SheetToggle("Firmware's button names", on: Binding(get: { player.midiSettings.buttonNames },
                                                                          set: { player.midiSettings.buttonNames = $0 }),
+                                    divider: true)
+                        SheetToggle("Screen protector", on: Binding(get: { ScreenProtector.shared.on },
+                                                                    set: { ScreenProtector.shared.on = $0 }),
                                     divider: false)
                     }
                     .padding(.top, 12)
+                    SheetNote("Double-tap the display to see it alone; double-tap again or swipe down to close.")
                     SheetSectionTitle("Theme")
                     ThemeSwatches(store: store) { withAnimation { ui.editorOpen = true } }
                     SheetList {
@@ -467,8 +523,19 @@ struct MainScreen: View {
         let imported = player.cores.filter(\.imported)
         let broken = library.files.filter { $0.error != nil }
         let files = library.files
-        return SheetPage("Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
-            SheetSectionTitle("Built in", top: 12)
+        return SheetPage(player.current?.name ?? "Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
+            if let c = player.current {
+                SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.status.booted ? " · running" : "")")
+            }
+            SheetSectionTitle("This firmware", top: 12)
+            SheetList {
+                SheetRow("About this firmware") { showAbout = true }
+                    .disabled(player.current == nil)
+                SheetRow("Restart the firmware", divider: false, chevron: false) { player.powerCycle() }
+            }
+            dataRows(from: .firmware).padding(.top, 12)
+                .id("reset")
+            SheetSectionTitle("Built in")
             SheetList {
                 ForEach(Array(builtIn.enumerated()), id: \.element.id) { i, c in
                     SheetRow("\(c.name)", value: c.version, divider: i < builtIn.count - 1, chevron: false,
@@ -535,21 +602,6 @@ struct MainScreen: View {
                       : "Edit deletes imported firmware. Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware holds them.")
             ForEach(broken) { f in SheetNote("\(f.file): \(f.error ?? "")", color: .orange) }
             if !library.message.isEmpty { SheetNote(library.message) }
-            SheetList {
-                SheetRow("About this firmware") { showAbout = true }
-                    .disabled(player.current == nil)
-                SheetRow("Restart the firmware", chevron: false) { player.powerCycle() }
-                SheetRow("States", value: "\(player.states.count)") { page = .states }
-                    .disabled(player.current == nil)
-                SheetRow("Safety copies", value: "\(player.safetyCopies.count)") { page = .safetyCopies }
-                    .disabled(player.current == nil)
-                ResetFirmwareRow(name: player.current?.name ?? "the firmware", asking: $askReset, divider: false) {
-                    Task { await player.resetFlash() }
-                }
-                .disabled(player.current == nil)
-            }
-            .id("reset")
-            .padding(.top, 16)
             if player.current?.imported == true, player.status.booted {
                 SheetNote(player.status.coreWakes == 0 ? "Runs in the WebAssembly interpreter (no sound yet)."
                           : String(format: "Runs in the WebAssembly interpreter: %u%% of the audio time on the core thread, "
@@ -566,7 +618,7 @@ struct MainScreen: View {
 
     /// the selected firmware's safety copies (PLAN.md section 18), Restore asked inline
     private var safetyCopiesPage: some View {
-        SheetPage("Safety copies", backTitle: "Firmware", back: { askRestore = nil; page = .firmware }) {
+        SheetPage("Safety copies", backTitle: dataBackTitle, back: { askRestore = nil; page = dataBack }) {
             SheetSectionTitle(player.current.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
             SafetyCopiesList(copies: player.safetyCopies, asking: $askRestore) { s in
                 Task { await player.restore(s) }
@@ -581,7 +633,7 @@ struct MainScreen: View {
     /// the selected firmware's named states (PLAN.md section 18 step 2): the App Group's library, the AU's too
     private var statesPage: some View {
         let c = player.current
-        return SheetPage("States", backTitle: "Firmware", back: { page = .firmware }) {
+        return SheetPage("States", backTitle: dataBackTitle, back: { page = dataBack }) {
             if !stateNotice.isEmpty {
                 SheetNote(stateNotice, color: .orange).padding(.top, 12)
                 if let id = stateNeeds {
@@ -590,7 +642,7 @@ struct MainScreen: View {
             }
             SheetSectionTitle(c.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
             StatesList(firmware: c?.name ?? "", version: c?.version ?? "", states: player.states,
-                       startSaving: options.statesSave, startEditing: options.statesShare,
+                       startSaving: options.statesSave || saveOpen, startEditing: options.statesShare,
                        save: { n in Task { await player.saveState(name: n) } },
                        load: { s in Task { await player.loadState(s) } },
                        rename: { s, n in _ = try? player.library.rename(s, to: n) },
@@ -601,7 +653,7 @@ struct MainScreen: View {
                       + "in the AU instrument, and the other way. Loading keeps a safety copy of the current memory first. "
                       + "Each state is also a .rfm1state file in Files › RemoteFM1 › States; Share… sends one.")
             SheetList {
-                SheetRow("Safety copies", value: "\(player.safetyCopies.count)", divider: false) { page = .safetyCopies }
+                SheetRow("Safety copies", value: "\(player.safetyCopies.count)", divider: false) { page = .safetyCopies; saveOpen = false }
             }
             .padding(.top, 12)
             if !player.message.isEmpty { SheetNote(player.message) }
