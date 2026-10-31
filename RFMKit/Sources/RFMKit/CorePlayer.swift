@@ -199,6 +199,10 @@ public final class CorePlayer {
     public private(set) var preview: CGImage?
     public private(set) var message = ""
     public private(set) var audioText = ""
+    /// the audio output route now (MIDI & audio › Audio output), read again on every route change
+    public private(set) var outputs: [AudioRoute.Output] = []
+    /// route changes seen, engine restarts they caused (Diagnostics, tests)
+    public private(set) var routeChanges = 0
     public private(set) var saves = 0
     public private(set) var lastSave: Date?
     public private(set) var reboots = 0
@@ -231,6 +235,7 @@ public final class CorePlayer {
     @ObservationIgnored private var bootedID: String?
     @ObservationIgnored private var fallbackNote = ""    // (kept as the message until another core is picked)
     @ObservationIgnored private var configObserver: NSObjectProtocol?
+    @ObservationIgnored private var routeObserver: NSObjectProtocol?
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
 
@@ -482,17 +487,52 @@ public final class CorePlayer {
         audioRunning = true
         // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup)
         if let au = eng.outputNode.audioUnit { rfme_use_output_workgroup(e, UnsafeMutableRawPointer(au)) }
+        observeRoute()
         #if os(iOS)
-        let s = AVAudioSession.sharedInstance()
-        let route = s.currentRoute.outputs.map(\.portName).joined(separator: ", ")
-        audioText = String(format: "%.0f Hz, io buffer %.1f ms, %@", rate, s.ioBufferDuration * 1000, route)
-        #else
-        audioText = String(format: "%.0f Hz", rate)
+        outputs = AudioRoute.current
         #endif
+        updateAudioText()
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: eng, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.audioConfigurationChanged() }
         }
+    }
+
+    /// AVAudioSession.routeChangeNotification (the app's whole life: the route shows even with the sound off)
+    private func observeRoute() {
+        #if os(iOS)
+        guard routeObserver == nil else { return }
+        outputs = AudioRoute.current
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] n in
+            let r = (n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            let cause = r.map(AudioRoute.cause) ?? .other
+            MainActor.assumeIsolated { self?.routeChanged(cause) }
+        }
+        #endif
+    }
+
+    func routeChanged(_ cause: AudioRoute.Cause) {
+        routeChanges += 1
+        #if os(iOS)
+        outputs = AudioRoute.current
+        #endif
+        switch AudioRoute.action(cause, audioOn: mode == .core && audioOn, engineRunning: engine?.isRunning ?? false) {
+        case .none: break
+        case .rename: updateAudioText()
+        case .restart: audioConfigurationChanged()
+        }
+    }
+
+    private func updateAudioText() {
+        guard let eng = engine else { return }
+        let rate = eng.outputNode.outputFormat(forBus: 0).sampleRate
+        #if os(iOS)
+        let s = AVAudioSession.sharedInstance()
+        audioText = String(format: "%.0f Hz, io buffer %.1f ms, %@", rate, s.ioBufferDuration * 1000, AudioRoute.name(outputs))
+        #else
+        audioText = String(format: "%.0f Hz", rate)
+        #endif
     }
 
     private func stopAudio() {

@@ -102,6 +102,7 @@ public struct SendCartPage: View {
             }
             if case .working(let w) = sender.state { SheetStatus(w, dot: Palette.sheetAccent, pulsing: true) }
             else if case .done(let d) = sender.state { SheetStatus(d, dot: Palette.linkedDot) }
+            else if case .failed(let f) = sender.state, f.hasPrefix("Rename") { SheetNote(f, color: .orange) }
         } else if sender.firmware == .v030 {
             SheetNote("RemoteFM1 0.3.0: up to 3 banks, sending only. Update RemoteFM1 to list, replace and remove banks.")
         }
@@ -225,21 +226,27 @@ public struct SendCartPage: View {
     }
 }
 
-/// UIDocumentPickerViewController for opening files (copies them in)
+/// UIDocumentPickerViewController for opening files (opened in place, security-scoped: CartSender.read copies the bytes);
+/// it opens in the folder last picked from (PickerFolder)
 struct DocumentPicker: UIViewControllerRepresentable {
     let types: [UTType]
     var multiple = true
+    var folder: PickerFolder = .cart
     let picked: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let p = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        let p = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         p.allowsMultipleSelection = multiple
+        p.directoryURL = folder.url
         p.delegate = context.coordinator
         return p
     }
 
     func updateUIViewController(_ vc: UIDocumentPickerViewController, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(picked) }
+    func makeCoordinator() -> Coordinator {
+        let f = folder, p = picked
+        return Coordinator { urls in f.remember(urls); p(urls) }
+    }
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let picked: ([URL]) -> Void

@@ -142,6 +142,9 @@ public final class FakeFM1: @unchecked Sendable {
     public var inSession = false
     /// what STORED says for the next dump (0 normally; 1, 3 or 5 to test)
     public var nextDumpStatus: UInt8 = 0
+    /// as the unit: a NAME is written a moment after its reply; BANKS answers busy with the old name this many times
+    public var nameLag = 0
+    private var pendingName: (slot: Int, name: String, left: Int)?
 
     public init(silent: Bool = false, banks: [UserBank] = []) {
         self.silent = silent
@@ -186,10 +189,17 @@ public final class FakeFM1: @unchecked Sendable {
         let slot = b.count > 1 ? Int(b[1]) : 0
         let has = lock.withLock { slots[slot] != nil }
         switch op {
-        case 0: return [reply(list.body)]
+        case 0:
+            if let p = pendingName {
+                if p.left > 0 { pendingName?.left -= 1; var l = list; l.busy = true; return [reply(l.body)] }
+                lock.withLock { slots[p.slot]?.name = p.name }
+                pendingName = nil
+            }
+            return [reply(list.body)]
         case 1:
-            guard has, b.count > 2 else { return [reply([1, UInt8(slot), 2])] }
-            lock.withLock { slots[slot]?.name = BankList.name(b[2...].prefix(10)) }
+            guard has, b.count > 2, b.count <= 12 else { return [reply([1, UInt8(slot), 2])] }
+            if pendingName != nil { return [reply([1, UInt8(slot), 3])] }
+            pendingName = (slot, BankList.name(b[2...]), nameLag)
             return [reply([1, UInt8(slot), 0])]
         case 2:
             guard slot < 16 else { return [reply([2, UInt8(slot), 2])] }

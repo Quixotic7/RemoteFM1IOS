@@ -566,3 +566,25 @@ starts. Each dump waits for STORED (2 s) instead of the 1 s; no reply to BANKS w
 to 3 banks, sending only". The page: "Banks on the FM-1: n of 16", each bank's Replace (an .syx with one cartridge),
 Remove (an inline confirm) and Rename (10 characters); statuses in plain words. The simulator and `-cartdemo` use a
 FakeFM1 (the demo with 4 banks).
+
+**Rename (2026-10-30).** On the owner's phone Rename "did nothing". The NAME bytes match the firmware byte for byte
+(`F0 7D 52 46 0B 00 01 00 44 58 20 42 61 00 73 65 F7` for slot 0 "DX Base", testNameGoldenBytes) and sa_info_cmd takes
+it in a session too; but the unit answers `01 slot 0` *before* writing: sa_ub_poll starts a directory job (a sector
+erase, then the program) and BANKS lists the old directory, `busy` 1, until it commits. The app read BANKS once 200 ms
+after the reply and called it done, so the old name came back. Now it reads BANKS every 150 ms until not busy and the
+new name shows (3 s at most), and every outcome says what the unit answered: "renamed X", "status n" in words, "didn't
+answer NAME", or "said yes (status 0) but still lists …". FakeFM1.nameLag models the late write.
+
+**Pickers.** The .syx picker opens files in place (asCopy false; CartSender.read reads them security-scoped) so the
+picked file's folder is known; it and Add firmware… (fileImporter, fileDialogDefaultDirectory) open in the folder last
+picked from (PickerFolder: a bookmark of the folder, else its URL; gone: the system's default).
+
+## 15. Audio output (the app)
+
+With the FM-1 on USB it is also a USB sound card and iOS sends the app's sound there. MIDI & audio › Audio output shows
+the route (AVAudioSession.currentRoute) and opens the system route picker (an AVRoutePickerView out of sight, its button
+triggered from the row): iPhone speaker, AirPods (A2DP: the session is .playback, no mixing, which allows every output),
+headphones, or the FM-1. A note under it says when the sound goes to USB. We never override the route. On
+routeChangeNotification the name is read again and, when the engine stopped (the device in use gone), a new engine is
+started (AudioRoute.action); a rate or buffer change posts AVAudioEngineConfigurationChange as before, which rebuilds the
+engine at the new rate and the core's render-ahead with it. Not in the AU (the host owns its audio).

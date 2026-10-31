@@ -268,12 +268,44 @@ final class CartTests: XCTestCase {
         XCTAssertEqual(s.resultText, SAInfo.words(2))
         let before = log.events.filter { $0.hasSuffix("pause") }.count
         await s.rename(slot: 4, to: "My Pianos!!!")
-        XCTAssertEqual(s.state, .done("USER5 renamed."))
+        XCTAssertEqual(s.state, .done("USER5 renamed My Pianos!."))
         XCTAssertEqual(s.banks?.banks.first?.name, "My Pianos!")
         XCTAssertEqual(log.events.filter { $0.hasSuffix("pause") }.count, before, "NAME needs no pause")
         fm1.inSession = true
         await s.delete(slot: 4)
         XCTAssertEqual(s.resultText, SAInfo.words(4))
+    }
+
+    /// NAME's bytes against docs/CART-UPLOAD.md / sa_ubank.c's sa_info_cmd: `01 slot name[1..10]`, rf_pack7 groups
+    func testNameGoldenBytes() {
+        let body = CartSender.nameBody(slot: 0, "DX Base")!
+        XCTAssertEqual(body, [0x01, 0x00, 0x44, 0x58, 0x20, 0x42, 0x61, 0x73, 0x65])
+        XCTAssertEqual(SAInfo.encode(cmd: SAInfo.request, body),
+                       [0xF0, 0x7D, 0x52, 0x46, 0x0B, 0x00, 0x01, 0x00, 0x44, 0x58, 0x20, 0x42, 0x61, 0x00, 0x73, 0x65, 0xF7])
+        XCTAssertEqual(CartSender.nameBody(slot: 15, "ABCDEFGHIJKL")?.count, 12, "10 characters at most (len <= 12)")
+        XCTAssertEqual(CartSender.nameBody(slot: 1, "é1")?.suffix(3), [0x20, 0x20, 0x31], "non-ASCII as spaces")
+        XCTAssertNil(CartSender.nameBody(slot: 1, "   "))
+    }
+
+    /// the unit writes the name a moment after its reply: the list is read until it shows it; statuses in words
+    @MainActor func testRenameWaitsForTheWriteAndSaysWhy() async {
+        let fm1 = FakeFM1(banks: Self.two)
+        fm1.nameLag = 4                                       // busy, old name, 4 BANKS replies
+        let (s, _, _, _) = make031(fm1)
+        await s.refresh()
+        await s.rename(slot: 0, to: "DX Base")
+        XCTAssertEqual(s.state, .done("USER1 renamed DX Base."))
+        XCTAssertEqual(s.banks?.banks.first?.name, "DX Base")
+        fm1.nameLag = 100
+        await s.rename(slot: 0, to: "Other")
+        if case .failed(let e) = s.state { XCTAssertTrue(e.contains("still lists USER1 as \"DX Base\""), e) } else { XCTFail() }
+        await s.rename(slot: 0, to: "Again")
+        XCTAssertEqual(s.resultText, "Rename: \(SAInfo.words(3)!) (status 3)")
+        await s.rename(slot: 7, to: "Empty")
+        XCTAssertEqual(s.resultText, "Rename: \(SAInfo.words(2)!) (status 2)")
+        fm1.silent = true
+        await s.rename(slot: 4, to: "X")
+        XCTAssertEqual(s.resultText, "Rename: the FM-1 didn't answer NAME (no reply in 1000 ms).")
     }
 
     @MainActor func testSilentIsV030() async {
@@ -302,5 +334,20 @@ final class CartTests: XCTestCase {
         XCTAssertEqual(s.resultText, "Cartridge 1: the FM-1 didn't confirm it. Check its screen.")
         XCTAssertGreaterThanOrEqual(log.now - t0, 2400)
         XCTAssertTrue(p.running, "the panel started again")
+    }
+}
+
+final class PickerFolderTests: XCTestCase {
+    func testRemembersTheParentAndForgetsWhenGone() throws {
+        let d = UserDefaults(suiteName: "PickerFolderTests")!
+        d.removePersistentDomain(forName: "PickerFolderTests")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let f = PickerFolder(key: "t", defaults: d)
+        XCTAssertNil(f.url)
+        f.remember([dir.appendingPathComponent("a.syx")])
+        XCTAssertEqual(f.url?.standardizedFileURL.resolvingSymlinksInPath().path, dir.resolvingSymlinksInPath().path)
+        try FileManager.default.removeItem(at: dir)
+        XCTAssertNil(f.url, "gone: nil")
     }
 }

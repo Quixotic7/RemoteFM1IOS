@@ -260,6 +260,12 @@ now (remembered until a newer release). Over Bluetooth it says to connect a USB 
 newest release gets a small notice instead. Never during an install or while an AU instance holds the FM-1; the AU's
 FM-1 card only says to install from the app.
 
+## Audio output
+
+MIDI & audio › Audio output shows where the app's sound goes and opens the system's output picker: with the FM-1 on USB
+iOS sends the sound to it (it is a USB sound card); pick the iPhone, AirPods or headphones there instead. PLAN.md
+section 15.
+
 ## Sending a DX7 cartridge
 
 Controls › Settings › Send a DX7 cartridge sends DX7 32-voice cartridges (.syx, picked in Files or opened from Files

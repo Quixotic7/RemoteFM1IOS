@@ -117,6 +117,8 @@ public final class CartSender {
         public var delete = 1500                    // DELETE's reply (the directory written; up to ~0.5 s behind a save)
         public var stored = 2000                    // STORED after a dump
         public var poll = 20
+        public var namePoll = 150                   // NAME: BANKS read again this often ...
+        public var nameSettle = 3000                // ... until the new name shows, at most this long
         public init() {}
     }
 
@@ -344,22 +346,41 @@ public final class CartSender {
         state = failure.map { .failed($0) } ?? .done("USER\(slot + 1) removed.")
     }
 
-    /// names the bank in `slot` (NAME, 1..10 printable characters; works in a session, no pause)
+    /// NAME's request body for `name` (1..10 printable ASCII; anything else a space, as the firmware does; nil: blank)
+    nonisolated static func nameBody(slot: Int, _ name: String) -> [UInt8]? {
+        let n = Array(name.utf8.map { (0x20 ... 0x7E).contains($0) ? $0 : 0x20 }.prefix(10))
+        guard n.contains(where: { $0 != 0x20 }) else { return nil }
+        return [SAInfo.Op.name.rawValue, UInt8(slot)] + n
+    }
+
+    /// names the bank in `slot` (NAME: works in a session, no pause). The unit answers `01 slot status` at once and
+    /// writes the directory a moment later (a sector erase: 0.1..0.5 s, with BANKS saying busy meanwhile), so the list
+    /// is read again until it is no longer busy and shows the new name (up to `timing.nameSettle`); every outcome in
+    /// plain words with the status the unit gave.
     public func rename(slot: Int, to name: String) async {
         guard !busy else { return }
-        let n = Array(name.utf8.map { (0x20 ... 0x7E).contains($0) ? $0 : 0x20 }.prefix(10))
-        guard !n.isEmpty, n.contains(where: { $0 != 0x20 }) else { state = .failed("Type a name."); return }
+        guard let body = Self.nameBody(slot: slot, name) else { state = .failed("Type a name."); return }
+        let want = BankList.name(body[2...])
         rescan()
         guard let port = target else { state = .failed(noPort); return }
         state = .working("Renaming USER\(slot + 1)…")
-        let r = await ask([SAInfo.Op.name.rawValue, UInt8(slot)] + n, to: port, timeout: timing.reply)
-        var failure: String?
-        if let r, r.count >= 3 { failure = SAInfo.words(r[2]) } else { failure = "The FM-1 didn't answer." }
-        if failure == nil {
-            await clock.sleep(ms: 200)                  // (written a moment after the reply)
-            await list(port)
+        guard let r = await ask(body, to: port, timeout: timing.reply), r.count >= 3 else {
+            state = .failed("Rename: the FM-1 didn't answer NAME (no reply in \(timing.reply) ms).")
+            return
         }
-        state = failure.map { .failed($0) } ?? .done("USER\(slot + 1) renamed.")
+        if let e = SAInfo.words(r[2]) { state = .failed("Rename: \(e) (status \(r[2]))"); return }
+        var t = 0, seen: String?
+        while true {
+            await clock.sleep(ms: timing.namePoll)
+            t += timing.namePoll
+            if await list(port), let l = banks {
+                seen = l.banks.first { $0.slot == slot }?.name
+                if !l.busy && seen == want { state = .done("USER\(slot + 1) renamed \(want)."); return }
+            }
+            if t >= timing.nameSettle { break }
+        }
+        state = .failed("Rename: the FM-1 said yes (status 0) but still lists USER\(slot + 1) as "
+            + (seen.map { "\"\($0)\"" } ?? "nothing") + " after \(timing.nameSettle) ms. Refresh in a moment.")
     }
 
     private func write(_ bytes: [UInt8], to port: CartPort) async throws {

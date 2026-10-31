@@ -174,11 +174,13 @@ struct MainScreen: View {
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [FirmwareLibrary.fileType, .data],
                       allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
+            PickerFolder.firmware.remember(urls)
             var last: ImportedFirmware?
             for u in urls { last = (try? library.importFile(u)) ?? last }
             player.catalogChanged()
             if let f = last, f.error == nil { player.select(f.key) }
         }
+        .fileDialogDefaultDirectory(showImporter ? PickerFolder.firmware.url : nil)
         .fullScreenCover(isPresented: $showDiagnostics) {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
@@ -506,8 +508,11 @@ struct MainScreen: View {
         return SheetPage("MIDI & audio", scrollTo: midiScroll ?? options.sheetScroll, back: { midiScroll = nil; page = nil }) {
             SheetSectionTitle("Audio", top: 12)
             SheetList {
-                SheetToggle("Sound", on: Binding(get: { player.audioOn }, set: { player.setAudio($0) }), divider: false)
+                SheetToggle("Sound", on: Binding(get: { player.audioOn }, set: { player.setAudio($0) }))
+                AudioOutputRow(value: AudioRoute.name(player.outputs.isEmpty ? AudioRoute.current : player.outputs),
+                               divider: false)
             }
+            if let h = AudioRoute.hint(player.outputs) { SheetNote(h) }
             SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
                                                                       player.status.latencyMs, player.status.underruns)
                       : "No sound: the firmware runs on a timer.")
