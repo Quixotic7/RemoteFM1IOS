@@ -124,6 +124,12 @@ void *  m3_Realloc  (void * i_ptr, size_t i_newSize, size_t i_oldSize)
 {
     if (UNLIKELY(i_newSize == i_oldSize)) return i_ptr;
 
+    // RemoteFM1 patch (Fantasy CFW, 2026-11-01): a first allocation (a module's linear memory, up to 512 MiB) with
+    // calloc and no memset, so the system hands out zero pages lazily: untouched memory costs no RAM. (realloc + memset
+    // made every declared byte dirty at load.)
+    if (i_ptr == NULL)
+        return calloc (i_newSize, 1);
+
     void * newPtr = realloc (i_ptr, i_newSize);
 
     if (LIKELY(newPtr))

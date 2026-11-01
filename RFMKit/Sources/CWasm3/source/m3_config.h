@@ -37,7 +37,7 @@
 # endif
 
 # ifndef d_m3MaxDuplicateFunctionImpl
-#   define d_m3MaxDuplicateFunctionImpl         3
+#   define d_m3MaxDuplicateFunctionImpl         32  // RemoteFM1 patch: was 3 (README.md)
 # endif
 
 # ifndef d_m3EnableExtendedOpcodes

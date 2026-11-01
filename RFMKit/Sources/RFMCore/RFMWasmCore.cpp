@@ -24,13 +24,26 @@
 //   WASI          fd_write: stdout and stderr to the log (os_log, rate-limited per instance); fd_read, fd_close, fd_seek:
 //                 EBADF; clock_time_get: the host's monotonic clock; proc_exit: the instance halts
 //
+//   Fantasy CFW   (FM1VST docs/VIRTUAL-CARTS.md, 2026-11-01) a manifest with "virtual": true may declare up to 512 MiB of
+//                 memory (in a file under 16 MiB) and, with "fs1" in "needs", import rfm1_host_1's file API
+//                 (RFMFileApi.h: one FileApi per instance; its answers copied in before tick, frame, idle and audio,
+//                 between export calls). An unknown "needs" is refused ("needs a newer RemoteFM1"). Before an instance
+//                 is made its memory is checked against what this process can still get (os_proc_available_memory):
+//                 "needs N MB of memory" rather than being killed. wasm3 allocates the memory lazily (calloc, its
+//                 README's patch): what a firmware never touches costs nothing
+//
 // Threading: as CoreBackend's. No thread-local state: wasm3's runtime is all in the instance, so the core thread and
 // the control thread may take turns.
 #include <CommonCrypto/CommonDigest.h>
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include <os/proc.h>
+#endif
 #include <mach/mach_time.h>
 #include <os/log.h>
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cmath>
@@ -43,6 +56,7 @@
 #include <vector>
 
 #include "RFMCoreBackend.h"
+#include "RFMFileApi.h"
 #include "RFMWasm.h"
 #include "wasm3.h"
 
@@ -249,6 +263,8 @@ private:
 // ------------------------------------------------------------------------------------------------ the file ------
 constexpr uint8_t I32 = 0x7F, I64 = 0x7E;
 constexpr uint32_t MAX_MEMORY = 32u * 1048576u;
+constexpr uint64_t MAX_VIRTUAL_MEMORY = 512ull * 1048576u;     // a Fantasy CFW's
+constexpr size_t MAX_VIRTUAL_FILE = 16u * 1048576u;             // (its file: under this)
 constexpr uint32_t PAGE = 65536;
 
 struct FuncType {
@@ -270,6 +286,16 @@ const ImportSig IMPORTS[] = {
     {"proc_exit", {I32}, {}, "v(i)"},
 };
 const char *const WASI = "wasi_snapshot_preview1";
+
+// a Fantasy CFW's file API (VIRTUAL-CARTS.md section 4)
+const ImportSig HOST_IMPORTS[] = {
+    {"fs_request", {I32, I32, I32, I64, I32, I32}, {I32}, "i(iiiIii)"},
+    {"fs_poll", {I32}, {I32}, "i(i)"},
+    {"fs_cancel", {I32}, {}, "v(i)"},
+    {"fs_changed", {}, {I32}, "i()"},
+};
+const char *const HOST = "rfm1_host_1";
+const char *const KNOWN_NEEDS[] = {"fs1"};
 
 // section 2's exports: name, i32 arguments, i32 results
 enum {
@@ -362,6 +388,10 @@ struct WasmFile {
     // the manifest
     std::string id, name, version, license, source_url;
     uint32_t memory_pages = 0;
+    // a Fantasy CFW: "virtual", "needs", "folders"; fs: it imports rfm1_host_1
+    bool isVirtual = false, fs = false;
+    std::vector<std::string> needs;
+    FsModes modes;
 };
 
 namespace {
@@ -512,6 +542,22 @@ bool checkFile(WasmFile &f, std::string *err)
                                "): the .rfm1 format allows only WASI functions (section 3)");
                 const uint32_t ti = s.u32();
                 const ImportSig *sig = nullptr;
+                if (mod == HOST) {                  // a Fantasy CFW's file API: allowed by its manifest (below)
+                    for (const ImportSig &x : HOST_IMPORTS)
+                        if (fld == x.name)
+                            sig = &x;
+                    if (!sig)
+                        return bad("it imports " + what + ", which this app doesn't know (it needs a newer RemoteFM1)");
+                    if (ti >= types.size())
+                        return bad("the import " + what + " has no type");
+                    if (types[ti].params != sig->params || types[ti].results != sig->results)
+                        return bad("the import " + what + " has the signature " +
+                                   sigText(types[ti].params, types[ti].results) + ", not " +
+                                   sigText(sig->params, sig->results));
+                    f.fs = true;
+                    importedFuncs++;
+                    continue;
+                }
                 if (mod == WASI)
                     for (const ImportSig &x : IMPORTS)
                         if (fld == x.name)
@@ -552,8 +598,8 @@ bool checkFile(WasmFile &f, std::string *err)
                     return bad("its memory can grow (initial " + std::to_string(init) + " pages, maximum " +
                                (flags & 1 ? std::to_string(max) : std::string("none")) +
                                "): the format wants a fixed memory, initial = maximum (section 6)");
-                if ((uint64_t)init * PAGE > MAX_MEMORY)
-                    return bad("its memory is " + std::to_string(init / 16) + " MiB: at most 32 MiB (section 6)");
+                if ((uint64_t)init * PAGE > MAX_VIRTUAL_MEMORY)
+                    return bad("its memory is " + std::to_string(init / 16) + " MiB: at most 512 MiB, for a Fantasy CFW");
                 f.memory_pages = init;
             }
             break;
@@ -633,6 +679,54 @@ bool checkFile(WasmFile &f, std::string *err)
         return bad("its manifest's id \"" + f.id + "\" is not [a-z0-9_]{1,31}");
     if (const Json *au = m.get("authors"); au && au->t != Json::Arr)
         return bad("its manifest's \"authors\" is not a list");
+
+    // a Fantasy CFW (VIRTUAL-CARTS.md sections 1-4): what it needs first, then its limits and its file API
+    if (const Json *v = m.get("virtual")) {
+        if (v->t != Json::Bool)
+            return bad("its manifest's \"virtual\" is not true or false");
+        f.isVirtual = v->b;
+    }
+    if (const Json *nd = m.get("needs")) {
+        if (nd->t != Json::Arr)
+            return bad("its manifest's \"needs\" is not a list of names");
+        std::string unknown;
+        for (const Json &x : nd->a) {
+            if (x.t != Json::Str)
+                return bad("its manifest's \"needs\" is not a list of names");
+            f.needs.push_back(x.s);
+            bool known = false;
+            for (const char *k : KNOWN_NEEDS)
+                known = known || x.s == k;
+            if (!known)
+                unknown += std::string(unknown.empty() ? "" : ", ") + "\"" + x.s + "\"";
+        }
+        if (!unknown.empty())
+            return bad("it needs a newer RemoteFM1 (it needs " + unknown + ")");
+    }
+    if (!f.needs.empty() && !f.isVirtual)
+        return bad("its manifest lists \"needs\" but is not \"virtual\" (a Fantasy CFW)");
+    if (const Json *fo = m.get("folders")) {
+        if (fo->t != Json::Obj)
+            return bad("its manifest's \"folders\" is not an object");
+        for (const auto &kv : fo->o) {
+            uint8_t *slot = kv.first == "audio" ? &f.modes.audio : kv.first == "code" ? &f.modes.code
+                          : kv.first == "data" ? &f.modes.data : nullptr;
+            if (!slot)
+                continue;                   // (a folder this app doesn't know: never granted)
+            if (kv.second.t != Json::Str || (kv.second.s != "r" && kv.second.s != "rw"))
+                return bad("its manifest's \"folders\" gives " + kv.first + " \"" +
+                           (kv.second.t == Json::Str ? kv.second.s : std::string("?")) + "\" (only \"r\" or \"rw\")");
+            *slot = kv.second.s == "rw" ? FsModes::ReadWrite : FsModes::Read;
+        }
+    }
+    const bool fs1 = std::find(f.needs.begin(), f.needs.end(), "fs1") != f.needs.end();
+    if (f.fs && !(f.isVirtual && fs1))
+        return bad(std::string("it imports ") + HOST +
+                   " (the RemoteFM1 folder) but its manifest doesn't say \"virtual\": true with \"fs1\" in \"needs\"");
+    if (!f.isVirtual && (uint64_t)f.memory_pages * PAGE > MAX_MEMORY)
+        return bad("its memory is " + std::to_string(f.memory_pages / 16) + " MiB: at most 32 MiB (section 6)");
+    if (f.isVirtual && f.bytes.size() >= MAX_VIRTUAL_FILE)
+        return bad("larger than 16 MiB: a Fantasy CFW's file is under 16 MiB");
 
     // the memory and the exports (section 2)
     if (memories != 1)
@@ -759,6 +853,20 @@ double usNow()
     return (double)mach_absolute_time() * us;
 }
 
+std::atomic<uint64_t> g_budget{0};          // (tests) the memory an instance may have; 0: the system's
+
+// what this process can still allocate before the system ends it; 0: unknown (no check)
+uint64_t memoryBudget()
+{
+    if (const uint64_t b = g_budget.load())
+        return b;
+#if TARGET_OS_IPHONE
+    if (__builtin_available(iOS 13.0, *))
+        return (uint64_t)os_proc_available_memory();
+#endif
+    return 0;
+}
+
 os_log_t wasmLog()
 {
     static os_log_t l = os_log_create("com.quixotic7.remotefm1", "wasm");
@@ -767,7 +875,8 @@ os_log_t wasmLog()
 
 class WasmCore final : public CoreBackend {
 public:
-    explicit WasmCore(std::shared_ptr<const WasmFile> f) : f_(std::move(f)) {}
+    explicit WasmCore(std::shared_ptr<const WasmFile> f, std::shared_ptr<FsFolder> folder = nullptr)
+        : f_(std::move(f)), folder_(std::move(folder)) {}
 
     ~WasmCore() override
     {
@@ -789,6 +898,11 @@ public:
             return false;
         };
         const double t0 = usNow();
+        // the memory first: refused in words rather than the system ending the app (or the AU) mid-load
+        const uint64_t need = (uint64_t)f_->memory_pages * PAGE, budget = memoryBudget();
+        if (budget && need + 16u * 1048576u > budget)
+            return bad("needs " + std::to_string((need + 1048575u) / 1048576u) + " MB of memory; this " +
+                       "device can give it " + std::to_string(budget / 1048576u) + " MB now");
         env_ = m3_NewEnvironment();
         rt_ = env_ ? m3_NewRuntime(env_, 1024 * 1024, this) : nullptr;
         if (!env_ || !rt_)
@@ -806,6 +920,15 @@ public:
             if (r && r != m3Err_functionLookupFailed)
                 return bad(std::string("import ") + IMPORTS[i].name + ": " + r);
         }
+        if (f_->fs) {                       // a Fantasy CFW: the RemoteFM1 folder (RFMFileApi.h)
+            fs_ = std::make_unique<FileApi>(f_->id, f_->modes, folder_);
+            static const M3RawCall host[] = {w_fs_request, w_fs_poll, w_fs_cancel, w_fs_changed};
+            for (size_t i = 0; i < sizeof host / sizeof host[0]; i++) {
+                r = m3_LinkRawFunctionEx(mod_, HOST, HOST_IMPORTS[i].name, HOST_IMPORTS[i].m3sig, host[i], this);
+                if (r && r != m3Err_functionLookupFailed)
+                    return bad(std::string("import ") + HOST_IMPORTS[i].name + ": " + r);
+            }
+        }
         r = m3_CompileModule(mod_);
         if (r) {
             M3ErrorInfo info{};
@@ -814,11 +937,11 @@ public:
                        " (WebAssembly outside the format's feature set, section 6?)");
         }
         for (int i = 0; i < F_N; i++) {
-            if (m3_FindFunction(&fn_[i], rt_, FN[i].name)) {
+            if (M3Result fr = m3_FindFunction(&fn_[i], rt_, FN[i].name)) {
                 fn_[i] = nullptr;
                 if (i == F_INITIALIZE)
                     continue;
-                return bad(std::string("no export ") + FN[i].name);
+                return bad(std::string("no export ") + FN[i].name + " (" + fr + ")");
             }
             if (m3_GetArgCount(fn_[i]) != FN[i].nargs || m3_GetRetCount(fn_[i]) != FN[i].nret)
                 return bad(std::string("export ") + FN[i].name + ": the wrong number of arguments or results");
@@ -925,11 +1048,12 @@ public:
         return (int)call(F_BOOT_OPTIONS, (uint32_t)fail, putStr(reason), (uint32_t)stage);
     }
     void init(int demo) override { call(F_INIT, (uint32_t)demo); }
-    void tick(uint32_t ms) override { call(F_TICK, ms); }
-    void frame() override { call(F_FRAME); }
-    void idle() override { call(F_IDLE); }
+    void tick(uint32_t ms) override { fsApply(); call(F_TICK, ms); }
+    void frame() override { fsApply(); call(F_FRAME); }
+    void idle() override { fsApply(); call(F_IDLE); }
     void audio(int16_t *stereo, uint32_t frames) override
     {
+        fsApply();
         while (frames) {
             const uint32_t n = frames < AUDIO_FRAMES ? frames : AUDIO_FRAMES;
             if (dead_) {
@@ -1009,6 +1133,62 @@ public:
     }
     uint32_t flash_dirty() override { return w_.flash_dirty ? call(F_FLASH_DIRTY) : 0; }
     int flash_sync() override { return w_.flash_sync ? (int)call(F_FLASH_SYNC) : 1; }
+
+    // ---- (tests: RFMWasm.h's rfmw_inst_*) any export by name, i32 / i64 arguments; false: none, or it trapped
+    bool callExport(const char *name, const uint64_t *args, uint32_t nargs, int64_t *ret)
+    {
+        if (dead_ || !rt_)
+            return false;
+        IM3Function fn = nullptr;
+        if (m3_FindFunction(&fn, rt_, name) || m3_GetArgCount(fn) != nargs || nargs > 8)
+            return false;
+        uint32_t a32[8];
+        uint64_t a64[8];
+        const void *ap[8];
+        for (uint32_t i = 0; i < nargs; i++) {
+            if (m3_GetArgType(fn, i) == c_m3Type_i64) {
+                a64[i] = args[i];
+                ap[i] = &a64[i];
+            } else {
+                a32[i] = (uint32_t)args[i];
+                ap[i] = &a32[i];
+            }
+        }
+        if (M3Result r = m3_Call(fn, nargs, ap)) {
+            dead_ = true;
+            trap_ = std::string(name) + ": " + r;
+            return false;
+        }
+        if (ret) {
+            *ret = 0;
+            if (m3_GetRetCount(fn) == 1) {
+                if (m3_GetRetType(fn, 0) == c_m3Type_i64) {
+                    int64_t v = 0;
+                    const void *rp[1] = {&v};
+                    m3_GetResults(fn, 1, rp);
+                    *ret = v;
+                } else {
+                    int32_t v = 0;
+                    const void *rp[1] = {&v};
+                    m3_GetResults(fn, 1, rp);
+                    *ret = v;
+                }
+            }
+        }
+        return true;
+    }
+    uint8_t *memory(uint32_t *size) const
+    {
+        if (size)
+            *size = memSize_;
+        return mem_;
+    }
+    FileApi *fileApi() { return fs_.get(); }
+    void fsApply()
+    {
+        if (fs_ && !dead_)
+            fs_->apply(mem_, memSize_);
+    }
 
 private:
     bool inMem(uint32_t off, uint32_t n) const { return off && (uint64_t)off + n <= memSize_; }
@@ -1160,6 +1340,47 @@ private:
         std::memcpy((uint8_t *)_mem + out, &ns, 8);
         m3ApiReturn(0);
     }
+    // ---- rfm1_host_1 (VIRTUAL-CARTS.md section 4): the requests checked and queued here, done by the FileApi's IO
+    // thread, answered by fsApply() before the next tick / audio
+    static m3ApiRawFunction(w_fs_request)
+    {
+        m3ApiReturnType(int32_t);
+        m3ApiGetArg(int32_t, op);
+        m3ApiGetArg(uint32_t, path);
+        m3ApiGetArg(int32_t, pathLen);
+        m3ApiGetArg(int64_t, offset);
+        m3ApiGetArg(uint32_t, buf);
+        m3ApiGetArg(int32_t, len);
+        FileApi *fs = self(_ctx)->fs_.get();
+        if (!fs || pathLen < 0)
+            m3ApiReturn(FS_EIO);
+        m3ApiReturn(fs->request(op, (const uint8_t *)_mem, m3_GetMemorySize(runtime), path, (uint32_t)pathLen, offset,
+                                buf, len));
+    }
+    static m3ApiRawFunction(w_fs_poll)
+    {
+        m3ApiReturnType(int32_t);
+        m3ApiGetArg(int32_t, id);
+        (void)runtime; (void)_mem;
+        FileApi *fs = self(_ctx)->fs_.get();
+        m3ApiReturn(fs ? fs->poll(id) : FS_ENOENT);
+    }
+    static m3ApiRawFunction(w_fs_cancel)
+    {
+        m3ApiGetArg(int32_t, id);
+        (void)runtime; (void)_mem;
+        if (FileApi *fs = self(_ctx)->fs_.get())
+            fs->cancel(id);
+        m3ApiSuccess();
+    }
+    static m3ApiRawFunction(w_fs_changed)
+    {
+        m3ApiReturnType(int32_t);
+        (void)runtime; (void)_mem;
+        FileApi *fs = self(_ctx)->fs_.get();
+        m3ApiReturn(fs ? fs->changed() : 0);
+    }
+
     static m3ApiRawFunction(w_proc_exit)
     {
         m3ApiGetArg(uint32_t, code);
@@ -1169,6 +1390,8 @@ private:
     }
 
     std::shared_ptr<const WasmFile> f_;
+    std::shared_ptr<FsFolder> folder_;      // (tests) this folder, not the app's
+    std::unique_ptr<FileApi> fs_;
     IM3Environment env_ = nullptr;
     IM3Runtime rt_ = nullptr;
     IM3Module mod_ = nullptr;
@@ -1246,6 +1469,17 @@ int rfmw_check(const char *path, rfmw_info_t *out, char *err, uint32_t n)
         out->memory_bytes = c.memoryBytes();
         out->file_size = (uint32_t)f->bytes.size();
         out->load_us = c.loadUs();
+        out->is_virtual = f->isVirtual ? 1 : 0;
+        out->uses_folder = f->fs ? 1 : 0;
+        std::string fo;
+        auto mode = [&](const char *k, uint8_t m) {
+            if (m)
+                fo += std::string(fo.empty() ? "" : " ") + k + (m == rfm::FsModes::ReadWrite ? ":rw" : ":r");
+        };
+        mode("audio", f->modes.audio);
+        mode("code", f->modes.code);
+        mode("data", f->modes.data);
+        rfm::put(out->folders, sizeof out->folders, fo);
     }
     return 1;
 }
@@ -1297,6 +1531,84 @@ int rfme_load_wasm(rfme_t *e, const char *path, char *err, uint32_t n)
         return 1;
     rfm::put(err, n, msg);
     return 0;
+}
+
+// ---- the RemoteFM1 folder (Fantasy CFW)
+void rfmw_set_folder(const char *path)
+{
+    rfm::fsSetFolder(path && *path ? rfm::fsPosixFolder(path) : nullptr);
+}
+
+void rfmw_folder_changed(void) { rfm::fsBumpChanged(); }
+
+uint64_t rfmw_folder_reads(void) { return rfm::fsReadCount(); }
+
+void rfmw_set_memory_budget(uint64_t bytes) { rfm::g_budget.store(bytes); }
+
+// ---- one instance, outside an engine (tests)
+struct rfmw_inst {
+    std::shared_ptr<const rfm::WasmFile> file;
+    std::unique_ptr<rfm::WasmCore> core;
+};
+
+rfmw_inst *rfmw_inst_open(const char *path, const char *folder, char *err, uint32_t n)
+{
+    std::string msg;
+    auto f = rfm::wasmOpen(path ? path : "", &msg);
+    if (!f) {
+        rfm::put(err, n, msg);
+        return nullptr;
+    }
+    auto i = new rfmw_inst;
+    i->file = f;
+    i->core = std::make_unique<rfm::WasmCore>(f, folder ? rfm::fsPosixFolder(folder) : nullptr);
+    if (!i->core->open(&msg)) {
+        rfm::put(err, n, msg);
+        delete i;
+        return nullptr;
+    }
+    return i;
+}
+
+void rfmw_inst_close(rfmw_inst *i) { delete i; }
+
+int rfmw_inst_call(rfmw_inst *i, const char *name, const uint64_t *args, uint32_t nargs, int64_t *ret)
+{
+    return i && name && i->core->callExport(name, args, nargs, ret) ? 1 : 0;
+}
+
+uint8_t *rfmw_inst_memory(rfmw_inst *i, uint32_t *size) { return i ? i->core->memory(size) : nullptr; }
+
+void rfmw_inst_apply(rfmw_inst *i)
+{
+    if (i)
+        i->core->fsApply();
+}
+
+int rfmw_inst_settle(rfmw_inst *i, uint32_t timeout_ms)
+{
+    if (!i || !i->core->fileApi())
+        return 0;
+    const bool ok = i->core->fileApi()->waitIdle((int)timeout_ms);
+    i->core->fsApply();
+    return ok ? 1 : 0;
+}
+
+int rfmw_inst_wait(rfmw_inst *i, uint32_t timeout_ms)
+{
+    return i && i->core->fileApi() && i->core->fileApi()->waitIdle((int)timeout_ms) ? 1 : 0;
+}
+
+void rfmw_inst_bump(rfmw_inst *i)
+{
+    if (i && i->core->fileApi())
+        i->core->fileApi()->bump();
+}
+
+void rfmw_inst_tick(rfmw_inst *i, uint32_t ms)
+{
+    if (i)
+        i->core->tick(ms);
 }
 
 } // extern "C"

@@ -15,3 +15,7 @@
   from https://remotefm1.com/installer/firmware/remote-0.2.3.fwsc on 2026-10-29; it installs as `FM-1_52000203`.
   `RemoteFM1/releases.json`: https://remotefm1.com/installer/releases.json as it was that day (0.2.3 the newest).
   FirmwareInstallTests check both and install the package on FM1Kit's SimulatedFM1.
+- `fs_cart.wasm`, `fs_cart_plain.wasm`, `fs_cart.c`: the web player's file API test module (RemoteFM1
+  `web/engines/rfm1/fixtures/`, branch `fantasy-cfw` 60a1b8b), unchanged: a minimal `.rfm1` without its manifest that
+  imports `rfm1_host_1` (the plain one doesn't) and exports `t_request`, `t_poll`, `t_spin`, `t_cancel`, `t_changed`.
+  FantasyCFWTests adds each case's manifest.
