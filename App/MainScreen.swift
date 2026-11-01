@@ -762,20 +762,6 @@ struct MainScreen: View {
             SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
                                                                       player.status.latencyMs, player.status.underruns)
                       : "No sound: the firmware runs on a timer.")
-            // (the battery) what the app does when you leave it or lock the screen
-            SheetSectionTitle("In the background")
-            SheetList {
-                let modes = BackgroundMode.allCases
-                SheetSegmented("Play", options: modes.map(\.title),
-                               selected: modes.firstIndex(of: battery.policy.mode) ?? 0) { battery.policy.mode = modes[$0] }
-                SheetToggle("Stop after 10 quiet minutes", on: Binding(get: { battery.policy.idleStop },
-                                                                       set: { battery.policy.idleStop = $0 }), divider: false)
-            }
-            SheetNote("Keep playing: the firmware plays with the screen locked (it uses the battery). Only with an FM-1: "
-                      + "it stops when no FM-1 is connected. Stop when I leave: it stops when you leave the app or lock "
-                      + "the screen. Quiet: no key, knob, MIDI or sound. The lock screen's Pause stops it too; it saves "
-                      + "first and plays again when you come back."
-                      + (battery.lastStop.isEmpty ? "" : " Last stopped: \(battery.lastStop)."))
             SheetSectionTitle("MIDI")
             SheetList {
                 SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { midiScroll = nil; page = .midiInput }
@@ -816,9 +802,28 @@ struct MainScreen: View {
         }
     }
 
+    /// (the battery) what the app does when you leave it or lock the screen: one row a choice, a check on the chosen
+    private var backgroundSection: some View {
+        let modes = BackgroundMode.allCases, now = battery.policy.mode
+        return VStack(alignment: .leading, spacing: 0) {
+            SheetSectionTitle("When you leave the app", top: 12).id("background")
+            SheetList {
+                ForEach(modes, id: \.self) { m in
+                    SheetRow(m.title, chevron: false, check: m == now) { battery.policy.mode = m }
+                }
+                SheetToggle("Stop after 10 quiet minutes", on: Binding(get: { battery.policy.idleStop },
+                                                                       set: { battery.policy.idleStop = $0 }), divider: false)
+            }
+            SheetNote(now.detail + " Quiet: no key, knob, MIDI or sound. Pause on the lock screen stops it too; it saves "
+                      + "first and plays again when you come back."
+                      + (battery.lastStop.isEmpty ? "" : " Last stopped: \(battery.lastStop)."))
+        }
+    }
+
     private var settingsPage: some View {
         SheetPage("Settings", scrollTo: options.sheetScroll, back: { page = nil }) {
-            SheetSectionTitle("Keys", top: 12)
+            backgroundSection
+            SheetSectionTitle("Keys")
             SheetList {
                 SheetToggle("Step numbers on the keys", on: $ui.stepNumbers, divider: false)
             }

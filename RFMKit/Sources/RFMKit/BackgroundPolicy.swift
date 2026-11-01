@@ -19,8 +19,17 @@ public enum BackgroundMode: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .always: "Keep playing"
-        case .withFM1: "Only with an FM-1"
-        case .never: "Stop when I leave"
+        case .withFM1: "Only with an FM-1 connected"
+        case .never: "Stop playing"
+        }
+    }
+
+    /// what the choice does, in a line
+    public var detail: String {
+        switch self {
+        case .always: "The firmware keeps playing with the screen locked. This uses the battery."
+        case .withFM1: "It keeps playing while an FM-1 is connected, and stops when none is."
+        case .never: "It stops when you leave the app or lock the screen."
         }
     }
 }
