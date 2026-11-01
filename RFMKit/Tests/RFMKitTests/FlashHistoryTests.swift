@@ -285,4 +285,33 @@ final class FlashHistoryTests: XCTestCase {
         s.version = "0.12"
         XCTAssertEqual(s.loadQuestion(running: "0.12"), "Load \"Jam 3\"? The current memory is kept as a safety copy first.")
     }
+
+    /// a removed built-in core's memory (<id>.bin) becomes its .rfm1's (rfm1-<id>.bin) at that one's first boot, with a
+    /// safety copy; not when the .rfm1 has a memory of its own
+    @MainActor func testImportedFirmwareAdoptsTheRemovedBuiltInMemory() throws {
+        let dir = tempDir()
+        let flash = dir.appendingPathComponent("cores")
+        try FileManager.default.createDirectory(at: flash, withIntermediateDirectories: true)
+        let old = Data((0..<4096).map { UInt8(truncatingIfNeeded: $0 &* 13 &+ 1) })
+        try FlashFile.write(old, to: flash.appendingPathComponent("oldsynth.bin"), firmwareID: "oldsynth", version: "1.4.5")
+        let suite = "rfm-adopt-\(UUID().uuidString)"
+        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { d.removePersistentDomain(forName: suite) }
+        let p = CorePlayer(link: nil, slotsDir: "/nonexistent", flashDir: flash, midiDefaults: d)
+        defer { p.stop() }
+        var info = CoreInfo(id: "rfm1:abc")
+        info.kind = "wasm"
+        info.coreID = "oldsynth"
+        info.name = "Old Synth"
+        info.version = "1.5.1"
+        let url = flash.appendingPathComponent("rfm1-oldsynth.bin")
+        p.adoptBuiltInFlash(info, to: url)
+        XCTAssertEqual(FlashFile.read(url, expectedSize: 0).data, old, "the built-in one's memory is the .rfm1's now")
+        XCTAssertEqual(FlashFile.meta(url)?.version, "1.4.5", "(so the boot sees a version change and watches it)")
+        XCTAssertEqual(p.history.list("oldsynth").first?.sha256, FlashFile.sha256(old), "a safety copy first")
+        // its own memory now: never replaced again
+        try FlashFile.write(Data([1, 2, 3, 4]), to: url, firmwareID: "oldsynth", version: "1.5.1")
+        p.adoptBuiltInFlash(info, to: url)
+        XCTAssertEqual(FlashFile.read(url, expectedSize: 0).data, Data([1, 2, 3, 4]))
+    }
 }

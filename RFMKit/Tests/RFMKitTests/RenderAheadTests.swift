@@ -212,7 +212,7 @@ final class RenderAheadTests: XCTestCase {
     func testMIDIOutKeepsItsFrame() throws {
         let rate = 44100.0, at = 400, offset: UInt32 = 50
         var found = false
-        for core in ["felucca", "choralroot", "melodee", "saadet"] {
+        for core in ["felucca", "choralroot", "saadet"] {
             let e = try engine(core)
             rfme_midi_out_enable(e, 1)
             rfme_set_midi(e, 0, 0, 0, 1)

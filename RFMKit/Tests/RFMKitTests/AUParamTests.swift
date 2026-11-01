@@ -382,7 +382,7 @@ final class AUParamTests: XCTestCase {
             throw XCTSkip("no macOS core builds in \(CoreTests.coresDir): run scripts/build_cores.sh macos")
         }
         XCTAssertGreaterThan(rfms_scan(CoreTests.coresDir), 0)
-        for (id, visible) in [("choralroot", 77), ("felucca", 73), ("melodee", 78)] {
+        for (id, visible) in [("choralroot", 77), ("felucca", 73)] {
             let e = rfme_new(nil)!
             defer { rfme_free(e) }
             var err = [CChar](repeating: 0, count: 256)

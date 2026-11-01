@@ -460,6 +460,7 @@ public final class CorePlayer {
             return false
         }
         let url = flashURL(selected)
+        if let info { adoptBuiltInFlash(info, to: url) }
         let r = io.sync { FlashFile.read(url, expectedSize: Int(rfme_flash_size(e))) }
         let bytes = r.data
         if !r.note.isEmpty { log.error("flash \(url.lastPathComponent, privacy: .public): \(r.note, privacy: .public)") }
@@ -618,6 +619,22 @@ public final class CorePlayer {
         }
         saves += 1
         lastSave = Date()
+    }
+
+    /// (a boot of an imported firmware with no memory of its own) a built-in core of the same firmware that this build
+    /// no longer has (Melodee, 2026-10-31: the .rfm1 replaced it) left its memory as <id>.bin: it becomes this one's
+    /// (copied; the file kept, and a safety copy taken), so nothing played on the built-in one is lost
+    func adoptBuiltInFlash(_ info: CoreInfo, to url: URL) {
+        guard info.imported, !FileManager.default.fileExists(atPath: url.path),
+              !cores.contains(where: { !$0.imported && $0.firmwareID == info.firmwareID }) else { return }
+        let old = flashDir.appendingPathComponent("\(info.firmwareID).bin")
+        guard let d = io.sync(execute: { FlashFile.read(old, expectedSize: 0).data }), !d.isEmpty else { return }
+        let fromVersion = FlashFile.meta(old)?.version ?? ""
+        history.record(d, firmwareID: info.firmwareID, version: fromVersion, reason: .beforeUpdate(from: fromVersion.isEmpty ? "built in" : "built in \(fromVersion)", to: info.version))
+        do {
+            try io.sync { try FlashFile.write(d, to: url, firmwareID: info.firmwareID, version: fromVersion) }
+            log.info("flash: \(info.name, privacy: .public) takes the built-in one's memory (\(old.lastPathComponent, privacy: .public))")
+        } catch { log.error("flash: adopting \(old.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)") }
     }
 
     /// (a boot) the flash file was written by another version of this firmware: a copy first, the sidecar then

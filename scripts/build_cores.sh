@@ -38,7 +38,7 @@ SAADET=$ROOT/vendor/saadet
 BOARDWALK=$ROOT/vendor/boardwalk
 LOOM=$ROOT/vendor/loom
 FM1BASE=$ROOT/vendor/fm1-base
-CORES=${RFM_CORES:-choralroot;felucca;melodee;fizz;saadet;boardwalk;loom}
+CORES=${RFM_CORES:-choralroot;felucca;fizz;saadet;boardwalk;loom}
 B=$ROOT/build/cores
 SRC=$B/src
 PY=${CR_PYTHON:-/Library/Frameworks/Python.framework/Versions/3.11/bin/python3}
@@ -173,6 +173,16 @@ build_platform() {
         done
         printf '%-11s %-15s %s  %s\n' "$lid" "$ver" "$(du -h "$lib" | cut -f1)" "$fw/FM1Core_${id}_1..$NSLOTS.framework"
     done <"$dir/cores.txt"
+    # slots of a core no longer built (Melodee, 2026-10-31: an .rfm1 now) are removed, so nothing picks up old ones
+    local kept
+    kept=$(awk '{ sub(/_store$/, "", $1); print $1 }' "$dir/cores.txt" | sort -u)
+    for f in "$dir"/frameworks/FM1Core_*.framework "$dir"/frameworks-store/FM1Core_*.framework; do
+        [ -d "$f" ] || continue
+        local core
+        core=$(basename "$f" .framework | sed -E 's/^FM1Core_(.*)_[0-9]+$/\1/')
+        printf '%s\n' "$kept" | grep -qxF "$core" && continue
+        find "$f" -depth -delete && echo "removed $(basename "$f") (no longer built)"
+    done
 }
 
 PLATS=("$@")

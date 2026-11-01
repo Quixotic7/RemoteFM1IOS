@@ -166,6 +166,12 @@ Code is written by Opus subagents, one milestone at a time; Claude designs, revi
 
 Decided by the owner (2026-10-27):
 
+- (2026-10-31) **Melodee is no longer built in.** The owner's word: Melodee comes as an .rfm1 from the catalog
+  (melodee-1.5.1.rfm1, Kerem Kilic's latest release built as his official one, RemoteFM1FW 2026-10-31d), not the
+  modified 1.4.5 core. The full build's cores are ChoralRoot, Felucca, FIZZ, Saadet, Boardwalk, LOOM-8;
+  build_cores.sh removes slots of a core it no longer builds. A built-in core's memory (<id>.bin) becomes its .rfm1's
+  at that one's first boot (CorePlayer.adoptBuiltInFlash, a safety copy first), so nothing played on it is lost.
+
 - **Firmwares:** ChoralRoot, Felucca, Melodee first (M3), then the cores that aren't gated; never the gated ones
   (fm106, rainbow, fartmachine, x0x, nomansky, orbit, sloop, sloopdx).
 - **Devices:** one universal app, iPhone and iPad. Developed and tested on the iPhone 13 Pro Max over Bluetooth;

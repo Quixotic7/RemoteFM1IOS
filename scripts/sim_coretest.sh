@@ -6,7 +6,7 @@
 # take a screenshot, print the summary; shut the simulator down again if this script booted it.
 #
 #   scripts/sim_coretest.sh [UDID] [core ...]     (default: RFM iPhone 17, CEB2B846-...;
-#                                                  choralroot felucca melodee fizz saadet boardwalk loom)
+#                                                  choralroot felucca fizz saadet boardwalk loom)
 #   OUT=dir   where the results go (default $TMPDIR/remotefm1-coretest); NOBUILD=1 reuses the last build
 #   RFM1="felucca choralroot"   (M7) imported firmware: each <id>-*.rfm1 of $RFM1_DIR (default FM1VST's rfm1 worktree's
 #             build-rfm1/rfm1) copied into the app's Documents/Firmware after the install; then name it as a core
@@ -24,7 +24,7 @@ UDID=${UDID:-CEB2B846-457C-4A33-AA1A-A287D30CDE2F}   # (RFM iPhone 17, this proj
 CORES=("$@")
 RFM1_DIR=${RFM1_DIR:-/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/rfm1/build-rfm1/rfm1}
 if [ ${#CORES[@]} -eq 0 ] && [ -n "${RFM1:-}" ]; then for i in $RFM1; do CORES+=("rfm1:$i"); done; fi
-[ ${#CORES[@]} -gt 0 ] || CORES=(choralroot felucca melodee fizz saadet boardwalk loom)
+[ ${#CORES[@]} -gt 0 ] || CORES=(choralroot felucca fizz saadet boardwalk loom)
 OUT=${OUT:-${TMPDIR:-/tmp}/remotefm1-coretest}
 DD=$OUT/dd
 RES=$OUT/$UDID

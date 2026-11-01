@@ -76,7 +76,7 @@ final class ThumbnailMaker: XCTestCase {
 
     /// every built-in core and every released .rfm1 ships a picture
     @MainActor func testShippedThumbnails() {
-        for id in CoreTests.ids + ["amb", "coralflower", "duell", "fimba", "fmini", "fomni", "ghoulbox", "jiant", "minitone",
+        for id in CoreTests.ids + ["amb", "coralflower", "duell", "melodee", "fimba", "fmini", "fomni", "ghoulbox", "jiant", "minitone",
                                    "pigeon", "purplemonkey", "s1vave", "skiff", "speak37"] {
             XCTAssertNotNil(FirmwareThumbs.shipped(id), "\(id) has no shipped thumbnail")
         }

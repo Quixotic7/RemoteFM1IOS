@@ -61,7 +61,7 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "melodee", "fizz", "saadet", "boardwalk", "loom"]
+    static let ids = ["choralroot", "felucca", "fizz", "saadet", "boardwalk", "loom"]   // (Melodee: an .rfm1 since 2026-10-31)
     static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0", "loom": "MPL-2.0"]    // (the others: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
     static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC), "loom": Int32(RFME_B_PLAY)]
@@ -105,7 +105,6 @@ final class CoreTests: XCTestCase {
             let credits = rfms_credits(id, nil, 0)
             print("core \(id): \(name) \(ver), \(RemoteController.string(i.source_url)), credits \(credits) bytes")
         }
-        XCTAssertGreaterThan(rfms_credits("melodee", nil, 0), 0)        // (CZ / Prophet data, the uPD933 notice)
     }
 
     /// each core: boots from an empty flash, runs 3 device seconds, draws; a held key sounds
@@ -438,7 +437,7 @@ final class CoreTests: XCTestCase {
     func testDefaultCoreFallsBack() {
         let all = CorePlayer.catalog()
         XCTAssertEqual(all.map(\.id), Self.ids, "the picker's order")
-        XCTAssertEqual(CorePlayer.pick("melodee", in: all), "melodee")
+        XCTAssertEqual(CorePlayer.pick("felucca", in: all), "felucca")
         XCTAssertEqual(CorePlayer.pick(nil, in: all), "choralroot")
         XCTAssertEqual(CorePlayer.pick("nosuchcore", in: all), "choralroot")
         let store = all.filter { $0.id == "fizz" }
@@ -531,26 +530,6 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(c.flash(), image, "the image staged back is not the image read")
             c.run(1000)
             XCTAssertEqual(c.param("Tempo"), 121, "the saved tempo did not survive the reboot")
-        }
-        // Melodee: its first FM1P_PERSIST parameter changed (conformance.txt's default round trip)
-        var name = [CChar](repeating: 0, count: 64)
-        var pname: String { cstr(name) }
-        var lo: Int32 = 0, hi: Int32 = 0, v0: Int32 = 0, want: Int32 = 0
-        do {
-            let c = try TestCore("melodee")
-            c.boot()
-            c.run(600)
-            XCTAssertEqual(rfme_param_persist(c.e, &name, 64, &lo, &hi, &v0), 1)
-            want = v0 < hi ? v0 + 1 : lo
-            XCTAssertEqual(rfme_param_set(c.e, name, want), 1)
-            c.run(1000)
-            image = c.flash()
-        }
-        do {
-            let c = try TestCore("melodee")
-            c.boot(image)
-            c.run(1000)
-            XCTAssertEqual(c.param(pname), want, "melodee's \(pname)")
         }
         // Felucca: the palette from its menu (HOME held, KNOB 1, HOME), the screen after a reboot not a fresh one's
         do {
