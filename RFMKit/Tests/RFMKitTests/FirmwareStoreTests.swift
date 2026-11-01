@@ -245,7 +245,7 @@ final class FirmwareStoreTests: XCTestCase {
         XCTAssertEqual(s3.problem, "")
     }
 
-    /// RemoteFM1FW's catalog: its text fills what remotefm1.com leaves empty, its images are kept (offline too) and
+    /// RemoteFM1FW's catalog: its text and images win over remotefm1.com's, its images are kept (offline too) and
     /// shown before the shipped and captured thumbnails, fetched again only for a new release
     func testFWCatalogTextAndImages() async throws {
         let lib = library()
@@ -262,9 +262,13 @@ final class FirmwareStoreTests: XCTestCase {
         let d = s.details
         XCTAssertEqual(d["grimm"]?.summary, "Grim drums", "an id only the catalog has")
         XCTAssertEqual(d["grimm"]?.image, img + "grimm.png")
-        XCTAssertNotEqual(d["amb"]?.about, "Catalog text for amb.", "remotefm1.com's text comes first")
-        XCTAssertEqual(d["amb"]?.image, img + "amb.png", "the catalog fills the image")
-        XCTAssertEqual(s.available.first { $0.id == "amb" }?.image, img + "amb.png")
+        XCTAssertEqual(d["amb"]?.about, "Catalog text for amb.", "the catalog's text always")
+        XCTAssertEqual(d["amb"]?.summary, "Generative ambient")
+        XCTAssertEqual(d["amb"]?.image, img + "amb.png")
+        let amb = try XCTUnwrap(s.available.first { $0.id == "amb" }, "remotefm1.com's download")
+        XCTAssertEqual(amb.image, img + "amb.png")
+        XCTAssertEqual(amb.about, "Catalog text for amb.")
+        XCTAssertFalse(amb.downloads.isEmpty)
         XCTAssertNil(d["broken"])
 
         let th = s.thumbs

@@ -167,6 +167,13 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         }
         if sameVersion && o.beta { beta = true }
     }
+
+    /// RemoteFM1FW's catalog entry's card text and image over what another feed said
+    mutating func takeCatalog(_ c: AvailableFirmware) {
+        if !c.summary.isEmpty { summary = c.summary }
+        if !c.about.isEmpty { about = c.about }
+        if !c.image.isEmpty { image = c.image }
+    }
 }
 
 /// what an entry is to this device
@@ -217,14 +224,17 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
         self.release = release
     }
 
-    /// every snapshot's details as one, by id: the first feed's entry, its empty fields filled from the later ones
-    /// (RemoteFM1FW's catalog gives the thumbnail, and the text of a firmware remotefm1.com doesn't list)
+    /// every snapshot's details as one, by id: the first feed's entry, its empty fields filled from the later ones;
+    /// RemoteFM1FW's catalog's text and image always (the owner: "Always use the Catalog descriptions and thumbnails")
     public static func details(_ snaps: [FeedSnapshot]) -> [String: AvailableFirmware] {
         var out: [String: AvailableFirmware] = [:]
         for s in snaps {
             for (k, v) in s.details {
                 if var have = out[k] { have.fill(from: v, sameVersion: false); out[k] = have } else { out[k] = v }
             }
+        }
+        for s in snaps where s.feed.kind == .catalog {
+            for (k, v) in s.details { out[k]?.takeCatalog(v) }
         }
         return out
     }
@@ -346,8 +356,11 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                 }
             }
         }
+        var catalog: [String: AvailableFirmware] = [:]
+        for s in snaps where s.feed.kind == .catalog { for (k, v) in s.details where catalog[k] == nil { catalog[k] = v } }
         return out.values.map { e in
             var e = e
+            if let c = catalog[e.id] { e.takeCatalog(c) }
             if e.name.isEmpty { e.name = AvailableFirmware.name(fromID: e.id) }
             if e.version.contains("-") { e.beta = true }
             return e
