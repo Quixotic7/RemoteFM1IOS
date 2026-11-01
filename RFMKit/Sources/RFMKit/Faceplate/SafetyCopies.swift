@@ -12,11 +12,19 @@ struct SheetAsk: View {
     let action: String
     let cancel: () -> Void
     let confirm: () -> Void
+    /// another answer, above the two (the States page: "Get 0.28 and load")
+    var other: (title: String, action: () -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(question).font(RFMFonts.ui(13, 600)).foregroundStyle(Palette.sheetText)
                 .fixedSize(horizontal: false, vertical: true)
+            if let other {
+                HStack {
+                    Spacer(minLength: 0)
+                    SheetButton(other.title, accent: true, action: other.action)
+                }
+            }
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 SheetButton("Cancel", action: cancel)

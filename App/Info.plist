@@ -30,6 +30,18 @@
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
+			<string>RemoteFM1 transfer</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.quixotic7.remotefm1.transfer</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
 			<string>DX7 cartridge</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
@@ -84,6 +96,23 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>rfm1state</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>RemoteFM1 transfer</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.quixotic7.remotefm1.transfer</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rfm1transfer</string>
 				</array>
 			</dict>
 		</dict>

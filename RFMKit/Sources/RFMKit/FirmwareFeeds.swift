@@ -93,6 +93,9 @@ public struct FirmwareFeed: Codable, Sendable, Hashable, Identifiable {
     public static let releases = FirmwareFeed(
         kind: .github, url: URL(string: "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/latest")!,
         name: "the RemoteFM1FW releases on GitHub")
+    /// every RemoteFM1FW release, newest first (the older versions; read when a page needs them, not with the feeds)
+    public static let allReleases = URL(string: "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases?per_page=100")!
+
     /// RemoteFM1FW's card text and thumbnails (catalog/SCHEMA.md); its images sit beside it in images/
     public static let fwCatalog = FirmwareFeed(
         kind: .catalog, url: URL(string: "https://raw.githubusercontent.com/Quixotic7/RemoteFM1FW/main/catalog/catalog.json")!,
@@ -311,6 +314,28 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
         }
     }
 
+    /// every version in a list of GitHub releases (newest release first): by id, one entry a version (the newest
+    /// release's file), newest version first
+    public static func versions(_ data: Data, feed: String) throws -> [String: [AvailableFirmware]] {
+        guard let list = try? JSONDecoder().decode([Lossy<ReleaseJSON>].self, from: data) else { throw ParseError() }
+        var out: [String: [AvailableFirmware]] = [:]
+        for case let r? in list.map(\.value) where !(r.draft ?? false) {
+            for a in r.assets {
+                guard let (id, version) = idAndVersion(a.name), let url = URL(string: a.browser_download_url),
+                      url.scheme == "https", !(out[id] ?? []).contains(where: { $0.version == version }) else { continue }
+                var e = AvailableFirmware(id: id)
+                e.version = version
+                e.beta = version.contains("-")
+                let d = a.digest ?? ""
+                e.downloads = [.init(url: url, feed: feed, sha256: d.hasPrefix("sha256:") ? String(d.dropFirst(7)).lowercased() : "",
+                                     size: a.size ?? 0, fileName: a.name)]
+                out[id, default: []].append(e)
+            }
+        }
+        for k in out.keys { out[k]?.sort { FirmwareVersion.less($1.version, $0.version) } }
+        return out
+    }
+
     /// "<id>-<version>.rfm1" (the id may hold dashes: the version starts at the first "-" before a digit)
     static func idAndVersion(_ name: String) -> (String, String)? {
         guard name.lowercased().hasSuffix(".rfm1") else { return nil }
@@ -396,6 +421,7 @@ private struct SiteJSON: Decodable {
 /// a GitHub release (the fields used)
 private struct ReleaseJSON: Decodable {
     var tag_name: String?
+    var draft: Bool?
     var assets: [Asset]
 
     struct Asset: Decodable {

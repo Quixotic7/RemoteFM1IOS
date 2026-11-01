@@ -913,8 +913,10 @@ public final class CorePlayer {
         return cores.compactMap { c in
             let url = flashURL(c.id)
             guard let d = io.sync(execute: { FlashFile.read(url, expectedSize: 0).data }) else { return nil }
+            // (the versions of an imported firmware share one memory: the version that last wrote it)
+            let v = FlashFile.meta(url)?.version ?? ""
             return Backup.Current(firmwareID: c.firmwareID, firmwareName: c.name,
-                                  kind: c.kind, version: c.version, sha256: c.sha256, flash: d)
+                                  kind: c.kind, version: v.isEmpty ? c.version : v, sha256: c.sha256, flash: d)
         }
     }
 

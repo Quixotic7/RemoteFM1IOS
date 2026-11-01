@@ -64,7 +64,7 @@ struct CatalogDetailPage: View {
 
     var body: some View {
         if let e = store.available.first(where: { $0.id == id }) {
-            page(e)
+            page(e).task { await store.loadVersions() }
         } else {
             SheetPage(id, backTitle: "Get firmware", back: back) {
                 SheetNote(store.checking ? "Getting the list…" : "This firmware isn't in the list any more.").padding(.top, 12)
@@ -133,6 +133,7 @@ struct CatalogDetailPage: View {
             }
             .padding(.top, 16)
             CatalogNotes(store: store)
+            olderVersions(e)
             SheetSectionTitle("Details")
             SheetList {
                 InfoLine("Version", e.version)
@@ -161,6 +162,26 @@ struct CatalogDetailPage: View {
 }
 
 extension CatalogDetailPage {
+    /// the firmware's other versions on GitHub: Install (beside the one here), or Play when it is here
+    @ViewBuilder func olderVersions(_ e: AvailableFirmware) -> some View {
+        let others = store.versions(of: e.id).filter { $0.version != e.version }
+        if !others.isEmpty {
+            SheetSectionTitle("Older versions")
+            SheetList {
+                ForEach(Array(others.enumerated()), id: \.element.version) { i, o in
+                    let f = library.files.first { $0.error == nil && $0.coreID == e.id && $0.version == o.version }
+                    SheetRow(o.version, value: f != nil ? "Play" : "Install · \(CatalogText.size(o.size))",
+                             divider: i < others.count - 1, chevron: false) {
+                        if let f { play(f.key) } else { Task { await store.install(o) } }
+                    }
+                    .disabled(store.progress != nil)
+                }
+            }
+            SheetNote("For a state made with an older version. Installing one keeps the version here; they share the "
+                      + "firmware's memory, and a safety copy is kept if one resets it.")
+        }
+    }
+
     /// Delete (every file of this firmware here), asked again in place
     @ViewBuilder func deleteRow(_ files: [ImportedFirmware]) -> some View {
         let what = files.count == 1 ? "\(files[0].name) \(files[0].version)" : "\(files.count) versions"

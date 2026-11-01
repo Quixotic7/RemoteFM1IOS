@@ -104,7 +104,7 @@ enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
     case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install, cart
     case keyChannel = "keychannel", midiMode = "midimode", safetyCopies = "safetycopies"
-    case states
+    case states, transfer
 }
 
 struct MainScreen: View {
@@ -136,6 +136,10 @@ struct MainScreen: View {
     @State private var shareItem: ShareItem?            // (section 18 step 3) a file in the share sheet
     @State private var stateNotice = ""                 // an opened .rfm1state: what happened (the States page)
     @State private var stateNeeds: String?              // its firmware, not installed: the catalog's id (Get firmware)
+    @State private var stateNeedsVersion: SavedState?   // ... and its own version can be downloaded: Get it and load
+    @State private var transfer: TransferFile.Report?   // an opened .rfm1transfer: what came in (the transfer page)
+    @State private var transferNote = ""
+    @State private var sending = false                  // Send to another device… being made
     @State private var importingBackup = false          // the document picker picks a backup, not firmware
     @State private var backingUp = false
     @State private var backupNote = ""
@@ -228,10 +232,17 @@ struct MainScreen: View {
             AboutFirmware(info: player.current, onDelete: deleteAction(player.current))
         }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: importingBackup ? [.folder, Self.stateType] : [FirmwareLibrary.fileType, .data],
+                      allowedContentTypes: importingBackup ? [.folder, Self.stateType, Self.transferType] : [FirmwareLibrary.fileType, .data],
                       allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
-            if importingBackup { importingBackup = false; restore(urls); return }
+            if importingBackup {
+                importingBackup = false
+                let xfer = urls.filter { $0.pathExtension.lowercased() == TransferFile.fileExtension }
+                if let u = xfer.first { openTransfer(u) }
+                let rest = urls.filter { $0.pathExtension.lowercased() != TransferFile.fileExtension }
+                if !rest.isEmpty { restore(rest) }
+                return
+            }
             PickerFolder.firmware.remember(urls)
             var last: ImportedFirmware?
             for u in urls { last = (try? library.importFile(u)) ?? last }
@@ -257,6 +268,10 @@ struct MainScreen: View {
         .onOpenURL { url in                             // (a .rfm1state: imported, its States page)
             guard url.isFileURL, url.pathExtension.lowercased() == StateFile.fileExtension else { return }
             openState(url)
+        }
+        .onOpenURL { url in                             // (a .rfm1transfer: everything imported, the transfer page)
+            guard url.isFileURL, url.pathExtension.lowercased() == TransferFile.fileExtension else { return }
+            openTransfer(url)
         }
         .onOpenURL { url in                             // (an .syx from Files or AirDrop: the cartridge page)
             guard url.isFileURL, url.pathExtension.lowercased() == "syx" else { return }
@@ -390,6 +405,7 @@ struct MainScreen: View {
         case .firmware: firmwarePage
         case .safetyCopies: safetyCopiesPage
         case .states: statesPage
+        case .transfer: transferPage
         case .getFirmware:
             GetFirmwarePage(store: catalog, builtIn: builtIn, scrollTo: options.sheetScroll, back: { page = .firmware }) { id in
                 catalogItem = id
@@ -692,9 +708,20 @@ struct MainScreen: View {
         return SheetPage("States", backTitle: dataBackTitle, back: { page = dataBack }) {
             if !stateNotice.isEmpty {
                 SheetNote(stateNotice, color: .orange).padding(.top, 12)
-                if let id = stateNeeds {
-                    SheetButton("Get firmware") { catalogItem = id; stateNeeds = nil; page = .catalogItem }.padding(.top, 8)
+                HStack(spacing: 8) {
+                    if let s = stateNeedsVersion {
+                        SheetButton("Get \(s.version) and load", accent: true) {
+                            stateNeedsVersion = nil
+                            stateNeeds = nil
+                            Task { stateNotice = await loadAnywhere(s) }
+                        }
+                    }
+                    if let id = stateNeeds {
+                        SheetButton("Get firmware") { catalogItem = id; stateNeeds = nil; stateNeedsVersion = nil; page = .catalogItem }
+                    }
+                    Spacer(minLength: 0)
                 }
+                .padding(.top, 8)
             }
             SheetSectionTitle(c.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)
             StatesList(firmware: c?.name ?? "", version: c?.version ?? "", states: player.states,
@@ -703,7 +730,8 @@ struct MainScreen: View {
                        load: { s in Task { await player.loadState(s) } },
                        rename: { s, n in _ = try? player.library.rename(s, to: n) },
                        delete: { s in player.library.delete(s) },
-                       share: { s in share(s) })
+                       share: { s in share(s) },
+                       otherVersion: { s in otherVersion(s) })
             SheetNote("A state is the firmware's memory (its patches, banks, sequences) with MASTER, the octave and the "
                       + "keys' touch, under a name. The app and every AU instance share them: a state saved here loads "
                       + "in the AU instrument, and the other way. Loading keeps a safety copy of the current memory first. "
@@ -714,6 +742,133 @@ struct MainScreen: View {
             .padding(.top, 12)
             if !player.message.isEmpty { SheetNote(player.message) }
         }
+        .task { await catalog.loadVersions() }
+    }
+
+    // MARK: older versions, the transfer file
+
+    /// a state made with another version: switch to its version (here), or get it (on GitHub), then load
+    private func otherVersion(_ s: SavedState) -> (title: String, action: () -> Void)? {
+        let go = { Task { stateNotice = await loadAnywhere(s) } }
+        if player.cores.contains(where: { $0.firmwareID == s.firmwareID && $0.version == s.version }) {
+            return ("Switch to \(s.version) and load", { _ = go() })
+        }
+        if catalog.version(s.firmwareID, s.version) != nil { return ("Get \(s.version) and load", { _ = go() }) }
+        return nil
+    }
+
+    /// what Load does for a state of the transfer page
+    private func loadLabel(_ s: SavedState) -> String {
+        if player.cores.contains(where: { $0.firmwareID == s.firmwareID && $0.version == s.version }) { return "Load" }
+        if catalog.version(s.firmwareID, s.version) != nil { return "Get \(s.version) and load" }
+        if let c = player.cores.first(where: { $0.firmwareID == s.firmwareID }) { return "Load into \(c.version)" }
+        return "Not here"
+    }
+
+    /// s loaded into its own version of the firmware: the one here, else downloaded (GitHub's releases), else the
+    /// firmware's other version here (the version note says so). Returns what happened
+    private func loadAnywhere(_ s: SavedState) async -> String {
+        let name = s.firmwareName.isEmpty ? s.firmwareID : s.firmwareName
+        if player.mode != .core { player.setMode(.core) }
+        if let c = player.cores.first(where: { $0.firmwareID == s.firmwareID && $0.version == s.version }) {
+            player.select(c.id)
+        } else {
+            await catalog.loadVersions()
+            if let e = catalog.version(s.firmwareID, s.version) {
+                guard let f = await catalog.install(e) else {
+                    return catalog.failure.isEmpty ? catalog.message : "\(name) \(s.version): \(catalog.failure)"
+                }
+                player.catalogChanged()
+                player.select(f.key)
+            } else if let c = player.cores.first(where: { $0.firmwareID == s.firmwareID && $0.id == player.selected })
+                        ?? player.cores.first(where: { $0.firmwareID == s.firmwareID }) {
+                player.select(c.id)
+            } else {
+                return "\(name) \(s.version) isn't on this device or in Get firmware."
+            }
+        }
+        await player.loadState(s)
+        return player.message
+    }
+
+    /// Send to another device…: one .rfm1transfer (every state, each firmware's current memory, their firmware
+    /// files) to the share sheet
+    private func sendTransfer() {
+        sending = true
+        backupNote = ""
+        let lib = player.library
+        let files = library.files.map { ($0, library.folder.appendingPathComponent($0.file)) }
+        let device = UIDevice.current.model
+        let app = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+            + " (" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") + ")"
+        Task {
+            let cur = await player.currentFlashes()
+            let r = await Task.detached { () -> Result<URL, Error> in
+                Result {
+                    let data = TransferFile.make(library: lib, current: cur, files: files, device: device, app: app)
+                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("transfer-\(UUID().uuidString.prefix(8))")
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let day = Date().formatted(.iso8601.year().month().day())
+                    let u = dir.appendingPathComponent("RemoteFM1 from \(device) \(day).\(TransferFile.fileExtension)")
+                    try data.write(to: u, options: .atomic)
+                    return u
+                }
+            }.value
+            sending = false
+            switch r {
+            case .success(let u): shareItem = ShareItem(url: u)
+            case .failure(let e): backupNote = "Can't make the file: \(e.localizedDescription)"
+            }
+        }
+    }
+
+    /// a .rfm1transfer opened: its firmware files and states imported, then the transfer page
+    private func openTransfer(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        transferNote = ""
+        do {
+            let d = try TransferFile.decode(try Data(contentsOf: url))
+            let r = TransferFile.importInto(d, states: player.library, firmware: library) {
+                player.cores.map { ($0.firmwareID, $0.version) }
+            }
+            player.catalogChanged()
+            transfer = r
+        } catch {
+            transfer = nil
+            transferNote = "\(url.lastPathComponent) wasn't read: \(error.localizedDescription)"
+        }
+        page = .transfer
+        withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+    }
+
+    private var transferPage: some View {
+        SheetPage("From another device", back: { page = nil }) {
+            if let r = transfer {
+                SheetNote(r.text).padding(.top, 12)
+                if !r.current.isEmpty {
+                    SheetSectionTitle("Its current memory")
+                    SheetList {
+                        ForEach(Array(r.current.enumerated()), id: \.element.id) { i, s in
+                            SheetRow("\(s.firmwareName) \(s.version)", value: loadLabel(s), divider: i < r.current.count - 1,
+                                     chevron: false) {
+                                Task { transferNote = await loadAnywhere(s) }
+                            }
+                            .disabled(catalog.progress != nil)
+                        }
+                    }
+                    SheetNote("Load makes the firmware here play what it played on the other device. The memory here "
+                              + "is kept as a safety copy first. Every state that came in is in its firmware's States page.")
+                }
+                if !r.missing.isEmpty {
+                    SheetNote("Not on this \(UIDevice.current.model): \(r.missing.joined(separator: ", ")). Get it in Get "
+                              + "firmware, then load its states from its States page.")
+                }
+            }
+            if let p = catalog.progress { SheetNote("Getting \(p.id)… \(CatalogText.progress(p))") }
+            if !transferNote.isEmpty { SheetNote(transferNote) }
+        }
+        .task { await catalog.loadVersions() }
     }
 
     #if DEBUG
@@ -846,9 +1001,12 @@ struct MainScreen: View {
                 if let lastBackup {
                     SheetRow("Share the backup…", chevron: false) { shareBackup(lastBackup) }
                 }
-                SheetRow("Restore from backup…", divider: false, chevron: false) {
+                SheetRow("Restore from backup…", chevron: false) {
                     importingBackup = true
                     showImporter = true
+                }
+                SheetRow(sending ? "Making the file…" : "Send to another device…", divider: false, chevron: false) {
+                    if !sending { sendTransfer() }
                 }
             }
             SheetNote(backupNote.isEmpty
@@ -856,12 +1014,16 @@ struct MainScreen: View {
                         + "copies into Files › RemoteFM1 › Backups. Restore adds a backup's states to the library; "
                         + "nothing is overwritten."
                       : backupNote)
+            SheetNote("Send to another device makes one file with every state, each firmware's current memory and "
+                      + "the firmware files they need. AirDrop it or save it to Files, then open it on the other "
+                      + "device: everything is added there, and its current memory loads with one tap.")
         }
     }
 
     // MARK: files and backups (section 18 step 3)
 
     static let stateType = UTType(exportedAs: StateFile.typeIdentifier, conformingTo: .data)
+    static let transferType = UTType(exportedAs: TransferFile.typeIdentifier, conformingTo: .data)
 
     /// Documents/States made like the library (off the main thread; a file the user added there: imported)
     private func syncMirror() {
@@ -884,6 +1046,7 @@ struct MainScreen: View {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         stateNeeds = nil
+        stateNeedsVersion = nil
         do {
             let i = try player.library.importFile(url)
             let s = i.state
@@ -896,6 +1059,7 @@ struct MainScreen: View {
                 let name = s.firmwareName.isEmpty ? s.firmwareID : s.firmwareName
                 let a = catalog.available.first { $0.id == s.firmwareID }
                 stateNeeds = a?.id
+                stateNeedsVersion = catalog.version(s.firmwareID, s.version) != nil ? s : nil
                 stateNotice = what + " It's a state of \(name) \(s.version), which isn't installed"
                     + (a == nil ? ": add that firmware to load it." : ": get it, then load the state from its States page.")
             }

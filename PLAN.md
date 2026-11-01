@@ -736,6 +736,19 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    the DUELL .rfm1 by itself and read its parts. Some editors may still want a real FM-1 (installers) or Chrome-only
    features.
 
+### Another device and older versions (2026-11-01)
+
+Users copied files from an iPhone to an iPad and couldn't get the same state back: the firmware's current memory
+isn't in Files, and a state may need the version it was made with.
+
+- Send to another device (Settings › Your data): one `.rfm1transfer` file (TransferFile.swift) with every state, each
+  firmware's current memory as a state, and the `.rfm1` files of the versions they were made with. Opened on the
+  other device: everything imported (duplicates skipped), then the From another device page offers to load each
+  current memory.
+- Older versions: every RemoteFM1FW release read on demand (FirmwareVersions.swift, cached); a firmware's Get
+  firmware page lists them, and installing one keeps the version there.
+- A state made with another version: the load question offers "Switch to 0.28 and load" or "Get 0.28 and load".
+
 ## 19. The battery (2026-11-01)
 
 Users found the app drains the battery in the background: it keeps its audio session so a firmware plays with the

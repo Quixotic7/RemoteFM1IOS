@@ -155,7 +155,11 @@ public final class FirmwareStore {
     @ObservationIgnored public var didChange: (@MainActor () -> Void)?
 
     @ObservationIgnored public let library: FirmwareLibrary
-    @ObservationIgnored private let transport: FirmwareTransport
+    @ObservationIgnored let transport: FirmwareTransport
+    /// (FirmwareVersions.swift) every version on GitHub, by id, newest first; when it was read
+    public internal(set) var allVersions: [String: [AvailableFirmware]] = [:]
+    public internal(set) var versionsChecked: Date?
+    public internal(set) var versionsLoading = false
     @ObservationIgnored public let cacheURL: URL
     @ObservationIgnored private var task: Task<ImportedFirmware?, Never>?
     @ObservationIgnored private var attempted: Date?
@@ -176,6 +180,7 @@ public final class FirmwareStore {
         cacheURL = cache ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Firmware catalog/feeds.json")
         loadCache()
+        loadVersionsCache()
     }
 
     /// when the list was read: the oldest feed's last good answer (nil: never)
@@ -400,7 +405,11 @@ public final class FirmwareStore {
             for o in old { library.delete(o) }
             didChange?()
         }
-        message = older.isEmpty ? "Installed \(f.name) \(f.version)."
+        let newer = library.files.contains {
+            $0.error == nil && $0.coreID == f.coreID && FirmwareVersion.less(f.version, $0.version)
+        }
+        message = newer ? "Installed \(f.name) \(f.version) beside the newer one."
+            : older.isEmpty ? "Installed \(f.name) \(f.version)."
             : "Updated \(f.name) to \(f.version). \(kept.map { "\($0.version) is kept: delete it when you're happy." } ?? "")"
         log.info("\(self.message, privacy: .public) (\(f.file, privacy: .public); kept \(kept?.file ?? "-", privacy: .public); removed \(old.map(\.file), privacy: .public))")
         return f

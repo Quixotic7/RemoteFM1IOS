@@ -20,6 +20,8 @@ public struct StatesList: View {
     let share: ((SavedState) -> Void)?
     let shareNote: String
     let startEditing: String?           // (screenshots) the first state whose name starts so: its … open
+    /// a state made with another version: the way to its own version ("Get 0.28 and load"), nil none
+    let otherVersion: ((SavedState) -> (title: String, action: () -> Void)?)?
     @State private var started = false
 
     private enum Ask: Equatable { case load(String), delete(String) }
@@ -34,7 +36,9 @@ public struct StatesList: View {
                 startSaving: Bool = false, startEditing: String? = nil,
                 save: @escaping (String) -> Void, load: @escaping (SavedState) -> Void,
                 rename: @escaping (SavedState, String) -> Void, delete: @escaping (SavedState) -> Void,
-                share: ((SavedState) -> Void)? = nil, shareNote: String = "") {
+                share: ((SavedState) -> Void)? = nil, shareNote: String = "",
+                otherVersion: ((SavedState) -> (title: String, action: () -> Void)?)? = nil) {
+        self.otherVersion = otherVersion
         self.firmware = firmware
         self.version = version
         self.states = states
@@ -90,7 +94,10 @@ public struct StatesList: View {
         if ask == .load(s.id) {
             SheetAsk(question: s.loadQuestion(running: version),
                      action: s.versionNote(running: version).isEmpty ? "Load" : "Load anyway", cancel: { withAnimation { ask = nil } },
-                     confirm: { withAnimation { ask = nil }; load(s) })
+                     confirm: { withAnimation { ask = nil }; load(s) },
+                     other: s.versionNote(running: version).isEmpty ? nil : otherVersion?(s).map { o in
+                         (o.title, { withAnimation { ask = nil }; o.action() })
+                     })
         } else if ask == .delete(s.id) {
             SheetAsk(question: "Delete \"\(s.name)\" from the library? The app and the AU instrument both lose it.",
                      action: "Delete", cancel: { withAnimation { ask = nil } },
