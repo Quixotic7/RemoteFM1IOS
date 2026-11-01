@@ -694,6 +694,57 @@ public final class CorePlayer {
         }
     }
 
+    // MARK: a web manager (section 18 step 5)
+
+    @ObservationIgnored private var managerDecoder = UsbMidiDecoder()
+
+    /// a web manager open: the firmware's MIDI out kept on every clock (and handed to managerTake), or not
+    public func managerAttach(_ on: Bool) {
+        rfme_midi_out_enable(e, on ? 2 : 0)
+        managerDecoder = UsbMidiDecoder()
+        if on { var p: UInt32 = 0; while rfme_midi_out_take(e, &p) == 1 {} }     // (nothing old)
+    }
+
+    /// one message from the page to the firmware's MIDI in: SysEx whole (retried while the queue is full), else as
+    /// the firmware's own MIDI in (not the keys, not the learned map). false: not sent
+    @discardableResult
+    public func managerSend(_ bytes: [UInt8]) async -> Bool {
+        guard let first = bytes.first, first & 0x80 != 0 else { return false }
+        if first == 0xF0 {
+            for _ in 0..<200 {
+                if bytes.withUnsafeBufferPointer({ rfme_sysex_in(e, $0.baseAddress, UInt32($0.count)) }) == 1 { return true }
+                guard bytes.last == 0xF7, bytes.count <= 12_000 else { return false }
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            return false
+        }
+        var ok = true
+        var i = 0
+        while i < bytes.count {                          // (several short messages in one send)
+            let st = bytes[i], n = Self.messageLength(st)
+            guard st & 0x80 != 0, i + n <= bytes.count else { return false }
+            ok = bytes[i..<(i + n)].withContiguousStorageIfAvailable { rfme_midi_in(e, $0.baseAddress, UInt32(n), 1) == 1 } ?? false && ok
+            i += n
+        }
+        return ok
+    }
+
+    /// what the firmware sent since the last call, as whole messages
+    public func managerTake() -> [[UInt8]] {
+        var out: [[UInt8]] = []
+        var p: UInt32 = 0
+        while rfme_midi_out_take(e, &p) == 1 { if let m = managerDecoder.feed(p) { out.append(m) } }
+        return out
+    }
+
+    nonisolated static func messageLength(_ st: UInt8) -> Int {
+        switch st {
+        case 0xC0...0xDF, 0xF1, 0xF3: 2
+        case 0x80...0xBF, 0xE0...0xEF, 0xF2: 3
+        default: 1
+        }
+    }
+
     /// the wiped-memory notice: put the copy back (true: restored), or keep the new memory
     public func answerWiped(restore: Bool) async -> Bool {
         guard let c = wipedCopy else { return false }

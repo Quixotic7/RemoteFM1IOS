@@ -51,6 +51,7 @@ struct LaunchOptions {
     var firmwareEdit: String?                           // (DEBUG) -firmwareedit [ask]: the Firmware page in Edit (ask:
                                                         // the first imported row asks "Delete?")
     var askReset = false                                // (DEBUG) -askreset: the Firmware page asks "Reset firmware?"
+    var openManager = false                             // (DEBUG) -openmanager: the running firmware's web manager
     var safetyDemo = false                              // (DEBUG) -safetydemo: a few made-up safety copies
     var statesDemo = false                              // (DEBUG) -statesdemo: a few made-up states (one of another version)
     var statesSave = false                              // (DEBUG) -statessave: the States page's Save as… field open
@@ -88,6 +89,7 @@ struct LaunchOptions {
         cartDemo = a.contains("-cartdemo")
         if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
         askReset = a.contains("-askreset")
+        openManager = a.contains("-openmanager")
         safetyDemo = a.contains("-safetydemo")
         statesDemo = a.contains("-statesdemo")
         statesSave = a.contains("-statessave")
@@ -124,6 +126,7 @@ struct MainScreen: View {
     @State private var showAUTest = false
     @State private var showBluetooth = false
     @State private var showAbout = false
+    @State private var showManager = false             // (section 18 step 5) the firmware's own web manager
     @State private var askReset = false                 // Reset firmware… asked inline
     @State private var askRestore: String?              // the safety copy whose row asks "Restore?"
     @State private var source: SoundSource
@@ -237,6 +240,13 @@ struct MainScreen: View {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
+        .fullScreenCover(isPresented: $showManager) {
+            if let c = player.current, let u = ManagerList.url(for: c.firmwareID) {
+                ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name), firmware: c.name) {
+                    showManager = false
+                }
+            }
+        }
         .onAppear(perform: launch)
         .sheet(item: $shareItem) { ActivitySheet(url: $0.url) }
         .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
@@ -295,6 +305,7 @@ struct MainScreen: View {
         #if DEBUG
         if options.cartDemo { CartSender.shared(for: controller).addDemo() }
         if options.askReset { askReset = true }
+        if options.openManager { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showManager = true } }
         if options.safetyDemo { safetyDemo() }
         if options.statesDemo { statesDemo() }
         syncMirror()
@@ -560,6 +571,9 @@ struct MainScreen: View {
             }
             SheetSectionTitle("This firmware", top: 12)
             SheetList {
+                if let c = player.current, ManagerList.url(for: c.firmwareID) != nil {
+                    SheetRow("Open its manager", value: "presets, backups") { showManager = true }
+                }
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)
                 SheetRow("Restart the firmware", divider: false, chevron: false) { player.powerCycle() }

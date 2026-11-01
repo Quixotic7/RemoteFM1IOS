@@ -198,12 +198,13 @@ struct rfme final : rfm::HostParams::Panel {
     std::atomic<int> keyChannel{RFME_KEYS_ANY}, transpose{0}, keyNotesToFw{0};
     std::atomic<bool> mapOn{true};
     bool mapWasOn = true;                   // (the core thread's) mapOn as syncMap last saw it
-    std::atomic<bool> midiOutOn{false};
+    std::atomic<int> midiOutOn{0};
     rfm::Spsc<OutPacket, 2048> midiOutQ;                 // the core thread -> the render thread (the AU's MIDI output)
     std::atomic<uint32_t> midiInCount{0}, midiNotes{0}, midiInDropped{0};
     // (M8) a controller's MIDI, learn and the learned map. The queues' producers: rfme_midi_in's callers (serialised
     // by ctlLock, never the audio thread) and the core thread (learnQ); the map comes over in a Triple
     rfm::Spsc<CtlEvent, 1024> ctlQ;
+    rfm::Spsc<uint32_t, 4096> sysexQ;   // (a web manager's SysEx, rfme_sysex_in) USB-MIDI packets for the core's midi_in
     std::mutex ctlLock;
     rfm::Spsc<LearnMsg, 256> learnQ;
     std::atomic<bool> learnArmed{false};
@@ -494,6 +495,10 @@ struct rfme final : rfm::HostParams::Panel {
     void controllerMidi()
     {
         hostParamsIn();                                 // (the host's parameter changes from its own threads)
+        // a web manager's SysEx: as many packets as the core's input takes now, the rest at the next chunk
+        for (uint32_t p; inW - inR < kInRing && sysexQ.pop(p);)
+            inRing[inW++ % kInRing] = p;
+        flushMidiIn();
         for (CtlEvent c; ctlQ.pop(c);) {
             if (c.toFirmware)
                 toFirmware(c.data, c.len);
@@ -774,7 +779,9 @@ struct rfme final : rfm::HostParams::Panel {
             apply(ev);
         syncMap();                                       // (M8: a new map lets go of what the old one held)
         devMs.store(ms, std::memory_order_relaxed);
-        const bool keep = producing && midiOutOn.load(std::memory_order_relaxed);
+        // (kept while the audio ring is made, for the AU; 2: on every clock, for the app's web managers)
+        const int outOn = midiOutOn.load(std::memory_order_relaxed);
+        const bool keep = outOn == 2 || (producing && outOn == 1);
         for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
             midiOut.fetch_add(1, std::memory_order_relaxed);
             if (keep)
@@ -1153,7 +1160,11 @@ struct rfme final : rfm::HostParams::Panel {
     bool midiOutTake(uint32_t *pkt, uint32_t *offset)
     {
         OutPacket o;
-        if (!midiOutQ.peek(o) || o.at >= outEnd)
+        if (!midiOutQ.peek(o))
+            return false;
+        // (with the audio clock a packet waits until the audio it belongs to has played; mode 2 without it: at once)
+        const bool now = midiOutOn.load(std::memory_order_relaxed) == 2 && !audioLive.load(std::memory_order_acquire);
+        if (!now && o.at >= outEnd)
             return false;
         midiOutQ.pop(o);
         *pkt = o.pkt;
@@ -1201,6 +1212,8 @@ struct rfme final : rfm::HostParams::Panel {
         noteKeys = labels = matrixButtons = 0;
         resetMidi();
         for (CtlEvent c; ctlQ.pop(c);) {                // (the clock stopped: this thread is the consumer now)
+        }
+        for (uint32_t p; sysexQ.pop(p);) {
         }
         std::memset(learnNotes, 0, sizeof learnNotes);
         mapper->release();                              // (the map kept; nothing it held is held now)
@@ -1399,7 +1412,7 @@ void rfme_set_midi(rfme_t *e, int key_channel, int transpose, int key_notes_to_f
     e->keyNotesToFw.store(key_notes_to_firmware != 0);
 }
 
-void rfme_midi_out_enable(rfme_t *e, int on) { e->midiOutOn.store(on != 0); }
+void rfme_midi_out_enable(rfme_t *e, int on) { e->midiOutOn.store(on <= 0 ? 0 : on >= 2 ? 2 : 1); }
 
 int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
 {
@@ -1414,6 +1427,29 @@ int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
     }
     (ok ? e->midiInCount : e->midiInDropped).fetch_add(1, std::memory_order_relaxed);
     return ok ? 1 : 0;
+}
+
+int rfme_sysex_in(rfme_t *e, const uint8_t *data, uint32_t len)
+{
+    if (!data || len < 2 || data[0] != 0xF0 || data[len - 1] != 0xF7)
+        return 0;
+    for (uint32_t i = 1; i + 1 < len; i++)
+        if (data[i] & 0x80)
+            return 0;                                   // (a status byte inside: not one SysEx message)
+    std::lock_guard<std::mutex> g(e->ctlLock);
+    if ((len + 2) / 3 > 4096 - e->sysexQ.size())
+        return 0;                                       // (no room now: the caller tries again)
+    // USB-MIDI: CIN 4 for three bytes that go on, 5 / 6 / 7 for the last one, two or three (cable 0)
+    for (uint32_t i = 0; i < len; i += 3) {
+        const uint32_t left = len - i, n = left > 3 ? 3 : left;
+        const uint32_t cin = left > 3 ? 4u : (n == 1 ? 5u : n == 2 ? 6u : 7u);
+        uint32_t p = cin | (uint32_t)data[i] << 8;
+        if (n > 1) p |= (uint32_t)data[i + 1] << 16;
+        if (n > 2) p |= (uint32_t)data[i + 2] << 24;
+        e->sysexQ.push(p);
+    }
+    e->midiInCount.fetch_add(1, std::memory_order_relaxed);
+    return 1;
 }
 
 void rfme_set_midi_map(rfme_t *e, const rfme_map_entry_t *map, uint32_t n, float speed)

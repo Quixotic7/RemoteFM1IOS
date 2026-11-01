@@ -712,3 +712,12 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    MIDI with a port named as the firmware's USB port, wired to the running firmware): a Manager page in a WKWebView
    loading remotefm1.com's hosted manager with the same shim injected, bridged to the engine. Needs host SysEx into
    the core's MIDI in (today only channel and system messages are passed) and the core's SysEx out back to the page.
+   *As built (2026-10-31):* Firmware › "Open its manager" (the app, for the firmwares the site hosts a manager for:
+   ChoralRoot (and PurpleMonkey), Felucca, Melodee, JIANT, GHOULBOX) opens remotefm1.com/managers/<id>/ in a
+   WKWebView (`Managers/ManagerPage.swift`); a script injected at document start plays the site player's part of
+   fm1-shim.js's protocol on its BroadcastChannel (hello -> state with the firmware's USB port name; midi both ways).
+   The page's SysEx goes whole to the core's midi_in (`rfme_sysex_in`: USB-MIDI packets queued, fed as the core takes
+   them), other messages as the firmware's own MIDI in; the core's MIDI out (`rfme_midi_out_enable(e, 2)`: kept on
+   every clock, handed out at once without the audio clock) back to the page as whole messages (`UsbMidiDecoder`).
+   Opening it keeps a "before manager write" safety copy. Seen on the simulator: ChoralRoot's device manager
+   connected and read the running firmware. Not in the AU.

@@ -47,6 +47,8 @@ public:
         e = buf_[r % N];
         return true;
     }
+    // (the producer) entries waiting: at least this many are free for it after (N - size())
+    uint32_t size() const { return w_.load(std::memory_order_relaxed) - r_.load(std::memory_order_acquire); }
 
 private:
     std::array<T, N> buf_{};

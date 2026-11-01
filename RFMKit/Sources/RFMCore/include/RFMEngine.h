@@ -140,8 +140,13 @@ int rfme_use_output_workgroup(rfme_t *e, void *audio_unit);
 // still works)
 enum { RFME_KEYS_OFF = -1, RFME_KEYS_ANY = 0 };
 void rfme_set_midi(rfme_t *e, int key_channel, int transpose, int key_notes_to_firmware, int use_map);
-// the core's MIDI out kept for rfme_midi_out_take (on: the AU has a MIDI output; off: counted and dropped)
+// the core's MIDI out kept for rfme_midi_out_take (1: the AU has a MIDI output, kept while the audio ring is made;
+// 2: kept on every clock (the app's web managers); 0: counted and dropped)
 void rfme_midi_out_enable(rfme_t *e, int on);
+// (a web manager) one whole SysEx message (F0 .. F7, up to ~12 KB) to the core's midi_in, fed as fast as the core takes
+// it; any thread but the audio callback (serialised with rfme_midi_in). 1: queued; 0: not one SysEx message, or no
+// room now (try again shortly)
+int rfme_sysex_in(rfme_t *e, const uint8_t *data, uint32_t len);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
 // played; 0: none. _at also gives its frame in that render (the same latency as the audio)
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);
