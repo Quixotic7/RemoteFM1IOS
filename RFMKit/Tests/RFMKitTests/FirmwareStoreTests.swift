@@ -69,12 +69,14 @@ final class FirmwareStoreTests: XCTestCase {
 
     private func transport() throws -> FakeTransport {
         let t = FakeTransport()
-        t.pages = [FirmwareFeed.remotefm1.url: try siteJSON, FirmwareFeed.releases.url: try releaseJSON]
+        t.pages = [FirmwareFeed.remotefm1.url: try siteJSON, FirmwareFeed.releases.url: try releaseJSON,
+                   FirmwareFeed.fwCatalog.url: try fixture("fwcatalog-2026-11-01.json")]
         return t
     }
 
     private func store(_ lib: FirmwareLibrary, _ t: FakeTransport) -> FirmwareStore {
-        FirmwareStore(library: lib, transport: t, cache: root.appendingPathComponent("cache/feeds.json"))
+        FirmwareStore(library: lib, transport: t, cache: root.appendingPathComponent("cache/feeds.json"),
+                      thumbs: FirmwareThumbs(directory: root.appendingPathComponent("Thumbs")))
     }
 
     private func entry(_ id: String, version: String, sha: String, size: Int, urls: [String]) -> AvailableFirmware {
@@ -241,6 +243,56 @@ final class FirmwareStoreTests: XCTestCase {
         let s3 = store(lib, t)
         await s3.refreshIfOlder(than: 86_400)
         XCTAssertEqual(s3.problem, "")
+    }
+
+    /// RemoteFM1FW's catalog: its text fills what remotefm1.com leaves empty, its images are kept (offline too) and
+    /// shown before the shipped and captured thumbnails, fetched again only for a new release
+    func testFWCatalogTextAndImages() async throws {
+        let lib = library()
+        lib.sync()
+        let t = try transport()
+        let png = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="))
+        let img = "https://raw.githubusercontent.com/Quixotic7/RemoteFM1FW/main/catalog/images/"
+        t.files = [URL(string: img + "amb.png")!: png, URL(string: img + "grimm.png")!: png]
+        let s = store(lib, t)
+        await s.refresh()
+        XCTAssertEqual(s.problem, "")
+        XCTAssertTrue(s.report.contains { $0.contains("3 cards") }, "\(s.report)")
+        let d = s.details
+        XCTAssertEqual(d["grimm"]?.summary, "Grim drums", "an id only the catalog has")
+        XCTAssertEqual(d["grimm"]?.image, img + "grimm.png")
+        XCTAssertNotEqual(d["amb"]?.about, "Catalog text for amb.", "remotefm1.com's text comes first")
+        XCTAssertEqual(d["amb"]?.image, img + "amb.png", "the catalog fills the image")
+        XCTAssertEqual(s.available.first { $0.id == "amb" }?.image, img + "amb.png")
+        XCTAssertNil(d["broken"])
+
+        let th = s.thumbs
+        XCTAssertEqual(th.source("grimm"), th.catalogURL("grimm"))
+        XCTAssertNotNil(th.image("grimm"))
+        XCTAssertFalse(th.exists("zen1"))
+        XCTAssertTrue(th.save(rgba: [UInt8](repeating: 200, count: 240 * 240 * 4), id: "amb"))
+        XCTAssertEqual(th.source("amb"), th.catalogURL("amb"), "the catalog's beats a captured one")
+        XCTAssertEqual(t.started, 2)
+
+        // a check again: nothing fetched; offline the kept images still show
+        await s.refresh()
+        XCTAssertEqual(t.started, 2)
+        t.fail = .notConnectedToInternet
+        let s2 = store(lib, t)
+        await s2.refresh()
+        XCTAssertNotNil(s2.thumbs.image("grimm"))
+        XCTAssertEqual(s2.details["grimm"]?.summary, "Grim drums", "the cached catalog")
+
+        // a new release: fetched again; a failed one keeps its copy
+        t.fail = nil
+        var rel = try XCTUnwrap(JSONSerialization.jsonObject(with: releaseJSON) as? [String: Any])
+        rel["tag_name"] = "9999-01-01"
+        t.pages[FirmwareFeed.releases.url] = try JSONSerialization.data(withJSONObject: rel)
+        t.files[URL(string: img + "grimm.png")!] = Data("not an image".utf8)
+        await s2.refresh()
+        XCTAssertEqual(t.started, 4)
+        XCTAssertNotNil(FirmwareThumbs(directory: s2.thumbs.directory).image("grimm"), "the old copy kept")
     }
 
     // MARK: installs

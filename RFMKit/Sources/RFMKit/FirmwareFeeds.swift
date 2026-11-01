@@ -73,6 +73,7 @@ public struct FirmwareFeed: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case site       // a catalog.json like remotefm1.com's
         case github     // a GitHub release (api.github.com/repos/<owner>/<repo>/releases/latest)
+        case catalog    // RemoteFM1FW's catalog/catalog.json: card text and a thumbnail by manifest id (no downloads)
     }
 
     public var kind: Kind
@@ -92,8 +93,12 @@ public struct FirmwareFeed: Codable, Sendable, Hashable, Identifiable {
     public static let releases = FirmwareFeed(
         kind: .github, url: URL(string: "https://api.github.com/repos/Quixotic7/RemoteFM1FW/releases/latest")!,
         name: "the RemoteFM1FW releases on GitHub")
-    /// the feeds the app reads, in order (the first one's details win)
-    public static let defaults = [remotefm1, releases]
+    /// RemoteFM1FW's card text and thumbnails (catalog/SCHEMA.md); its images sit beside it in images/
+    public static let fwCatalog = FirmwareFeed(
+        kind: .catalog, url: URL(string: "https://raw.githubusercontent.com/Quixotic7/RemoteFM1FW/main/catalog/catalog.json")!,
+        name: "the RemoteFM1FW catalog")
+    /// the feeds the app reads, in order (the first one's details win, a later one fills what it left empty)
+    public static let defaults = [remotefm1, releases, fwCatalog]
 }
 
 /// a firmware the app can download
@@ -118,6 +123,8 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     public var site = ""
     /// (the site catalog's `editor`) the firmware's own web editor / manager page; "" none
     public var editor = ""
+    /// (RemoteFM1FW's catalog) the thumbnail's address; "" none
+    public var image = ""
     public var repo = ""                    // "owner/name" on GitHub
     public var beta = false
     public var downloads: [Download] = []   // the same version from each feed, the first tried first
@@ -125,7 +132,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     public init(id: String) { self.id = id }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, version, author, category, summary, about, license, sourceURL, site, editor, repo, beta, downloads
+        case id, name, version, author, category, summary, about, license, sourceURL, site, editor, image, repo, beta, downloads
     }
 
     /// (a cache from an older build lacks the newer fields: those take their defaults)
@@ -135,6 +142,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         func s(_ k: CodingKeys) -> String { (try? c.decodeIfPresent(String.self, forKey: k)) ?? nil ?? "" }
         name = s(.name); version = s(.version); author = s(.author); category = s(.category); summary = s(.summary)
         about = s(.about); license = s(.license); sourceURL = s(.sourceURL); site = s(.site); editor = s(.editor)
+        image = s(.image)
         repo = s(.repo)
         beta = (try? c.decodeIfPresent(Bool.self, forKey: .beta)) ?? nil ?? false
         downloads = (try? c.decodeIfPresent([Download].self, forKey: .downloads)) ?? nil ?? []
@@ -153,7 +161,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     mutating func fill(from o: AvailableFirmware, sameVersion: Bool) {
         func take(_ k: WritableKeyPath<AvailableFirmware, String>) { if self[keyPath: k].isEmpty { self[keyPath: k] = o[keyPath: k] } }
         take(\.name); take(\.author); take(\.category); take(\.summary); take(\.about); take(\.license)
-        take(\.site); take(\.repo); take(\.editor)
+        take(\.site); take(\.repo); take(\.editor); take(\.image)
         if sourceURL.isEmpty {
             sourceURL = sameVersion || o.repo.isEmpty ? o.sourceURL : "https://github.com/\(o.repo)"
         }
@@ -197,12 +205,28 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
     public var fetched: Date
     public var firmware: [AvailableFirmware]            // the downloadable ones
     public var details: [String: AvailableFirmware]     // a site catalog: every firmware's details by id (no downloads)
+    /// a GitHub release's tag (nil: not a release, or a cache from an older build)
+    public var release: String?
 
-    public init(feed: FirmwareFeed, fetched: Date, firmware: [AvailableFirmware], details: [String: AvailableFirmware] = [:]) {
+    public init(feed: FirmwareFeed, fetched: Date, firmware: [AvailableFirmware], details: [String: AvailableFirmware] = [:],
+                release: String? = nil) {
         self.feed = feed
         self.fetched = fetched
         self.firmware = firmware
         self.details = details
+        self.release = release
+    }
+
+    /// every snapshot's details as one, by id: the first feed's entry, its empty fields filled from the later ones
+    /// (RemoteFM1FW's catalog gives the thumbnail, and the text of a firmware remotefm1.com doesn't list)
+    public static func details(_ snaps: [FeedSnapshot]) -> [String: AvailableFirmware] {
+        var out: [String: AvailableFirmware] = [:]
+        for s in snaps {
+            for (k, v) in s.details {
+                if var have = out[k] { have.fill(from: v, sameVersion: false); out[k] = have } else { out[k] = v }
+            }
+        }
+        return out
     }
 
     public struct ParseError: Error, Equatable {}
@@ -254,7 +278,26 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                                      size: a.size ?? 0, fileName: a.name)]
                 list.append(e)
             }
-            return FeedSnapshot(feed: feed, fetched: fetched, firmware: list)
+            return FeedSnapshot(feed: feed, fetched: fetched, firmware: list, release: j.tag_name)
+        case .catalog:
+            guard let j = try? dec.decode(FWCatalogJSON.self, from: data) else { throw ParseError() }
+            var details: [String: AvailableFirmware] = [:]
+            for (id, item) in j.firmwares {
+                guard let f = item.value, !id.isEmpty else { continue }
+                var e = AvailableFirmware(id: id)
+                e.name = f.name ?? ""
+                e.author = f.author ?? ""
+                e.category = f.category ?? ""
+                e.summary = f.tag ?? ""
+                e.about = f.what ?? ""
+                e.site = f.site ?? ""
+                e.beta = f.beta ?? false
+                if let i = f.image, let u = URL(string: i, relativeTo: feed.url)?.absoluteURL, u.scheme == "https" {
+                    e.image = u.absoluteString
+                }
+                details[id] = e
+            }
+            return FeedSnapshot(feed: feed, fetched: fetched, firmware: [], details: details)
         }
     }
 
@@ -278,8 +321,7 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
     /// every feed's list as one: one entry per id, its newest version; the same version from several feeds keeps
     /// each download (in feed order); details filled in from the site catalogs. Sorted by name
     public static func merge(_ snaps: [FeedSnapshot]) -> [AvailableFirmware] {
-        var details: [String: AvailableFirmware] = [:]
-        for s in snaps { for (k, v) in s.details where details[k] == nil { details[k] = v } }
+        let details = Self.details(snaps)
         var out: [String: AvailableFirmware] = [:]
         for s in snaps {
             for var e in s.firmware {
@@ -340,6 +382,7 @@ private struct SiteJSON: Decodable {
 
 /// a GitHub release (the fields used)
 private struct ReleaseJSON: Decodable {
+    var tag_name: String?
     var assets: [Asset]
 
     struct Asset: Decodable {
@@ -347,5 +390,15 @@ private struct ReleaseJSON: Decodable {
         var size: Int?
         var digest: String?
         var browser_download_url: String
+    }
+}
+
+/// RemoteFM1FW's catalog/catalog.json, schema 1 (the fields used)
+private struct FWCatalogJSON: Decodable {
+    var firmwares: [String: Lossy<Item>]
+
+    struct Item: Decodable {
+        var name, tag, what, category, author, site, image: String?
+        var beta: Bool?
     }
 }

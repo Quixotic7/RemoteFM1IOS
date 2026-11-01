@@ -1,0 +1,12 @@
+{
+ "schema": 1,
+ "about": "A cut of RemoteFM1FW's catalog/catalog.json (2026-11-01f) for the tests.",
+ "firmwares": {
+  "amb": { "tag": "Generative ambient", "what": "Catalog text for amb.", "category": "Other", "author": "C. Vestal",
+           "beta": false, "image": "images/amb.png" },
+  "grimm": { "tag": "Grim drums", "what": "Catalog text for grimm.", "category": "Drums", "author": "Someone",
+             "beta": true, "image": "images/grimm.png" },
+  "zen1": { "tag": "Zen", "what": "No image yet." },
+  "broken": 42
+ }
+}

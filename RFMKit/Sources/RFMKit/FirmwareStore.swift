@@ -17,6 +17,7 @@
 
 import CryptoKit
 import Foundation
+import ImageIO
 import Observation
 
 /// how the store reaches the network (tests use their own)
@@ -159,14 +160,17 @@ public final class FirmwareStore {
     @ObservationIgnored private var task: Task<ImportedFirmware?, Never>?
     @ObservationIgnored private var attempted: Date?
     @ObservationIgnored private let log = RFMShared.log("catalog")
+    /// where RemoteFM1FW's catalog images are kept
+    @ObservationIgnored public let thumbs: FirmwareThumbs
 
     /// the most an .rfm1 may be when a feed gives no size (the format's memory cap is 32 MiB)
     public static let maxSize = 64 << 20
 
     /// cache: the cached lists' file (nil: Caches/Firmware catalog/feeds.json)
     public init(library: FirmwareLibrary, feeds: [FirmwareFeed] = FirmwareFeed.defaults,
-                transport: FirmwareTransport = URLSessionTransport(), cache: URL? = nil) {
+                transport: FirmwareTransport = URLSessionTransport(), cache: URL? = nil, thumbs: FirmwareThumbs? = nil) {
         self.library = library
+        self.thumbs = thumbs ?? .shared
         self.feeds = feeds
         self.transport = transport
         cacheURL = cache ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -214,7 +218,8 @@ public final class FirmwareStore {
             case .success(let d):
                 if let s = try? FeedSnapshot.parse(d, feed: f, fetched: now) {
                     snaps.append(s)
-                    lines.append("\(f.name): \(d.count) bytes, \(s.firmware.count) to download")
+                    lines.append("\(f.name): \(d.count) bytes, "
+                                 + (f.kind == .catalog ? "\(s.details.count) cards" : "\(s.firmware.count) to download"))
                     continue
                 }
                 let head = String(decoding: d.prefix(80), as: UTF8.self)
@@ -234,6 +239,7 @@ public final class FirmwareStore {
         report = lines
         problem = Array(Set(problems)).sorted().joined(separator: " ")
         saveCache()
+        await syncImages()
         log.info("checked \(self.feeds.count) feed(s): \(self.available.count) firmware, \(problems.count) problem(s)")
     }
 
@@ -242,6 +248,40 @@ public final class FirmwareStore {
         if let a = attempted, Date().timeIntervalSince(a) < minLapse { return }
         if snapshots.count == feeds.count, let c = checked, Date().timeIntervalSince(c) < maxAge { return }
         await refresh()
+    }
+
+    /// RemoteFM1FW's catalog images fetched into thumbs' catalog folder: one that is new, moved, or older than the
+    /// latest release; one that fails keeps the copy there. Kept by id in catalog/index.json ("<release> <url>")
+    func syncImages() async {
+        let dir = thumbs.catalogURL("x").deletingLastPathComponent()
+        let indexURL = dir.appendingPathComponent("index.json")
+        var index = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: indexURL))) ?? [:]
+        let release = snapshots.compactMap(\.release).first ?? ""
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        var got = 0, failed = 0
+        for (id, d) in FeedSnapshot.details(snapshots).sorted(by: { $0.key < $1.key }) {
+            guard !d.image.isEmpty, let u = URL(string: d.image), u.scheme == "https" else { continue }
+            let key = "\(release) \(u.absoluteString)", dst = thumbs.catalogURL(id)
+            if index[id] == key, fm.fileExists(atPath: dst.path) { continue }
+            let tmp = dir.appendingPathComponent(".\(UUID().uuidString)")
+            do {
+                try await transport.download(from: u, to: tmp, limit: 2 << 20) { _, _ in }
+                guard let src = CGImageSourceCreateWithURL(tmp as CFURL, nil), CGImageSourceGetCount(src) > 0
+                else { throw FirmwareStoreError.unreadable(u.lastPathComponent) }
+                try? fm.removeItem(at: dst)
+                try fm.moveItem(at: tmp, to: dst)
+                index[id] = key
+                got += 1
+            } catch {
+                try? fm.removeItem(at: tmp)
+                failed += 1
+            }
+        }
+        guard got > 0 || failed > 0 else { return }
+        if let data = try? JSONEncoder().encode(index) { try? data.write(to: indexURL, options: .atomic) }
+        if got > 0 { thumbs.reload() }
+        log.info("catalog images: \(got) new, \(failed) failed")
     }
 
     private func loadCache() {

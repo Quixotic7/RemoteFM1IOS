@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The firmware list's thumbnails. Shipped first: Resources/Thumbs/<firmwareID>.png, each firmware's LCD after a chord
+// The firmware list's thumbnails. RemoteFM1FW's catalog first: the owner's screenshots, catalog/images/<id>.png, kept in
+// the App Group's Thumbs/catalog/<id>.image by FirmwareStore's check (CatalogImages), so they show offline and in the
+// AU. Then shipped: Resources/Thumbs/<firmwareID>.png, each firmware's LCD after a chord
 // of white keys and PLAY (Tests' ThumbnailMaker makes them for the built-in cores and the released .rfm1 files).
 // Others (a firmware the app doesn't know): its own LCD, captured once it has run ~3 s after boot, as a 240x240 PNG
 // in the App Group's Thumbs/<firmwareID>.png, so the app and every AU instance show the same ones. An all-black (or nearly) frame isn't kept: the capture retries on the next frames up to ~10 s
@@ -36,19 +38,33 @@ import UniformTypeIdentifiers
         return directory.appendingPathComponent(String(safe) + ".png")
     }
 
+    /// RemoteFM1FW's catalog image (any type ImageIO reads: PNG, JPEG, WebP)
+    public func catalogURL(_ id: String) -> URL {
+        let safe = id.map { $0.isLetter || $0.isNumber || "-_.".contains($0) ? $0 : "_" }
+        return directory.appendingPathComponent("catalog").appendingPathComponent(String(safe) + ".image")
+    }
+
+    /// the file shown: the catalog's, the shipped one, the captured one
+    func source(_ id: String) -> URL? {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: catalogURL(id).path) { return catalogURL(id) }
+        if let s = Self.shipped(id) { return s }
+        return fm.fileExists(atPath: url(id).path) ? url(id) : nil
+    }
+
     /// a shipped thumbnail (the app's resources)
     public nonisolated static func shipped(_ id: String) -> URL? {
         Bundle.module.url(forResource: id, withExtension: "png", subdirectory: "Thumbs")
     }
 
-    public func exists(_ id: String) -> Bool { Self.shipped(id) != nil || FileManager.default.fileExists(atPath: url(id).path) }
+    public func exists(_ id: String) -> Bool { source(id) != nil }
 
     /// the thumbnail (cached; read again after another process wrote one: `reload`)
     public func image(_ id: String) -> CGImage? {
         _ = generation
         if let c = cache[id] { return c }
         if missing.contains(id) { return nil }
-        guard let src = CGImageSourceCreateWithURL((Self.shipped(id) ?? url(id)) as CFURL, nil),
+        guard let u = source(id), let src = CGImageSourceCreateWithURL(u as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { missing.insert(id); return nil }
         cache[id] = img
         return img
@@ -191,9 +207,8 @@ public enum FirmwareDetailsShare {
 extension FirmwareStore {
     /// every firmware's details by id: the site catalogs' (not only the downloadable ones), then the merged list's
     public var details: [String: AvailableFirmware] {
-        var out: [String: AvailableFirmware] = [:]
+        var out = FeedSnapshot.details(snapshots)
         for e in available { out[e.id] = e }
-        for s in snapshots { for (k, v) in s.details where out[k] == nil { out[k] = v } }
         return out
     }
 }
