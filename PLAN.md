@@ -735,3 +735,15 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    sheet (Save to Files); links to new windows open in Safari. Seen on the simulator: DUELL's own editor connected to
    the DUELL .rfm1 by itself and read its parts. Some editors may still want a real FM-1 (installers) or Chrome-only
    features.
+
+## 19. The battery (2026-11-01)
+
+Users found the app drains the battery in the background: it keeps its audio session so a firmware plays with the
+screen locked. Settings › MIDI & audio › In the background: **Play** Keep playing / Only with an FM-1 / Stop when I
+leave (locking the screen too), and **Stop after 10 quiet minutes** (on; quiet: no key, knob, MIDI, and no sound above
+-60 dBFS: `rfme_status.last_sound_ms`). In the background the app looks every 15 s (`App/Battery.swift`,
+`BackgroundPolicy`); a stop saves the firmware, stops its clock and sound and lets the audio session go, so iOS
+suspends the app; it runs again when the app comes back. The lock screen shows it as Now Playing (the firmware's name)
+and Pause / Stop stop it there. In the background with no FM-1 showing the screen, the firmware redraws every 250 ms
+instead of 15 (`rfme_set_frame_ms`; FIZZ: 4x fewer screen writes); the faceplate's display link pauses by itself.
+Not measured on a device yet (Xcode's energy gauge over a locked hour would say what's left).

@@ -113,6 +113,7 @@ struct MainScreen: View {
     let library: FirmwareLibrary
     let catalog: FirmwareStore
     let midi: AppMidi
+    let battery: Battery
     @State private var ui = FaceplateUI()
     @State private var showImporter = false
     @State private var feed: PanelFeed
@@ -149,12 +150,14 @@ struct MainScreen: View {
     private let store = ThemeStore.shared
     private let options = LaunchOptions()
 
-    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, catalog: FirmwareStore, midi: AppMidi) {
+    init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, catalog: FirmwareStore, midi: AppMidi,
+         battery: Battery) {
         self.controller = controller
         self.player = player
         self.library = library
         self.catalog = catalog
         self.midi = midi
+        self.battery = battery
         _feed = State(initialValue: midi.feed)
         _prompter = State(initialValue: InstallPrompter(controller: controller, installer: .shared(for: controller)))
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
@@ -759,6 +762,20 @@ struct MainScreen: View {
             SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
                                                                       player.status.latencyMs, player.status.underruns)
                       : "No sound: the firmware runs on a timer.")
+            // (the battery) what the app does when you leave it or lock the screen
+            SheetSectionTitle("In the background")
+            SheetList {
+                let modes = BackgroundMode.allCases
+                SheetSegmented("Play", options: modes.map(\.title),
+                               selected: modes.firstIndex(of: battery.policy.mode) ?? 0) { battery.policy.mode = modes[$0] }
+                SheetToggle("Stop after 10 quiet minutes", on: Binding(get: { battery.policy.idleStop },
+                                                                       set: { battery.policy.idleStop = $0 }), divider: false)
+            }
+            SheetNote("Keep playing: the firmware plays with the screen locked (it uses the battery). Only with an FM-1: "
+                      + "it stops when no FM-1 is connected. Stop when I leave: it stops when you leave the app or lock "
+                      + "the screen. Quiet: no key, knob, MIDI or sound. The lock screen's Pause stops it too; it saves "
+                      + "first and plays again when you come back."
+                      + (battery.lastStop.isEmpty ? "" : " Last stopped: \(battery.lastStop)."))
             SheetSectionTitle("MIDI")
             SheetList {
                 SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { midiScroll = nil; page = .midiInput }

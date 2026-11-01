@@ -204,6 +204,7 @@ struct rfme final : rfm::HostParams::Panel {
     // (M8) a controller's MIDI, learn and the learned map. The queues' producers: rfme_midi_in's callers (serialised
     // by ctlLock, never the audio thread) and the core thread (learnQ); the map comes over in a Triple
     rfm::Spsc<CtlEvent, 1024> ctlQ;
+    std::atomic<uint32_t> frameMs{15};  // (the battery) the screen's frame() period, kept across loads
     rfm::Spsc<uint32_t, 4096> sysexQ;   // (a web manager's SysEx, rfme_sysex_in) USB-MIDI packets for the core's midi_in
     std::mutex ctlLock;
     rfm::Spsc<LearnMsg, 256> learnQ;
@@ -246,6 +247,7 @@ struct rfme final : rfm::HostParams::Panel {
 
     // read by anyone
     std::atomic<bool> halted{false}, flashReady{false}, flashReq{false};
+    std::atomic<uint32_t> lastSoundMs{0};    // (the battery: idle detection) the device ms of the last audible chunk
     std::atomic<uint32_t> haltCode{0}, devMs{0}, lcdWrites{0}, snapshots{0}, applied{0}, dropped{0}, keysPressed{0};
     std::atomic<uint32_t> lastVel{0}, lastLean{0};  // (TOUCH) key << 8 | the key_vel / key_lean last given the core
     std::atomic<uint32_t> midiOut{0}, shed{0}, cpuPct{0}, haveStats{0}, flashCopies{0}, flashDirty{0};
@@ -1009,6 +1011,14 @@ struct rfme final : rfm::HostParams::Panel {
             pos = next;
         }
         flushMidiIn();
+        // (idle detection for the app's background policy) anything above a whisper (-60 dBFS) counts as sound
+        for (uint64_t f = w; f < end; f++) {
+            const uint32_t j = (uint32_t)(f & (kRingFrames - 1));
+            if (std::fabs(bufL[j]) > 0.001f || std::fabs(bufR[j]) > 0.001f) {
+                lastSoundMs.store(devMs.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                break;
+            }
+        }
     }
 
     // ---- the audio callback (RFME_CLOCK_AUDIO): the ring into L and R, host events queued. Real-time safe:
@@ -1202,6 +1212,7 @@ struct rfme final : rfm::HostParams::Panel {
         std::lock_guard<std::mutex> g(hpViewLock);
         core = std::move(c);
         dev = std::make_unique<rfm::CoreDevice>(*core);
+        dev->set_frame_ms(frameMs.load(std::memory_order_relaxed));
         namesGen.fetch_add(1);
         return true;
     }
@@ -1429,6 +1440,13 @@ int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
     return ok ? 1 : 0;
 }
 
+void rfme_set_frame_ms(rfme_t *e, uint32_t ms)
+{
+    e->frameMs.store(ms, std::memory_order_relaxed);
+    if (e->dev)
+        e->dev->set_frame_ms(ms);                       // (an atomic: safe while the core thread runs it)
+}
+
 int rfme_sysex_in(rfme_t *e, const uint8_t *data, uint32_t len)
 {
     if (!data || len < 2 || data[0] != 0xF0 || data[len - 1] != 0xF7)
@@ -1593,6 +1611,7 @@ void rfme_status(rfme_t *e, rfme_status_t *st)
     st->midi_mapped = e->midiMapped.load();
     st->midi_learned = e->midiLearned.load();
     st->midi_to_core = e->midiToCore.load();
+    st->last_sound_ms = e->lastSoundMs.load();
 }
 
 void rfme_reset_render_stats(rfme_t *e)

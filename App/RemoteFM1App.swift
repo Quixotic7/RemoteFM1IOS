@@ -28,6 +28,7 @@ struct RemoteFM1App: App {
     @State private var library: FirmwareLibrary?
     @State private var store: FirmwareStore?
     @State private var midi: AppMidi?
+    @State private var battery: Battery?
     @Environment(\.scenePhase) private var phase
     private let coreTest: Bool
 
@@ -63,6 +64,7 @@ struct RemoteFM1App: App {
         }
         _store = State(initialValue: st)
         _midi = State(initialValue: AppMidi(player: p))
+        _battery = State(initialValue: Battery(player: p, controller: c))
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
             if (d.string(forKey: "rfm1.mode") ?? "core") == "core" { p.setMode(.core) }
@@ -72,8 +74,8 @@ struct RemoteFM1App: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let controller, let player, let library, let store, let midi {
-                    MainScreen(controller: controller, player: player, library: library, catalog: store, midi: midi)
+                if let controller, let player, let library, let store, let midi, let battery {
+                    MainScreen(controller: controller, player: player, library: library, catalog: store, midi: midi, battery: battery)
                         .task { if coreTest { await CoreTest(controller: controller, player: player).run() } }
                         .onChange(of: player.mode) { _, m in
                             UserDefaults.standard.set(m.rawValue, forKey: "rfm1.mode")
@@ -96,6 +98,8 @@ struct RemoteFM1App: App {
         }
         .onChange(of: phase) { _, p in
             if p == .background, let player { Self.saveInBackground(player) }
+            if p == .background, !coreTest { battery?.enteredBackground() }     // (the battery: stop when the setting says)
+            if p == .active { battery?.becameActive() }
             if p == .active, let library, let player {          // (files added in the Files app meanwhile)
                 library.sync()
                 player.catalogChanged()

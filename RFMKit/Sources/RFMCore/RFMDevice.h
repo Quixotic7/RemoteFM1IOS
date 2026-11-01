@@ -9,6 +9,7 @@
 //
 // Threading: all calls on one thread at a time (the core's), as core-api/fm1core.h requires.
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <utility>
@@ -56,6 +57,8 @@ public:
     using Between = std::function<void(uint32_t ms, bool frame)>;
     void run_ms();
     void set_between(Between b) { between_ = std::move(b); }
+    // (the battery) the screen's frame() every this many device ms (15 by default; slower when nobody sees it)
+    void set_frame_ms(uint32_t ms) { frame_ms_.store(ms < 15u ? 15u : ms, std::memory_order_relaxed); }
     uint32_t take_s16(int16_t *stereo, uint32_t max_frames);
     void discard() { ring_r_ = ring_w_; }   // drop what nobody took (the timer clock)
     // n host frames at host_rate (the device runs as far as needed; bypassed at exactly 44100)
@@ -78,6 +81,7 @@ private:
     CoreBackend &b_;
     bool booted_ = false;
     uint32_t dev_ms_ = 0, last_frame_ = 0;
+    std::atomic<uint32_t> frame_ms_{15};
     uint64_t frames_done_ = 0;
     int32_t enc_total_[FM1P_NE - 1] = {};
     int16_t ring_[RING * 2];

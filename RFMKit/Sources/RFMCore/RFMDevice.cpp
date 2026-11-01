@@ -69,7 +69,7 @@ void CoreDevice::run_ms()
 {
     const uint32_t ms = dev_ms_++;
     b_.tick(ms);
-    const bool frame = ms == 0 || ms - last_frame_ >= 15u;
+    const bool frame = ms == 0 || ms - last_frame_ >= frame_ms_.load(std::memory_order_relaxed);
     if (between_)
         between_(ms, frame);
     if (frame) {

@@ -423,6 +423,48 @@ public final class CorePlayer {
     /// the app goes to the background (the clock keeps running with the audio)
     public func didEnterBackground() async { await saveNow() }
 
+    // MARK: the battery (the app's background policy)
+
+    /// stopped to save the battery (in the background): the core kept, its clock and the sound off
+    public private(set) var suspended = false
+
+    /// what the background policy looks at: the device clock, the last sound, and a count that moves with any input
+    /// (keys, panel events, MIDI)
+    public struct Activity: Equatable, Sendable {
+        public var devMs: UInt32 = 0, lastSoundMs: UInt32 = 0, inputs: UInt64 = 0
+    }
+
+    public var activity: Activity {
+        var r = rfme_status_t()
+        rfme_status(e, &r)
+        return Activity(devMs: r.dev_ms, lastSoundMs: r.last_sound_ms,
+                        inputs: UInt64(r.keys_pressed) + UInt64(r.events_applied) + UInt64(r.midi_in) + UInt64(r.midi_to_core))
+    }
+
+    /// the firmware saved, its clock and the sound stopped, the audio session let go: iOS may suspend the app
+    public func suspendForBattery(_ why: String) async {
+        guard !suspended, mode == .core else { return }
+        await saveNow()
+        suspended = true
+        rfme_set_clock(e, Int32(RFME_CLOCK_NONE))
+        stopAudio()
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
+        log.info("battery: stopped in the background (\(why, privacy: .public))")
+    }
+
+    /// (the battery) how often the firmware redraws its screen: 15 ms normally, slower when nobody sees it
+    public func setFrameMs(_ ms: UInt32) { rfme_set_frame_ms(e, ms) }
+
+    /// back from a battery stop: the clock and the sound as before
+    public func resumeFromBattery() {
+        guard suspended else { return }
+        suspended = false
+        if mode == .core { applyClock() }
+        log.info("battery: running again")
+    }
+
     /// Pattern mode, the audio stopped, the flash saved
     public func stop() {
         setMode(.pattern)

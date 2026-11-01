@@ -147,6 +147,9 @@ void rfme_midi_out_enable(rfme_t *e, int on);
 // it; any thread but the audio callback (serialised with rfme_midi_in). 1: queued; 0: not one SysEx message, or no
 // room now (try again shortly)
 int rfme_sysex_in(rfme_t *e, const uint8_t *data, uint32_t len);
+// (the battery) the core's screen drawn (frame()) every `ms` device ms: 15 by default, slower when nobody sees it
+// (the app in the background with no FM-1 showing it); any thread
+void rfme_set_frame_ms(rfme_t *e, uint32_t ms);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
 // played; 0: none. _at also gives its frame in that render (the same latency as the audio)
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);
@@ -270,6 +273,8 @@ typedef struct {
     char kind[8];               // (M7) the backend: "native" (a slot), "wasm" (an .rfm1 in wasm3), "" none
     // (M8) MIDI messages the learned map took; learn took; passed on to the core's midi_in (host and controller)
     uint32_t midi_mapped, midi_learned, midi_to_core;
+    // (the app's background policy) the device ms of the last chunk with sound above -60 dBFS (the audio clock's)
+    uint32_t last_sound_ms;
 } rfme_status_t;
 void rfme_status(rfme_t *e, rfme_status_t *st);
 void rfme_reset_render_stats(rfme_t *e);
