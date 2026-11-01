@@ -241,7 +241,7 @@ struct MainScreen: View {
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .fullScreenCover(isPresented: $showManager) {
-            if let c = player.current, let u = ManagerList.url(for: c.firmwareID) {
+            if let c = player.current, let u = ManagerList.editor(for: c.firmwareID, details: catalog.details) {
                 ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name), firmware: c.name) {
                     showManager = false
                 }
@@ -305,7 +305,7 @@ struct MainScreen: View {
         #if DEBUG
         if options.cartDemo { CartSender.shared(for: controller).addDemo() }
         if options.askReset { askReset = true }
-        if options.openManager { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showManager = true } }
+        if options.openManager, options.catalogGet == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showManager = true } }
         if options.safetyDemo { safetyDemo() }
         if options.statesDemo { statesDemo() }
         syncMirror()
@@ -342,6 +342,13 @@ struct MainScreen: View {
         }
         let f = await catalog.install(e)
         RFMShared.log("catalog").info("-catalogget \(id, privacy: .public): \(f?.file ?? catalog.failure, privacy: .public)")
+        // (with -openmanager: that firmware played, then its editor)
+        if options.openManager, let f {
+            player.catalogChanged()
+            player.select(f.key)
+            try? await Task.sleep(for: .seconds(3))
+            showManager = true
+        }
     }
 
     private func viewKey(_ s: SoundSource) -> String { "rfm1.view.\(s.rawValue)" }
@@ -571,8 +578,8 @@ struct MainScreen: View {
             }
             SheetSectionTitle("This firmware", top: 12)
             SheetList {
-                if let c = player.current, ManagerList.url(for: c.firmwareID) != nil {
-                    SheetRow("Open its manager", value: "presets, backups") { showManager = true }
+                if let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
+                    SheetRow("Open its editor", value: "presets, backups") { showManager = true }
                 }
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)

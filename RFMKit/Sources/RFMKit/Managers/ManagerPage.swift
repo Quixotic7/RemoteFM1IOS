@@ -28,7 +28,7 @@ public struct ManagerPage: View {
     public var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(firmware) manager").font(RFMFonts.ui(17, 700)).foregroundStyle(Palette.sheetText)
+                Text("\(firmware) editor").font(RFMFonts.ui(17, 700)).foregroundStyle(Palette.sheetText)
                 Spacer()
                 SheetButton("Done", accent: true, action: done)
             }
@@ -54,12 +54,14 @@ struct ManagerWebView: UIViewRepresentable {
         let c = WKWebViewConfiguration()
         let state = ["port": port, "firmware": firmware]
         let json = (try? JSONSerialization.data(withJSONObject: state)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        c.userContentController.addUserScript(WKUserScript(source: Self.playerScript.replacingOccurrences(of: "%STATE%", with: json),
+        c.userContentController.addUserScript(WKUserScript(source: Self.webMIDI.replacingOccurrences(of: "%STATE%", with: json),
                                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1mgr")
         let w = WKWebView(frame: .zero, configuration: c)
         w.isOpaque = false
         w.backgroundColor = .black
+        w.navigationDelegate = context.coordinator
+        w.uiDelegate = context.coordinator
         context.coordinator.attach(w)
         w.load(URLRequest(url: url))
         return w
@@ -72,25 +74,68 @@ struct ManagerWebView: UIViewRepresentable {
         coordinator.detach()
     }
 
-    /// the player's side of fm1-shim.js's protocol (web/managers/fm1-shim.js): hello -> state; midi both ways; bye
-    static let playerScript = """
-    (function () {
+    /// a whole Web MIDI for the page (after RemoteFM1's web/managers/fm1-shim.js, which the site's hosted pages load:
+    /// set as window.__fm1shim first so that one stands aside): one input and one output named as the firmware's USB
+    /// port, always connected, sysex granted; what the page sends goes to the app (fm1mgr), the app's
+    /// __fm1player.midi(list) comes in on the input. Any editor page works, the site's copies and the authors' own
+    static let webMIDI = """
+    (function (G) {
       "use strict";
-      const CH = "remotefm1-managers", pid = "app-" + Math.random().toString(36).slice(2, 10), state = %STATE%;
-      const bc = new BroadcastChannel(CH);
-      const send = (m) => bc.postMessage(Object.assign({ __fm1mgr: 1, from: "player", pid }, m));
-      bc.onmessage = (e) => {
-        const m = e.data;
-        if (!m || m.__fm1mgr !== 1 || m.from === "player") return;
-        if (m.type === "hello") send({ type: "state", sid: m.sid, connected: true, port: state.port, firmware: state.firmware, engine: "native" });
-        else if (m.type === "midi" && m.bytes) window.webkit.messageHandlers.fm1mgr.postMessage(Array.from(m.bytes));
-      };
-      window.__fm1player = { midi(list) { for (const b of list) send({ type: "midi", sid: "*", bytes: Uint8Array.from(b) }); } };
-      window.addEventListener("pagehide", () => send({ type: "bye", sid: "*" }));
-    })();
+      if (G.__fm1app) return;
+      const state = %STATE%, NAME = state.port || "FM-1";
+      const post = (bytes) => { try { G.webkit.messageHandlers.fm1mgr.postMessage(Array.from(bytes)); } catch (_) {} };
+      const msgEvent = (data) => { try { return new MessageEvent("midimessage", { data }); } catch (_) {
+        const e = new Event("midimessage"); Object.defineProperty(e, "data", { value: data }); return e; } };
+      const connEvent = (port) => { const e = new Event("statechange"); Object.defineProperty(e, "port", { value: port }); return e; };
+      class Port extends EventTarget {
+        constructor(type, id) { super(); this._type = type; this._id = id; this._conn = "closed"; this._onstate = null;
+          this.addEventListener("statechange", (e) => { if (typeof this._onstate === "function") this._onstate.call(this, e); }); }
+        get id() { return this._id; } get name() { return NAME; } get manufacturer() { return "RemoteFM1"; }
+        get version() { return ""; } get type() { return this._type; } get state() { return "connected"; }
+        get connection() { return this._conn; }
+        get onstatechange() { return this._onstate; } set onstatechange(f) { this._onstate = f; }
+        open() { if (this._conn !== "open") { this._conn = "open"; changed(this); } return Promise.resolve(this); }
+        close() { if (this._conn !== "closed") { this._conn = "closed"; changed(this); } return Promise.resolve(this); }
+      }
+      class Input extends Port {
+        constructor() { super("input", "remotefm1-in"); this._onmsg = null;
+          super.addEventListener("midimessage", (e) => { if (typeof this._onmsg === "function") this._onmsg.call(this, e); }); }
+        get onmidimessage() { return this._onmsg; } set onmidimessage(f) { this._onmsg = f; if (f) this.open(); }
+        addEventListener(t, f, o) { super.addEventListener(t, f, o); if (t === "midimessage") this.open(); }
+      }
+      class Output extends Port {
+        constructor() { super("output", "remotefm1-out"); }
+        send(data, ts) {
+          const bytes = Uint8Array.from(data || [], (v) => { if (!Number.isInteger(v) || v < 0 || v > 255) throw new TypeError("MIDIOutput.send: bytes 0..255"); return v; });
+          if (!bytes.length) return; if (this._conn !== "open") this.open();
+          const delay = typeof ts === "number" && ts > 0 ? ts - performance.now() : 0;
+          if (delay > 1) setTimeout(() => post(bytes), delay); else post(bytes);
+        }
+        clear() {}
+      }
+      const input = new Input(), output = new Output(), accesses = new Set();
+      const inputs = new Map([[input.id, input]]), outputs = new Map([[output.id, output]]);
+      class Access extends EventTarget {
+        constructor() { super(); this._onstate = null;
+          this.addEventListener("statechange", (e) => { if (typeof this._onstate === "function") this._onstate.call(this, e); }); }
+        get inputs() { return inputs; } get outputs() { return outputs; } get sysexEnabled() { return true; }
+        get onstatechange() { return this._onstate; } set onstatechange(f) { this._onstate = f; }
+      }
+      function changed(port) { port.dispatchEvent(connEvent(port)); for (const a of accesses) a.dispatchEvent(connEvent(port)); }
+      function requestMIDIAccess() { const a = new Access(); accesses.add(a); return Promise.resolve(a); }
+      Object.defineProperty(G.navigator, "requestMIDIAccess", { value: requestMIDIAccess, configurable: true, writable: true });
+      // (pages that ask first: midi and midi-with-sysex are granted)
+      if (G.navigator.permissions && G.navigator.permissions.query) {
+        const q = G.navigator.permissions.query.bind(G.navigator.permissions);
+        G.navigator.permissions.query = (d) => (d && d.name === "midi") ? Promise.resolve({ state: "granted", onchange: null }) : q(d);
+      }
+      G.__fm1player = { midi(list) { if (input._conn !== "open") return; for (const b of list) input.dispatchEvent(msgEvent(Uint8Array.from(b))); } };
+      G.__fm1app = true;
+      G.__fm1shim = { app: true, manager: state.firmware, framed: false };   // (the site's fm1-shim.js: stand aside)
+    })(window);
     """
 
-    @MainActor final class Bridge: NSObject, WKScriptMessageHandler {
+    @MainActor final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
         let player: CorePlayer
         private weak var web: WKWebView?
         private var poll: Task<Void, Never>?
@@ -127,6 +172,53 @@ struct ManagerWebView: UIViewRepresentable {
             guard let a = message.body as? [Any] else { return }
             let bytes = a.compactMap { ($0 as? NSNumber)?.intValue }.filter { (0...255).contains($0) }.map { UInt8($0) }
             Task { @MainActor in self.enqueue(bytes) }
+        }
+
+        // MARK: downloads (an editor's backups, presets) and new windows
+
+        func webView(_: WKWebView, decidePolicyFor a: WKNavigationAction) async -> WKNavigationActionPolicy {
+            a.shouldPerformDownload ? .download : .allow
+        }
+
+        func webView(_: WKWebView, decidePolicyFor r: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+            r.canShowMIMEType ? .allow : .download
+        }
+
+        func webView(_: WKWebView, navigationAction _: WKNavigationAction, didBecome d: WKDownload) { d.delegate = self }
+        func webView(_: WKWebView, navigationResponse _: WKNavigationResponse, didBecome d: WKDownload) { d.delegate = self }
+
+        private var saving: [ObjectIdentifier: URL] = [:]
+
+        func download(_ d: WKDownload, decideDestinationUsing _: URLResponse, suggestedFilename name: String) async -> URL? {
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("editor-\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(name.isEmpty ? "download" : name)
+            saving[ObjectIdentifier(d)] = url
+            return url
+        }
+
+        func downloadDidFinish(_ d: WKDownload) {
+            guard let url = saving.removeValue(forKey: ObjectIdentifier(d)) else { return }
+            share(url)
+        }
+
+        func download(_ d: WKDownload, didFailWithError _: Error, resumeData _: Data?) { saving[ObjectIdentifier(d)] = nil }
+
+        /// the file the editor saved: the share sheet (Save to Files, AirDrop, ...)
+        private func share(_ url: URL) {
+            guard let w = web, var top = w.window?.rootViewController else { return }
+            while let p = top.presentedViewController { top = p }
+            let vc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            vc.popoverPresentationController?.sourceView = w
+            vc.popoverPresentationController?.sourceRect = CGRect(x: w.bounds.midX, y: w.bounds.midY, width: 1, height: 1)
+            top.present(vc, animated: true)
+        }
+
+        /// a link to a new window: in Safari (the editor's own site, its docs)
+        func webView(_: WKWebView, createWebViewWith _: WKWebViewConfiguration, for a: WKNavigationAction,
+                     windowFeatures _: WKWindowFeatures) -> WKWebView? {
+            if let u = a.request.url, u.scheme == "https" || u.scheme == "http" { UIApplication.shared.open(u) }
+            return nil
         }
 
         // (in the page's order: a SysEx waiting for room must not be overtaken)

@@ -116,11 +116,29 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     public var license = ""
     public var sourceURL = ""
     public var site = ""
+    /// (the site catalog's `editor`) the firmware's own web editor / manager page; "" none
+    public var editor = ""
     public var repo = ""                    // "owner/name" on GitHub
     public var beta = false
     public var downloads: [Download] = []   // the same version from each feed, the first tried first
 
     public init(id: String) { self.id = id }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, version, author, category, summary, about, license, sourceURL, site, editor, repo, beta, downloads
+    }
+
+    /// (a cache from an older build lacks the newer fields: those take their defaults)
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        func s(_ k: CodingKeys) -> String { (try? c.decodeIfPresent(String.self, forKey: k)) ?? nil ?? "" }
+        name = s(.name); version = s(.version); author = s(.author); category = s(.category); summary = s(.summary)
+        about = s(.about); license = s(.license); sourceURL = s(.sourceURL); site = s(.site); editor = s(.editor)
+        repo = s(.repo)
+        beta = (try? c.decodeIfPresent(Bool.self, forKey: .beta)) ?? nil ?? false
+        downloads = (try? c.decodeIfPresent([Download].self, forKey: .downloads)) ?? nil ?? []
+    }
 
     public var size: Int { downloads.first { $0.size > 0 }?.size ?? 0 }
     public var sha256: String { downloads.first { !$0.sha256.isEmpty }?.sha256 ?? "" }
@@ -135,7 +153,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     mutating func fill(from o: AvailableFirmware, sameVersion: Bool) {
         func take(_ k: WritableKeyPath<AvailableFirmware, String>) { if self[keyPath: k].isEmpty { self[keyPath: k] = o[keyPath: k] } }
         take(\.name); take(\.author); take(\.category); take(\.summary); take(\.about); take(\.license)
-        take(\.site); take(\.repo)
+        take(\.site); take(\.repo); take(\.editor)
         if sourceURL.isEmpty {
             sourceURL = sameVersion || o.repo.isEmpty ? o.sourceURL : "https://github.com/\(o.repo)"
         }
@@ -207,6 +225,7 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                 e.license = f.license ?? ""
                 e.sourceURL = f.source ?? ""
                 e.site = f.site ?? ""
+                e.editor = f.editor ?? ""
                 e.repo = f.repo ?? ""
                 e.beta = f.beta ?? false
                 details[f.id] = e
@@ -307,7 +326,7 @@ private struct SiteJSON: Decodable {
 
     struct Item: Decodable {
         var id: String
-        var name, version, author, authorFull, category, tag, what, blurb, license, source, repo, site: String?
+        var name, version, author, authorFull, category, tag, what, blurb, license, source, repo, site, editor: String?
         var beta: Bool?
         var rfm1: RFM1?
     }

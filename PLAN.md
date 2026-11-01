@@ -727,3 +727,11 @@ firmware deletes the older .rfm1. Built in this order, each step usable by itsel
    every clock, handed out at once without the audio clock) back to the page as whole messages (`UsbMidiDecoder`).
    Opening it keeps a "before manager write" safety copy. Seen on the simulator: ChoralRoot's device manager
    connected and read the running firmware. Not in the AU.
+   *Every firmware's editor (2026-10-31, the owner's word):* "Open its editor" for every firmware whose catalog entry
+   has an `editor` (about 40: SLOOP, Clipper, KARMA, DUELL, Skiff, ...), built in or downloaded (.rfm1): the site's
+   hosted copy when there is one, else the author's own page. The injected script is now a whole Web MIDI (one port
+   named as the firmware's USB port, always connected, sysex and the midi permission granted; it sets
+   window.__fm1shim so the site's own shim stands aside). An editor's downloads (backups, presets) go to the share
+   sheet (Save to Files); links to new windows open in Safari. Seen on the simulator: DUELL's own editor connected to
+   the DUELL .rfm1 by itself and read its parts. Some editors may still want a real FM-1 (installers) or Chrome-only
+   features.

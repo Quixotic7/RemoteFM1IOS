@@ -63,4 +63,27 @@ final class ManagerTests: XCTestCase {
         }
         return out
     }
+
+    /// the page: the site's hosted copy first, else the catalog's own editor link (https only)
+    func testEditorPage() {
+        var sloop = AvailableFirmware(id: "sloop")
+        sloop.editor = "https://isod89.github.io/sloop-fm1/webapp/editor/"
+        var bad = AvailableFirmware(id: "old")
+        bad.editor = "http://example.com/editor"
+        var felucca = AvailableFirmware(id: "felucca")
+        felucca.editor = "https://hugelton.github.io/Felucca/webapp/editor/"
+        let d = ["sloop": sloop, "old": bad, "felucca": felucca]
+        XCTAssertEqual(ManagerList.editor(for: "sloop", details: d)?.absoluteString, sloop.editor)
+        XCTAssertEqual(ManagerList.editor(for: "felucca", details: d)?.absoluteString, "https://remotefm1.com/managers/felucca/")
+        XCTAssertNil(ManagerList.editor(for: "old", details: d), "not https")
+        XCTAssertNil(ManagerList.editor(for: "fizz", details: d))
+    }
+
+    /// an older cache without `editor` still reads
+    func testOldCacheEntryDecodes() throws {
+        let json = #"{"id":"amb","name":"AMB-1","version":"1.3","downloads":[]}"#
+        let e = try JSONDecoder().decode(AvailableFirmware.self, from: Data(json.utf8))
+        XCTAssertEqual(e.name, "AMB-1")
+        XCTAssertEqual(e.editor, "")
+    }
 }

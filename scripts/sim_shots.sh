@@ -81,6 +81,7 @@ PHONE_SHOTS=(
     "phone-sheet-data|-source phone -view full -sheet -protector on -orientation portrait"
     "phone-firmware-panel|-source phone -view full -sheetpage firmware -orientation portrait"
     "phone-manager@14|-source phone -view full -core choralroot -openmanager -orientation portrait"
+    "phone-editor-duell@30|-source phone -view full -catalogget duell -openmanager -orientation portrait"
     "phone-firmware-thumbs@40|-source phone -view full -sheetpage firmware -makethumbs -orientation portrait"
     "phone-firmware-tiles|-source phone -view full -sheetpage firmware -sheetscroll builtin -orientation portrait"
     "phone-display-alone|-source phone -view full -displayalone -orientation portrait"

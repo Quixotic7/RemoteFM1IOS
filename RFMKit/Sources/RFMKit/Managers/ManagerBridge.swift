@@ -37,6 +37,14 @@ public enum ManagerList {
     }
 
     public static func port(for firmwareID: String, name: String) -> String { ports[firmwareID] ?? name }
+
+    /// the editor page to open: the site's hosted copy (its fixes, the site's shim) when there is one, else the
+    /// firmware's own editor from the catalog (`editor`, https only); nil: none known
+    public static func editor(for firmwareID: String, details: [String: AvailableFirmware]) -> URL? {
+        if let u = url(for: firmwareID) { return u }
+        guard let s = details[firmwareID]?.editor, let u = URL(string: s), u.scheme == "https" else { return nil }
+        return u
+    }
 }
 
 /// USB-MIDI event packets (cable 0, the CIN in the low nibble, bytes 1..3 above it: rfme_midi_out_take's packing) back
