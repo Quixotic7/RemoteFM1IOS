@@ -391,6 +391,39 @@ final class FantasyCFWTests: XCTestCase {
         XCTAssertEqual(x.r, 16, "the app's folder")
     }
 
+    // MARK: the app's folder
+
+    /// the AU's copy: audio/ and code/ (new, changed, removed), data/ left alone; the manifest's words
+    func testFolderCopyForTheAU() throws {
+        let app = root.appendingPathComponent("app"), au = root.appendingPathComponent("group")
+        RemoteFM1Folder.use(app)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: app.appendingPathComponent("README.txt").path))
+        RemoteFM1Folder.prepare("ripple", in: app)
+        XCTAssertEqual(RemoteFM1Folder.codeFiles("ripple", in: app), 0)
+        func w(_ base: URL, _ p: String, _ s: String) throws {
+            let u = base.appendingPathComponent(p)
+            try FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(s.utf8).write(to: u)
+        }
+        try w(app, "audio/kick.wav", "kick")
+        try w(app, "code/ripple/droplets/a.lua", "a")
+        try w(app, "data/ripple/app-only.bin", "x")
+        try w(au, "data/ripple/au-save.bin", "au")
+        try w(au, "audio/old.wav", "old")
+        XCTAssertEqual(RemoteFM1Folder.codeFiles("ripple", in: app), 1)
+        var r = RemoteFM1Folder.copy(from: app, to: au)
+        XCTAssertEqual(r, .init(copied: 2, removed: 1))
+        XCTAssertEqual(try String(contentsOf: au.appendingPathComponent("code/ripple/droplets/a.lua"), encoding: .utf8), "a")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: au.appendingPathComponent("audio/old.wav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: au.appendingPathComponent("data/ripple/au-save.bin").path), "data/ stays the AU's")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: au.appendingPathComponent("data/ripple/app-only.bin").path))
+        r = RemoteFM1Folder.copy(from: app, to: au)
+        XCTAssertFalse(r.changed, "nothing new")
+        try w(app, "code/ripple/droplets/a.lua", "a, longer")
+        XCTAssertEqual(RemoteFM1Folder.copy(from: app, to: au).copied, 1, "a changed file")
+        XCTAssertEqual(FantasyTag.folders(["audio": "r", "code": "r", "data": "rw"]), "reads audio and code, saves in data")
+    }
+
     // MARK: fm1-ripple
 
     /// ripple-0.4 with FM1VST's test folder: the droplets read, a1tone started (PLAY), the chord sounds

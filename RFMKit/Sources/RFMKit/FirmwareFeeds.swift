@@ -130,12 +130,14 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     public var image = ""
     public var repo = ""                    // "owner/name" on GitHub
     public var beta = false
+    /// a Fantasy CFW (the catalogs' "virtual"; the file's manifest is the authority once installed)
+    public var isVirtual = false
     public var downloads: [Download] = []   // the same version from each feed, the first tried first
 
     public init(id: String) { self.id = id }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, version, author, category, summary, about, license, sourceURL, site, editor, image, repo, beta, downloads
+        case id, name, version, author, category, summary, about, license, sourceURL, site, editor, image, repo, beta, isVirtual, downloads
     }
 
     /// (a cache from an older build lacks the newer fields: those take their defaults)
@@ -148,6 +150,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         image = s(.image)
         repo = s(.repo)
         beta = (try? c.decodeIfPresent(Bool.self, forKey: .beta)) ?? nil ?? false
+        isVirtual = (try? c.decodeIfPresent(Bool.self, forKey: .isVirtual)) ?? nil ?? false
         downloads = (try? c.decodeIfPresent([Download].self, forKey: .downloads)) ?? nil ?? []
     }
 
@@ -169,6 +172,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
             sourceURL = sameVersion || o.repo.isEmpty ? o.sourceURL : "https://github.com/\(o.repo)"
         }
         if sameVersion && o.beta { beta = true }
+        if o.isVirtual { isVirtual = true }
     }
 
     /// RemoteFM1FW's catalog entry's card text and image over what another feed said
@@ -176,6 +180,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         if !c.summary.isEmpty { summary = c.summary }
         if !c.about.isEmpty { about = c.about }
         if !c.image.isEmpty { image = c.image }
+        if c.isVirtual { isVirtual = true }
     }
 }
 
@@ -265,6 +270,7 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                 e.editor = f.editor ?? ""
                 e.repo = f.repo ?? ""
                 e.beta = f.beta ?? false
+                e.isVirtual = f.virtual ?? false
                 details[f.id] = e
                 guard let r = f.rfm1, let path = r.url ?? r.file, let url = URL(string: path, relativeTo: feed.url)?.absoluteURL
                 else { continue }
@@ -305,6 +311,7 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                 e.about = f.what ?? ""
                 e.site = f.site ?? ""
                 e.beta = f.beta ?? false
+                e.isVirtual = f.virtual ?? false
                 if let i = f.image, let u = URL(string: i, relativeTo: feed.url)?.absoluteURL, u.scheme == "https" {
                     e.image = u.absoluteString
                 }
@@ -407,7 +414,7 @@ private struct SiteJSON: Decodable {
     struct Item: Decodable {
         var id: String
         var name, version, author, authorFull, category, tag, what, blurb, license, source, repo, site, editor: String?
-        var beta: Bool?
+        var beta, virtual: Bool?
         var rfm1: RFM1?
     }
 
@@ -438,6 +445,6 @@ private struct FWCatalogJSON: Decodable {
 
     struct Item: Decodable {
         var name, tag, what, category, author, site, image: String?
-        var beta: Bool?
+        var beta, virtual: Bool?
     }
 }

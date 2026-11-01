@@ -594,6 +594,7 @@ struct MainScreen: View {
                 }
                 .padding(.top, 12)
                 SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.status.booted ? " · running" : "")")
+                if c.isVirtual { fantasyNote(c) }
             }
             SheetSectionTitle("This firmware", top: 12)
             SheetList {
@@ -689,6 +690,23 @@ struct MainScreen: View {
     }
 
     /// the selected firmware's safety copies (PLAN.md section 18), Restore asked inline
+    /// (Fantasy CFW) what it does in the RemoteFM1 folder and where that is; a prompt when its code folder is empty
+    @ViewBuilder private func fantasyNote(_ c: CoreInfo) -> some View {
+        let id = c.firmwareID, where_ = "Files › On My \(UIDevice.current.model) › RemoteFM1 › RemoteFM1"
+        let empty = c.folders["code"] != nil && RemoteFM1Folder.codeFiles(id) == 0
+        if c.folders.isEmpty {
+            SheetNote("A Fantasy CFW: it runs only in RemoteFM1, never on an FM-1.")
+        } else {
+            SheetNote("A Fantasy CFW: it runs only in RemoteFM1, never on an FM-1. It \(FantasyTag.folders(c.folders)) in "
+                      + "the RemoteFM1 folder (\(where_)): audio/ for everyone, code/\(id)/ and data/\(id)/ for it.")
+                .task(id: id) { RemoteFM1Folder.prepare(id) }
+            if empty {
+                SheetNote("Nothing in code/\(id)/ yet. Put its files there with the Files app"
+                          + (id == "ripple" ? " (droplets/*.lua)" : "") + ", then come back to RemoteFM1.", color: .orange)
+            }
+        }
+    }
+
     private var safetyCopiesPage: some View {
         SheetPage("Safety copies", backTitle: dataBackTitle, back: { askRestore = nil; page = dataBack }) {
             SheetSectionTitle(player.current.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 12)

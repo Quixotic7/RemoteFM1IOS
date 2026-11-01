@@ -82,6 +82,7 @@ struct CatalogDetailPage: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(e.version).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetMuted2)
                 if e.beta { BetaTag() }
+                if e.isVirtual { FantasyTag() }
                 if !e.author.isEmpty {
                     Text("· \(e.author)").font(RFMFonts.ui(15, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(1)
                 }
@@ -228,6 +229,7 @@ struct CatalogRow: View {
                         Text(item.displayName).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
                         Text(item.version).font(RFMFonts.ui(13, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(1)
                         if item.beta { BetaTag() }
+                        if item.isVirtual { FantasyTag() }
                     }
                     Text(CatalogText.byline(item)).font(RFMFonts.ui(12, 500)).foregroundStyle(Palette.sheetMuted)
                         .lineLimit(1)

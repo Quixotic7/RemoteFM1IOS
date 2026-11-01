@@ -760,3 +760,19 @@ suspends the app; it runs again when the app comes back. The lock screen shows i
 and Pause / Stop stop it there. In the background with no FM-1 showing the screen, the firmware redraws every 250 ms
 instead of 15 (`rfme_set_frame_ms`; FIZZ: 4x fewer screen writes); the faceplate's display link pauses by itself.
 Not measured on a device yet (Xcode's energy gauge over a locked hour would say what's left).
+
+## 20. Fantasy CFW (2026-11-01, step 1)
+
+Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, up to 512 MiB of memory, and with
+`"fs1"` the RemoteFM1 folder through `rfm1_host_1`.
+
+- The loader (RFMWasmCore.cpp) checks virtual / needs / folders as the web player does. A memory check runs before
+  an instance is made, and wasm3 allocates memory lazily (CWasm3/README.md's patches).
+- The file API (RFMFileApi.h/.cpp) is platform-neutral, for the Android port. Answers are copied in before
+  tick, frame, idle and audio.
+- The folder (RemoteFM1Folder.swift): `Documents/RemoteFM1` for the app (Files shows it). `audio/` and `code/` are
+  copied into the App Group's `RemoteFM1/` for the AU at launch and when the app returns to the front.
+- The app shows a FANTASY CFW tag on the tile, the card and Get firmware, and a folder note with a prompt when
+  `code/<id>/` is empty.
+- Step 2, not done: a File Provider, so the App Group folder itself shows in Files and the AU's `data/` is shared.
+

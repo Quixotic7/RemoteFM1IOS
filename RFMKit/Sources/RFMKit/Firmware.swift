@@ -162,6 +162,17 @@ public final class FirmwareCatalog: @unchecked Sendable {
     }
 
     /// the entries as catalog cores
+    /// (Fantasy CFW) the manifest's "virtual" and "folders" (the loader checked them)
+    nonisolated static func fantasy(_ path: String) -> (Bool, [String: String]) {
+        var buf = [CChar](repeating: 0, count: 16384)
+        guard rfmw_text(path, "manifest", &buf, UInt32(buf.count)) > 0,
+              let j = try? JSONSerialization.jsonObject(with: Data(String(cString: buf).utf8)) as? [String: Any]
+        else { return (false, [:]) }
+        let folders = (j["folders"] as? [String: String] ?? [:]).filter { ["audio", "code", "data"].contains($0.key) }
+        let needsFS = (j["needs"] as? [String] ?? []).contains("fs1")
+        return (j["virtual"] as? Bool ?? false, needsFS ? folders : [:])
+    }
+
     public func cores() -> [CoreInfo] {
         entries.compactMap { f in
             guard let p = path(f.sha256) else { return nil }
@@ -175,6 +186,7 @@ public final class FirmwareCatalog: @unchecked Sendable {
             c.path = p
             c.fileSize = f.fileSize
             c.fileName = f.file
+            (c.isVirtual, c.folders) = Self.fantasy(p)
             return c
         }
         .sorted { ($0.name.lowercased(), $0.version, $0.sha256) < ($1.name.lowercased(), $1.version, $1.sha256) }

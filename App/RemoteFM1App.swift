@@ -45,6 +45,7 @@ struct RemoteFM1App: App {
         let c = RemoteController(backend: backend, demoInput: backend.isFake, lease: PanelSession.Config(),
                                  identity: id, ownerName: "RemoteFM1 app")
         _controller = State(initialValue: c)
+        RemoteFM1Folder.use(RemoteFM1Folder.app)    // (Fantasy CFW: before any firmware loads)
         let lib = FirmwareLibrary()
         lib.sync()                              // (before the player: the catalog lists the imported files)
         _library = State(initialValue: lib)
@@ -104,12 +105,26 @@ struct RemoteFM1App: App {
                 library.sync()
                 player.catalogChanged()
             }
+            if p == .active { Self.syncFolder() }
+        }
+    }
+
+    /// (Fantasy CFW) the RemoteFM1 folder: Documents/RemoteFM1 for the app's firmwares; its audio/ and code/ copied to
+    /// the App Group's for the AU; running firmwares told it may have changed
+    static func syncFolder() {
+        let app = RemoteFM1Folder.app
+        DispatchQueue.global(qos: .utility).async {
+            if let g = RemoteFM1Folder.group {
+                let r = RemoteFM1Folder.copy(from: app, to: g)
+                if r.changed { RFMShared.log("folder").info("RemoteFM1 folder: \(r.copied) copied, \(r.removed) removed for the AU") }
+            }
+            RemoteFM1Folder.changed()
         }
     }
 
     /// an .rfm1 opened from Files, Safari's downloads or AirDrop: copied into Documents/Firmware and selected
     @MainActor static func open(_ url: URL, _ library: FirmwareLibrary, _ player: CorePlayer) {
-        guard url.isFileURL, !["syx", StateFile.fileExtension].contains(url.pathExtension.lowercased()) else { return }   // (.syx, .rfm1state: MainScreen)
+        guard url.isFileURL, !["syx", StateFile.fileExtension, TransferFile.fileExtension].contains(url.pathExtension.lowercased()) else { return }   // (.syx, .rfm1state, .rfm1transfer: MainScreen)
         do {
             let f = try library.importFile(url)
             player.catalogChanged()

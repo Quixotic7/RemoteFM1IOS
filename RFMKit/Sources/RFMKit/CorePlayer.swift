@@ -40,6 +40,10 @@ public struct CoreInfo: Sendable, Equatable, Identifiable {
     public var coreID = ""                      // the firmware's own id ("" = id: a built-in core)
     public var sha256 = "", path = "", fileName = ""   // an imported file: its hash, its mirrored path, its name
     public var fileSize = 0
+    /// a Fantasy CFW (its manifest's "virtual": runs only in RemoteFM1 hosts), and what its manifest's "folders" let
+    /// it do in the RemoteFM1 folder ("audio": "r", "data": "rw"; empty: it doesn't use the folder)
+    public var isVirtual = false
+    public var folders: [String: String] = [:]
 
     public var imported: Bool { kind == "wasm" }
     /// the firmware's own id (a saved state's, the flash file's)

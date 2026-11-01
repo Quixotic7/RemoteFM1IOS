@@ -94,6 +94,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
 
     public init(componentDescription: AudioComponentDescription, options: AudioComponentInstantiationOptions = [],
                 config: Config) throws {
+        // (Fantasy CFW) the extension's RemoteFM1 folder: the App Group's copy (the app's Documents aren't readable here)
+        if Bundle.main.bundleURL.pathExtension == "appex", let g = RemoteFM1Folder.group { RemoteFM1Folder.use(g) }
         let k = rfmk_new()!
         kernel = k
         let ref = KernelRef(p: k)

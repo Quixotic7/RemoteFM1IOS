@@ -54,6 +54,30 @@ public struct FirmwareThumb: View {
     }
 }
 
+/// "FANTASY CFW": a firmware that runs only in RemoteFM1 hosts (its manifest's "virtual"), never on an FM-1
+public struct FantasyTag: View {
+    var small = false
+    public init(small: Bool = false) { self.small = small }
+    public var body: some View {
+        Text(small ? "FANTASY" : "FANTASY CFW").font(RFMFonts.ui(small ? 8 : 9, 700)).tracking(0.8)
+            .foregroundStyle(Color(red: 0.62, green: 0.5, blue: 1))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Capsule().fill(Color.black.opacity(small ? 0.6 : 0)))
+            .overlay(Capsule().strokeBorder(Color(red: 0.62, green: 0.5, blue: 1).opacity(0.8), lineWidth: 1))
+            .fixedSize()
+            .accessibilityLabel("Fantasy CFW")
+    }
+
+    /// what its manifest's "folders" let it do, in words ("reads your audio and code folders, saves in data")
+    public static func folders(_ f: [String: String]) -> String {
+        let reads = ["audio", "code", "data"].filter { f[$0] == "r" || (f[$0] == "rw" && $0 != "data") }
+        var parts: [String] = []
+        if !reads.isEmpty { parts.append("reads " + reads.joined(separator: " and ")) }
+        if f["data"] == "rw" { parts.append("saves in data") }
+        return parts.joined(separator: ", ")
+    }
+}
+
 /// the firmware list as a grid of boxes
 public struct FirmwareTileGrid: View {
     let cores: [CoreInfo]
@@ -83,6 +107,9 @@ public struct FirmwareTileGrid: View {
                 FirmwareThumb(id: c.firmwareID, name: c.name)
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(on ? Palette.sheetAccent : Palette.sheetBorder, lineWidth: on ? 2.5 : 1))
+                    .overlay(alignment: .bottomLeading) {
+                        if c.isVirtual { FantasyTag(small: true).padding(5) }
+                    }
                     .overlay(alignment: .topTrailing) {
                         if on {
                             Image(systemName: "checkmark.circle.fill").font(.system(size: 18, weight: .bold))
@@ -107,7 +134,7 @@ public struct FirmwareTileGrid: View {
                 Button(role: .destructive, action: del) { Label("Delete \(c.name) \(c.version)", systemImage: "trash") }
             }
         }
-        .accessibilityLabel("\(c.name) \(c.version)\(c.imported ? ", imported" : "")")
+        .accessibilityLabel("\(c.name) \(c.version)\(c.imported ? ", imported" : "")\(c.isVirtual ? ", Fantasy CFW" : "")")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
@@ -136,6 +163,7 @@ public struct FirmwareInfoCard: View {
                     Text(info.name).font(RFMFonts.title(19)).foregroundStyle(Palette.sheetText).lineLimit(2)
                     Text([info.version, running ? "running" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(RFMFonts.ui(13, 600)).foregroundStyle(Palette.sheetAccent)
+                    if info.fantasy { FantasyTag().padding(.vertical, 2) }
                     if !info.author.isEmpty {
                         Text("by \(info.author)").font(RFMFonts.ui(13, 500)).foregroundStyle(Palette.sheetMuted2).lineLimit(2)
                     }

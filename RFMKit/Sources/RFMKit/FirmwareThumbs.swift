@@ -151,6 +151,9 @@ public struct FirmwareInfo: Equatable, Sendable {
     public var id = "", name = "", version = "", author = "", tag = "", about = "", license = ""
     /// the firmware's source on GitHub (or wherever its manifest points); nil: none known
     public var source: URL?
+    /// a Fantasy CFW, and its manifest's "folders"
+    public var fantasy = false
+    public var folders: [String: String] = [:]
 
     public init() {}
 
@@ -161,6 +164,8 @@ public struct FirmwareInfo: Equatable, Sendable {
         i.name = c.name
         i.version = c.version
         i.license = c.license
+        i.fantasy = c.isVirtual
+        i.folders = c.folders
         let d = details[c.firmwareID] ?? details[c.id] ?? details[c.firmwareID.lowercased()]
         if let d {
             if i.name.isEmpty { i.name = d.displayName }
