@@ -218,7 +218,7 @@ struct MainScreen: View {
                 .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
             }
             if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone && !midi.learn.active {
-                FirmwareSidebar(cores: FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected),
+                FirmwareSidebar(cores: FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected, added: addedDates),
                                                               by: firmwareSort, updated: catalog.updated),
                                 selected: player.selected, open: $sidebarOpen,
                                 select: { id in
@@ -596,6 +596,9 @@ struct MainScreen: View {
         }
     }
 
+    /// when each imported file came (by SHA-256): of two of the same version, the lists show the later
+    private var addedDates: [String: Date] { Dictionary(library.files.map { ($0.sha256, $0.added) }, uniquingKeysWith: max) }
+
     /// the cores built into the app (Get firmware doesn't list them)
     private var builtIn: [CoreInfo] { player.cores.filter { !$0.imported } }
 
@@ -642,7 +645,7 @@ struct MainScreen: View {
     }
 
     private var firmwarePage: some View {
-        let shown = FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected),
+        let shown = FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected, added: addedDates),
                                            by: firmwareSort, updated: catalog.updated)
         let builtIn = shown.filter { !$0.imported }
         let imported = shown.filter(\.imported)

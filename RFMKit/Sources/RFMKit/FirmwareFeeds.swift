@@ -214,7 +214,11 @@ extension AvailableFirmware {
         let here = files.filter { $0.error == nil && ($0.coreID == id || shas.contains($0.sha256)) }
         if let f = here.first(where: { shas.contains($0.sha256) }) { return .installed(f.version) }
         guard let newest = here.max(by: { FirmwareVersion.less($0.version, $1.version) }) else { return .notInstalled }
-        return FirmwareVersion.less(newest.version, version) ? .update(newest.version) : .installed(newest.version)
+        if FirmwareVersion.less(newest.version, version) { return .update(newest.version) }
+        // the same version, another file: a rebuild (RemoteFM1FW keeps a firmware's own version when only the
+        // .rfm1 glue changed, e.g. the faster screen of 2026-11-02; the SHA-256 tells): offered as an update
+        if !shas.isEmpty, FirmwareVersion.compare(newest.version, version) == .orderedSame { return .update(newest.version) }
+        return .installed(newest.version)
     }
 
     /// a built-in core of this id, of this version or newer (not offered: the built-in one runs natively)

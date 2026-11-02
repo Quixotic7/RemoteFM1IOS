@@ -24,14 +24,17 @@ public enum FirmwareListing {
     static let usedKey = "firmware.lastUsed"
 
     /// the cores a newer version of the same firmware replaces in the lists: every older version, built in or
-    /// imported; of two of the same version, the built-in one stays (it runs natively), else the first
-    public static func superseded(_ cores: [CoreInfo]) -> Set<String> {
+    /// imported; of two of the same version, the built-in one stays (it runs natively), else the one added last (a
+    /// rebuild: RemoteFM1FW keeps the version when only the glue changed), else the first. added: by SHA-256
+    public static func superseded(_ cores: [CoreInfo], added: [String: Date] = [:]) -> Set<String> {
         var best: [String: CoreInfo] = [:]
         for c in cores {
             guard let b = best[c.firmwareID] else { best[c.firmwareID] = c; continue }
             switch FirmwareVersion.compare(c.version, b.version) {
             case .orderedDescending: best[c.firmwareID] = c
             case .orderedSame where b.imported && !c.imported: best[c.firmwareID] = c
+            case .orderedSame where b.imported && c.imported && (added[c.sha256] ?? .distantPast) > (added[b.sha256] ?? .distantPast):
+                best[c.firmwareID] = c
             default: break
             }
         }
@@ -39,8 +42,8 @@ public enum FirmwareListing {
     }
 
     /// the cores to list: each firmware's newest version (and the selected one)
-    public static func visible(_ cores: [CoreInfo], selected: String) -> [CoreInfo] {
-        let hide = superseded(cores)
+    public static func visible(_ cores: [CoreInfo], selected: String, added: [String: Date] = [:]) -> [CoreInfo] {
+        let hide = superseded(cores, added: added)
         return cores.filter { !hide.contains($0.id) || $0.id == selected }
     }
 

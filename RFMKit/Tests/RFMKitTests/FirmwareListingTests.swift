@@ -28,6 +28,12 @@ final class FirmwareListingTests: XCTestCase {
         XCTAssertEqual(FirmwareListing.visible(cores, selected: "felucca").map(\.id),
                        ["felucca", "rfm1:choralroot@0.29", "rfm1:rainbow@1.1.5"])
         XCTAssertEqual(FirmwareListing.visible(cores, selected: "rfm1:choralroot@0.28").count, 4, "the selected one stays listed")
+        // a rebuild of the same version (RemoteFM1FW keeps the version): the one added last is listed
+        var r1 = core("rfm1:rb-old", "rainbow", "1.1.5-rb", wasm: true), r2 = core("rfm1:rb-new", "rainbow", "1.1.5-rb", wasm: true)
+        r1.sha256 = "old"; r2.sha256 = "new"
+        let added = ["old": Date(timeIntervalSince1970: 1), "new": Date(timeIntervalSince1970: 2)]
+        XCTAssertEqual(FirmwareListing.visible([r1, r2], selected: "", added: added).map(\.id), ["rfm1:rb-new"])
+        XCTAssertEqual(FirmwareListing.visible([r2, r1], selected: "", added: added).map(\.id), ["rfm1:rb-new"])
     }
 
     func testSorting() {

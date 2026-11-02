@@ -142,9 +142,13 @@ struct CatalogDetailPage: View {
                             SheetButton("Install · \(CatalogText.size(e.size))", accent: true) { Task { await store.install(e) } }
                                 .disabled(store.progress != nil)
                         case .update(let v):
-                            SheetButton("Update to \(e.version)", accent: true) { Task { await store.install(e) } }
-                                .disabled(store.progress != nil)
-                            Text("\(v) is here").font(RFMFonts.ui(13, 500)).foregroundStyle(Palette.sheetMuted2)
+                            let rebuild = FirmwareVersion.compare(v, e.version) == .orderedSame
+                            SheetButton(rebuild ? "Get the new build" : "Update to \(e.version)", accent: true) {
+                                Task { await store.install(e) }
+                            }
+                            .disabled(store.progress != nil)
+                            Text(rebuild ? "\(v) is here, an older build" : "\(v) is here")
+                                .font(RFMFonts.ui(13, 500)).foregroundStyle(Palette.sheetMuted2)
                         case .installed(let v):
                             if let f = here ?? library.files.first(where: { $0.error == nil && $0.sha256 == e.sha256 }) {
                                 SheetButton("Play \(f.name)", accent: true) { play(f.key) }

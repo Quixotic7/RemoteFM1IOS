@@ -188,7 +188,9 @@ final class FirmwareStoreTests: XCTestCase {
         let e = entry("felucca", version: "1.6.2", sha: "new", size: 1, urls: ["https://x/f.rfm1"])
         XCTAssertEqual(e.state([]), .notInstalled)
         XCTAssertEqual(e.state([file("felucca", "1.6.1")]), .update("1.6.1"))
-        XCTAssertEqual(e.state([file("felucca", "1.6.1"), file("felucca", "1.6.2")]), .installed("1.6.2"))
+        XCTAssertEqual(e.state([file("felucca", "1.6.1"), file("felucca", "1.6.2")]), .update("1.6.2"),
+                       "the same version, another file: a rebuild")
+        XCTAssertEqual(e.state([file("felucca", "1.6.2", sha: "new")]), .installed("1.6.2"))
         XCTAssertEqual(e.state([file("felucca", "1.7")]), .installed("1.7"))                 // (a newer one by hand)
         XCTAssertEqual(e.state([file("other", "0.1", sha: "new")]), .installed("0.1"))       // (the same file)
         var broken = file("felucca", "1.6.1")
