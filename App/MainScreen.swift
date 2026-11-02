@@ -277,7 +277,7 @@ struct MainScreen: View {
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .fullScreenCover(isPresented: $showManager) {
             if let c = player.current, let u = ManagerList.editor(for: c.firmwareID, details: catalog.details) {
-                ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name), firmware: c.name) {
+                ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name, details: catalog.details), firmware: c.name) {
                     showManager = false
                 }
             }

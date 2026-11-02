@@ -49,7 +49,11 @@ public enum ManagerList {
     /// the author's editor known to the app, nil: none
     public static func url(for firmwareID: String) -> URL? { authors[firmwareID] }
 
-    public static func port(for firmwareID: String, name: String) -> String { ports[firmwareID] ?? name }
+    /// the port the editor page sees: RemoteFM1FW's catalog `port`, else the app's list, else the firmware's name
+    public static func port(for firmwareID: String, name: String, details: [String: AvailableFirmware] = [:]) -> String {
+        if let p = details[firmwareID]?.port, !p.isEmpty { return p }
+        return ports[firmwareID] ?? name
+    }
 
     /// the editor page to open: the catalog's `editor` (the author's page, https only), else the one the app knows;
     /// nil: none

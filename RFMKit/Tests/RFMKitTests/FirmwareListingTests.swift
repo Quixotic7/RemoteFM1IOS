@@ -96,4 +96,16 @@ final class FirmwareListingTests: XCTestCase {
         XCTAssertEqual(g.headroomUs, PerfGuard.defaultHeadroomUs)
         XCTAssertEqual(g.frameMs, PerfGuard.defaultFrameMs)
     }
+
+    /// RemoteFM1FW's catalog may give a firmware's editor and its USB MIDI port name; they win over the site's
+    func testCatalogEditorAndPort() throws {
+        let site = Data(#"{"firmwares":[{"id":"mutabledreams","name":"Mutable Dreams"},{"id":"felucca","name":"Felucca","editor":"https://hugelton.github.io/Felucca/webapp/editor/"}]}"#.utf8)
+        let cat = Data(#"{"schema":1,"firmwares":{"mutabledreams":{"editor":"https://mutable-dreams.kidbee85.chatgpt.site/#device-editor","port":"Mutable Dreams FM-1"},"rainbow":{"editor":"http://insecure.example/"}}}"#.utf8)
+        let d = FeedSnapshot.details([try FeedSnapshot.parse(site, feed: .remotefm1), try FeedSnapshot.parse(cat, feed: .fwCatalog)])
+        XCTAssertEqual(d["mutabledreams"]?.editor, "https://mutable-dreams.kidbee85.chatgpt.site/#device-editor")
+        XCTAssertEqual(ManagerList.port(for: "mutabledreams", name: "x", details: d), "Mutable Dreams FM-1")
+        XCTAssertEqual(d["felucca"]?.editor, "https://hugelton.github.io/Felucca/webapp/editor/", "the site's, when the catalog has none")
+        XCTAssertEqual(d["rainbow"]?.editor ?? "", "", "https only")
+        XCTAssertEqual(ManagerList.port(for: "felucca", name: "Felucca", details: d), "Felucca", "the app's list")
+    }
 }

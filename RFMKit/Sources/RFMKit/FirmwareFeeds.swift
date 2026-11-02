@@ -128,6 +128,8 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     public var editor = ""
     /// (RemoteFM1FW's catalog) the thumbnail's address; "" none
     public var image = ""
+    /// (RemoteFM1FW's catalog) the firmware's USB MIDI port name, which its editor looks for; "" not given
+    public var port = ""
     public var repo = ""                    // "owner/name" on GitHub
     public var beta = false
     /// a Fantasy CFW (the catalogs' "virtual"; the file's manifest is the authority once installed)
@@ -140,7 +142,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, version, author, category, summary, about, license, sourceURL, site, editor, image, repo, beta, isVirtual, downloads
-        case released
+        case released, port
     }
 
     /// (a cache from an older build lacks the newer fields: those take their defaults)
@@ -151,6 +153,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         name = s(.name); version = s(.version); author = s(.author); category = s(.category); summary = s(.summary)
         about = s(.about); license = s(.license); sourceURL = s(.sourceURL); site = s(.site); editor = s(.editor)
         image = s(.image)
+        port = s(.port)
         repo = s(.repo)
         beta = (try? c.decodeIfPresent(Bool.self, forKey: .beta)) ?? nil ?? false
         isVirtual = (try? c.decodeIfPresent(Bool.self, forKey: .isVirtual)) ?? nil ?? false
@@ -171,7 +174,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     mutating func fill(from o: AvailableFirmware, sameVersion: Bool) {
         func take(_ k: WritableKeyPath<AvailableFirmware, String>) { if self[keyPath: k].isEmpty { self[keyPath: k] = o[keyPath: k] } }
         take(\.name); take(\.author); take(\.category); take(\.summary); take(\.about); take(\.license)
-        take(\.site); take(\.repo); take(\.editor); take(\.image)
+        take(\.site); take(\.repo); take(\.editor); take(\.image); take(\.port)
         if sourceURL.isEmpty {
             sourceURL = sameVersion || o.repo.isEmpty ? o.sourceURL : "https://github.com/\(o.repo)"
         }
@@ -184,6 +187,8 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         if !c.summary.isEmpty { summary = c.summary }
         if !c.about.isEmpty { about = c.about }
         if !c.image.isEmpty { image = c.image }
+        if !c.editor.isEmpty { editor = c.editor }
+        if !c.port.isEmpty { port = c.port }
         if c.isVirtual { isVirtual = true }
     }
 }
@@ -314,6 +319,8 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                 e.summary = f.tag ?? ""
                 e.about = f.what ?? ""
                 e.site = f.site ?? ""
+                if let u = f.editor.flatMap(URL.init(string:)), u.scheme == "https" { e.editor = u.absoluteString }
+                e.port = f.port ?? ""
                 e.beta = f.beta ?? false
                 e.isVirtual = f.virtual ?? false
                 if let i = f.image, let u = URL(string: i, relativeTo: feed.url)?.absoluteURL, u.scheme == "https" {
@@ -457,7 +464,7 @@ private struct FWCatalogJSON: Decodable {
     var firmwares: [String: Lossy<Item>]
 
     struct Item: Decodable {
-        var name, tag, what, category, author, site, image: String?
+        var name, tag, what, category, author, site, image, editor, port: String?
         var beta, virtual: Bool?
     }
 }

@@ -814,3 +814,6 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 - **Swipe in from the right:** the running firmware's editor.
 - **More editors:** Mutable Dreams (listed on the site as "mutable"), Rainbow Mode and Hortator (Felucca's editor on
   their own sites; port "Felucca").
+- **Editors from the catalog:** RemoteFM1FW's catalog may carry `editor` (https) and `port` (the USB MIDI port name the
+  editor looks for); both win over the site catalog and the app's lists (ManagerList.authors / ports stay as the
+  fallback). Asked of the RFM1Manager session, 2026-11-01.
