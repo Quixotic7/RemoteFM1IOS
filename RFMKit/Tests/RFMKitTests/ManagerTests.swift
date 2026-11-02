@@ -55,6 +55,9 @@ final class ManagerTests: XCTestCase {
         XCTAssertNotNil(ManagerList.url(for: "mutabledreams"), "the site lists it as \"mutable\"")
         XCTAssertEqual(ManagerList.port(for: "rainbow", name: "Rainbow Mode"), "Felucca", "Felucca's editor looks for Felucca")
         XCTAssertEqual(ManagerList.port(for: "melodee", name: "Melodee"), "Melodee FM-1")
+        // (RemoteFM1FW 31b8751, checked against the firmwares' USB descriptors)
+        XCTAssertEqual(ManagerList.port(for: "jiant", name: "JIANT"), "FM-1", "10.26's; JIANT's editor matches FM-1")
+        XCTAssertEqual(ManagerList.port(for: "hortator", name: "Hortator"), "Hortator")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")
     }
 

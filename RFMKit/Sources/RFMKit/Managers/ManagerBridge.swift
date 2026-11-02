@@ -29,14 +29,20 @@ public enum ManagerList {
         "hortator": URL(string: "https://deadactive.github.io/hortator/webapp/editor/")!,
     ]
 
-    /// each firmware's real USB MIDI port name: the name the page's port takes (managers.json "ports")
+    /// each firmware's real USB MIDI port name (its USB iProduct string, which its editor matches): RemoteFM1FW's
+    /// catalog `port` (31b8751, checked against each firmware's descriptor) wins; this list is the fallback, the same
+    /// names. Shared by several: "Felucca" (Felucca's forks), "FM-1", "FoMni FM-1"
     public static let ports: [String: String] = [
-        "choralroot": "ChoralRoot FM-1", "purplemonkey": "ChoralRoot FM-1", "coralflower": "CoralFlower FM-1",
-        "felucca": "Felucca", "ghoulbox": "Felucca", "amb": "Felucca", "obervave": "Felucca", "frodhes": "Felucca",
-        "melodee": "Melodee FM-1", "jiant": "JIANT FM", "fomni": "FoMni FM-1", "fimba": "FiMba FM-1",
-        "loom": "LOOM-8 FM-1", "duell": "DUELL", "minitone": "Felucca", "fmini": "FM-1 Midi", "skiff": "Felucca",
-        "grimm": "Felucca", "pigeon": "PIGEON", "tonitor": "FM-1 Tonitor", "speak37": "Speak37",
-        "rainbow": "Felucca", "hortator": "Felucca", "mutabledreams": "Mutable Dreams FM-1",
+        "amb": "AMB-1 FM-1", "aurora": "Felucca", "caravel": "Caravel", "choralroot": "ChoralRoot FM-1",
+        "clipper": "Clipper", "coralflower": "CoralFlower FM-1", "duell": "DUELL", "fartmachine": "FoMni FM-1",
+        "felucca": "Felucca", "fimba": "FiMba FM-1", "fmini": "FM-1 Midi", "fomni": "FoMni FM-1",
+        "frasil": "FRASIL FM-1", "frodhes": "Felucca", "ghoulbox": "Felucca", "grimm": "Felucca",
+        "hortator": "Hortator", "hyp1": "HYP-1 FM-1", "jiant": "FM-1", "karma": "FM-1 KARMA", "loom": "LOOM-8 FM-1",
+        "melodee": "Melodee FM-1", "minitone": "Felucca", "mutabledreams": "Mutable Dreams FM-1",
+        "niagaradrift": "Niagara Drift FM-1", "obervave": "Felucca", "pigeon": "PIGEON",
+        "purplemonkey": "ChoralRoot FM-1", "rainbow": "Felucca", "remotefm1": "FM-1", "ripple": "Ripple FM-1",
+        "s1vave": "Felucca", "skiff": "Felucca", "sloop": "Felucca", "speak37": "Speak37", "tonitor": "FM-1 Tonitor",
+        "x0x": "X0X FM-1", "zen1": "ZEN-1 FM-1",
     ]
 
     /// managers opened at their author's page rather than the site's copy, which lags behind (ChoralRoot's reads
