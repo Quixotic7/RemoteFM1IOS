@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // How the firmware lists show the cores (the owner, 2026-11-01):
-//   superseded   a built-in core with a newer imported .rfm1 of the same firmware is left out of the lists (the
-//                newer one is what the user wants; two of the same name confused testers). Shown again when the
-//                newer file is deleted, and while it is the one selected
+//   superseded   only each firmware's newest version is listed (older ones, built in or imported, confused
+//                testers); an older one still loads a state made with it, and shows while it is the one selected
 //   sorting      by name (the catalog's order), recently used (each firmware's last selection, UserDefaults by
 //                firmware id), or recently updated (the release date of its newest version, FirmwareStore.updated)
 
@@ -24,15 +23,22 @@ public enum FirmwareListing {
 
     static let usedKey = "firmware.lastUsed"
 
-    /// the built-in cores that an imported, newer version of the same firmware replaces in the lists
+    /// the cores a newer version of the same firmware replaces in the lists: every older version, built in or
+    /// imported; of two of the same version, the built-in one stays (it runs natively), else the first
     public static func superseded(_ cores: [CoreInfo]) -> Set<String> {
-        let imported = cores.filter(\.imported)
-        return Set(cores.filter { b in
-            !b.imported && imported.contains { $0.firmwareID == b.firmwareID && FirmwareVersion.less(b.version, $0.version) }
-        }.map(\.id))
+        var best: [String: CoreInfo] = [:]
+        for c in cores {
+            guard let b = best[c.firmwareID] else { best[c.firmwareID] = c; continue }
+            switch FirmwareVersion.compare(c.version, b.version) {
+            case .orderedDescending: best[c.firmwareID] = c
+            case .orderedSame where b.imported && !c.imported: best[c.firmwareID] = c
+            default: break
+            }
+        }
+        return Set(cores.filter { best[$0.firmwareID]?.id != $0.id }.map(\.id))
     }
 
-    /// the cores to list: the superseded built-ins left out (unless selected)
+    /// the cores to list: each firmware's newest version (and the selected one)
     public static func visible(_ cores: [CoreInfo], selected: String) -> [CoreInfo] {
         let hide = superseded(cores)
         return cores.filter { !hide.contains($0.id) || $0.id == selected }

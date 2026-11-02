@@ -53,28 +53,53 @@ public struct CoreInfo: Sendable, Equatable, Identifiable {
 }
 
 /// (M7) whether a Wasm core keeps up: its core thread's time over the audio's in windows of ~2 s (from the status's
-/// totals). A core whose screen redraws are slow (Rainbow Mode redraws all the time) drops out with a low average load:
-/// on dropouts the ring's headroom doubles, up to maxHeadroomUs (a little more latency, no crackles). The note when it is over ~90 %, or 3 or more underruns in a window at the most headroom. Native
-/// cores: never a note, the default headroom
+/// totals). The screen's frame() and the audio share that thread, and a core that redraws its whole screen each frame
+/// (Rainbow Mode) drops out with a low average load. So a Wasm core redraws every 33 ms (30 fps: the app's preview
+/// shows no more; the FM-1 gets 20), not every 15 ms, and starts with 12 ms of headroom. On dropouts, each window: the
+/// headroom doubles (up to maxHeadroomUs) and the screen slows a step (50, then 66 ms). What a firmware needed is kept
+/// for this run of the app, so going back to it doesn't drop out again. The note when it is over ~90 %, or 3 or more
+/// underruns in a window with nothing left to give. Native cores: the defaults, never a note
 public struct PerfGuard: Sendable {
     public static let defaultHeadroomUs: UInt32 = 6000      // (RFMEngine.cpp kDefaultHeadroomUs)
+    public static let wasmHeadroomUs: UInt32 = 12000
     public static let maxHeadroomUs: UInt32 = 40000
+    public static let defaultFrameMs: UInt32 = 15           // (RFMDevice.h frame_ms_)
+    public static let wasmFrameMs: [UInt32] = [33, 50, 66]
     private var window: (at: Date, ticks: Double, frames: UInt64, underruns: UInt32)?
     private var core = ""
+    private var learned: [String: (headroom: UInt32, frame: Int)] = [:]
+    private var frameStep = 0
     public private(set) var load = 0.0          // the last window's (0..1+)
     public private(set) var note = ""
     /// the ring's headroom this core needs (rfme_set_latency)
     public private(set) var headroomUs = PerfGuard.defaultHeadroomUs
+    /// how often its screen redraws (rfme_set_frame_ms; the battery's slower rate in the background wins)
+    public private(set) var frameMs = PerfGuard.defaultFrameMs
     public init() {}
+
+    private mutating func use(_ id: String) {
+        if !core.isEmpty { learned[core] = (headroomUs, frameStep) }
+        core = id
+        if id.isEmpty {
+            headroomUs = Self.defaultHeadroomUs
+            frameStep = 0
+            frameMs = Self.defaultFrameMs
+        } else {
+            let l = learned[id] ?? (Self.wasmHeadroomUs, 0)
+            headroomUs = l.headroom
+            frameStep = l.frame
+            frameMs = Self.wasmFrameMs[frameStep]
+        }
+    }
 
     public mutating func update(_ s: CoreStatus, name: String, now: Date = Date()) -> String {
         guard s.kind == "wasm", s.booted, s.coreWakes > 0, s.rate > 0 else {
             window = nil
             note = ""
-            if s.kind != "wasm" || s.coreID != core { headroomUs = Self.defaultHeadroomUs; core = "" }
+            if s.kind != "wasm" { if !core.isEmpty { use("") } } else if s.coreID != core { use(s.coreID) }
             return note
         }
-        if s.coreID != core { core = s.coreID; headroomUs = Self.defaultHeadroomUs }
+        if s.coreID != core { use(s.coreID) }
         let ticks = Double(s.coreAvgUs) * Double(s.coreWakes)
         guard let w = window, s.coreFrames >= w.frames, ticks >= w.ticks else {
             window = (now, ticks, s.coreFrames, s.underruns)      // (the first, or the stats were reset)
@@ -85,8 +110,11 @@ public struct PerfGuard: Sendable {
         load = audioUs > 0 ? (ticks - w.ticks) / audioUs : 0
         var under = s.underruns >= w.underruns ? s.underruns - w.underruns : 0
         window = (now, ticks, s.coreFrames, s.underruns)
-        if under > 0, headroomUs < Self.maxHeadroomUs {             // (dropouts: more headroom first)
-            headroomUs = min(Self.maxHeadroomUs, headroomUs * 2)
+        if under > 0, headroomUs < Self.maxHeadroomUs || frameStep < Self.wasmFrameMs.count - 1 {
+            headroomUs = min(Self.maxHeadroomUs, headroomUs * 2)    // (dropouts: more headroom, a slower screen)
+            frameStep = min(Self.wasmFrameMs.count - 1, frameStep + 1)
+            frameMs = Self.wasmFrameMs[frameStep]
+            learned[core] = (headroomUs, frameStep)
             under = 0
         }
         note = Self.note(load: load, underruns: under, name: name)
@@ -473,7 +501,11 @@ public final class CorePlayer {
     }
 
     /// (the battery) how often the firmware redraws its screen: 15 ms normally, slower when nobody sees it
-    public func setFrameMs(_ ms: UInt32) { rfme_set_frame_ms(e, ms) }
+    public func setFrameMs(_ ms: UInt32) {
+        batteryFrameMs = ms
+        rfme_set_frame_ms(e, max(ms, perf.frameMs))
+    }
+    @ObservationIgnored private var batteryFrameMs = PerfGuard.defaultFrameMs
 
     /// back from a battery stop: the clock and the sound as before
     public func resumeFromBattery() {
@@ -996,11 +1028,12 @@ public final class CorePlayer {
 
     /// the Wasm core's load over the last ~2 s (perfNote)
     private func updatePerf(_ s: CoreStatus) {
-        let had = perf.headroomUs
+        let had = perf.headroomUs, hadFrame = perf.frameMs
         let note = perf.update(s, name: current?.name ?? s.coreID)
-        if perf.headroomUs != had {
+        if perf.frameMs != hadFrame { rfme_set_frame_ms(e, max(batteryFrameMs, perf.frameMs)) }
+        if perf.headroomUs != had || perf.frameMs != hadFrame {
             rfme_set_latency(e, perf.headroomUs, 0)
-            log.info("core headroom \(self.perf.headroomUs / 1000, privacy: .public) ms (\(s.coreID, privacy: .public))")
+            log.info("core headroom \(self.perf.headroomUs / 1000, privacy: .public) ms, screen every \(self.perf.frameMs, privacy: .public) ms (\(s.coreID, privacy: .public))")
         }
         if note != perfNote { perfNote = note }
     }

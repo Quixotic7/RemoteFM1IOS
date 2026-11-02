@@ -15,13 +15,19 @@ final class FirmwareListingTests: XCTestCase {
         return c
     }
 
-    func testSupersededBuiltInsHidden() {
+    func testOnlyTheNewestVersionListed() {
         let cores = [core("choralroot", "choralroot", "0.26", wasm: false), core("felucca", "felucca", "1.6.1", wasm: false),
-                     core("rfm1:choralroot", "choralroot", "0.29", wasm: true),
-                     core("rfm1:felucca", "felucca", "1.6.1", wasm: true)]
-        XCTAssertEqual(FirmwareListing.superseded(cores), ["choralroot"], "only a strictly newer import hides a built-in")
-        XCTAssertEqual(FirmwareListing.visible(cores, selected: "felucca").map(\.id), ["felucca", "rfm1:choralroot", "rfm1:felucca"])
-        XCTAssertEqual(FirmwareListing.visible(cores, selected: "choralroot").count, 4, "the selected one stays listed")
+                     core("rfm1:choralroot@0.28", "choralroot", "0.28", wasm: true),
+                     core("rfm1:choralroot@0.29", "choralroot", "0.29", wasm: true),
+                     core("rfm1:felucca", "felucca", "1.6.1", wasm: true),
+                     core("rfm1:rainbow@1.1.4", "rainbow", "1.1.4", wasm: true),
+                     core("rfm1:rainbow@1.1.5", "rainbow", "1.1.5-rb", wasm: true)]
+        XCTAssertEqual(FirmwareListing.superseded(cores),
+                       ["choralroot", "rfm1:choralroot@0.28", "rfm1:felucca", "rfm1:rainbow@1.1.4"],
+                       "older versions, and an import the same as the built-in")
+        XCTAssertEqual(FirmwareListing.visible(cores, selected: "felucca").map(\.id),
+                       ["felucca", "rfm1:choralroot@0.29", "rfm1:rainbow@1.1.5"])
+        XCTAssertEqual(FirmwareListing.visible(cores, selected: "rfm1:choralroot@0.28").count, 4, "the selected one stays listed")
     }
 
     func testSorting() {
@@ -56,25 +62,38 @@ final class FirmwareListingTests: XCTestCase {
         XCTAssertEqual(back.released, v["amb"]?.first?.released)
     }
 
-    func testHeadroomGrowsOnDropouts() {
+    func testHeadroomAndScreenOnDropouts() {
         var g = PerfGuard()
         var s = CoreStatus()
         s.kind = "wasm"; s.booted = true; s.rate = 48000; s.coreID = "rainbow"
         s.coreWakes = 100; s.coreAvgUs = 100; s.coreFrames = 48000
         var t = Date(timeIntervalSince1970: 0)
         _ = g.update(s, name: "Rainbow Mode", now: t)
-        XCTAssertEqual(g.headroomUs, PerfGuard.defaultHeadroomUs)
-        var notes: [String] = []
-        for _ in 0..<5 {                                      // 40 % load, 20 dropouts each window
+        XCTAssertEqual(g.headroomUs, PerfGuard.wasmHeadroomUs, "a Wasm core starts with more headroom")
+        XCTAssertEqual(g.frameMs, 33, "and a 30 fps screen")
+        var notes: [String] = [], frames: [UInt32] = []
+        for _ in 0..<4 {                                      // 40 % load, 20 dropouts each window
             t += 2
             s.coreWakes += 1000; s.coreFrames += 96000; s.coreAvgUs = 800; s.underruns += 20
             notes.append(g.update(s, name: "Rainbow Mode", now: t))
+            frames.append(g.frameMs)
         }
+        XCTAssertEqual(frames, [50, 66, 66, 66])
         XCTAssertEqual(g.headroomUs, PerfGuard.maxHeadroomUs)
-        XCTAssertEqual(notes.prefix(3), ["", "", ""], "more headroom first, no note")
-        XCTAssertTrue(notes.last!.contains("too heavy"), "still dropping out at the most headroom: the note")
-        s.coreID = "choralroot"                               // (another firmware: back to the default)
+        XCTAssertEqual(notes.prefix(2), ["", ""], "more headroom and a slower screen first, no note")
+        XCTAssertTrue(notes.last!.contains("too heavy"), "still dropping out with nothing left: the note")
+
+        s.coreID = "choralroot"                               // another Wasm firmware: its own start
         _ = g.update(s, name: "ChoralRoot", now: t + 2)
+        XCTAssertEqual(g.headroomUs, PerfGuard.wasmHeadroomUs)
+        XCTAssertEqual(g.frameMs, 33)
+        s.coreID = "rainbow"                                  // back: what it needed, kept
+        _ = g.update(s, name: "Rainbow Mode", now: t + 4)
+        XCTAssertEqual(g.headroomUs, PerfGuard.maxHeadroomUs)
+        XCTAssertEqual(g.frameMs, 66)
+        s.kind = "native"; s.coreID = ""                      // a built-in core: the defaults
+        _ = g.update(s, name: "FIZZ", now: t + 6)
         XCTAssertEqual(g.headroomUs, PerfGuard.defaultHeadroomUs)
+        XCTAssertEqual(g.frameMs, PerfGuard.defaultFrameMs)
     }
 }

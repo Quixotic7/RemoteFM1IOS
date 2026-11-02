@@ -42,12 +42,21 @@ public struct SavedState: Codable, Sendable, Equatable, Identifiable {
         version.isEmpty || running.isEmpty || version == running ? "" : "made with \(version)"
     }
 
-    /// the question before a load: a state from another version of the firmware says so plainly (section 18 step 4)
+    /// made with a newer version than `running` (an older one may not read it); an older version's state loads into a
+    /// newer version plainly (the owner, 2026-11-01: the lists show only the newest version)
+    public func newer(than running: String) -> Bool {
+        !version.isEmpty && !running.isEmpty && FirmwareVersion.less(running, version)
+    }
+
+    /// the question before a load: a state from a newer version says so plainly (section 18 step 4)
     public func loadQuestion(running: String) -> String {
         let keep = "The current memory is kept as a safety copy first."
-        guard !versionNote(running: running).isEmpty else { return "Load \"\(name)\"? \(keep)" }
-        return "\"\(name)\" was made with version \(version); this is \(running). Another version may not read it, or "
-            + "may reset it. Load it anyway? \(keep)"
+        guard newer(than: running) else {
+            return versionNote(running: running).isEmpty ? "Load \"\(name)\"? \(keep)"
+                : "Load \"\(name)\" (made with \(version)) into \(running)? \(keep)"
+        }
+        return "\"\(name)\" was made with version \(version), newer than this \(running). An older version may not read it, "
+            + "or may reset it. Load it anyway? \(keep)"
     }
 
     /// the kept settings applied to `s`

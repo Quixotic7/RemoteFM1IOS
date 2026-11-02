@@ -93,9 +93,9 @@ public struct StatesList: View {
     @ViewBuilder private func entry(_ s: SavedState) -> some View {
         if ask == .load(s.id) {
             SheetAsk(question: s.loadQuestion(running: version),
-                     action: s.versionNote(running: version).isEmpty ? "Load" : "Load anyway", cancel: { withAnimation { ask = nil } },
+                     action: s.newer(than: version) ? "Load anyway" : "Load", cancel: { withAnimation { ask = nil } },
                      confirm: { withAnimation { ask = nil }; load(s) },
-                     other: s.versionNote(running: version).isEmpty ? nil : otherVersion?(s).map { o in
+                     other: !s.newer(than: version) ? nil : otherVersion?(s).map { o in
                          (o.title, { withAnimation { ask = nil }; o.action() })
                      })
         } else if ask == .delete(s.id) {

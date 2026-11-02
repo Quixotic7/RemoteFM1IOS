@@ -276,12 +276,16 @@ final class FlashHistoryTests: XCTestCase {
         XCTAssertFalse(FlashFile.looksErased(a))
     }
 
-    /// (step 4) a state from another version: the Load question says so plainly
-    func testLoadQuestionWarnsAboutAnotherVersion() {
+    /// (step 4) a state from a newer version: the Load question warns; an older version's loads plainly
+    func testLoadQuestionWarnsAboutANewerVersion() {
         var s = SavedState(id: "x", name: "Jam 3", note: "", firmwareID: "fizz", firmwareName: "FIZZ", kind: "native",
                            version: "0.11", sha256: "", date: Date(), flashSize: 1, flashSHA256: "", master: nil,
                            transpose: nil, keyTouch: nil, origin: "app")
-        XCTAssertTrue(s.loadQuestion(running: "0.12").contains("was made with version 0.11; this is 0.12"))
+        XCTAssertEqual(s.loadQuestion(running: "0.12"),
+                       "Load \"Jam 3\" (made with 0.11) into 0.12? The current memory is kept as a safety copy first.")
+        XCTAssertFalse(s.newer(than: "0.12"))
+        XCTAssertTrue(s.newer(than: "0.10"))
+        XCTAssertTrue(s.loadQuestion(running: "0.10").contains("made with version 0.11, newer than this 0.10"))
         s.version = "0.12"
         XCTAssertEqual(s.loadQuestion(running: "0.12"), "Load \"Jam 3\"? The current memory is kept as a safety copy first.")
     }

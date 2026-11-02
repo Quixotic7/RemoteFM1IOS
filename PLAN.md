@@ -779,12 +779,16 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 
 ## 21. Testers' list, 2026-11-01
 
-- **Built-ins with a newer .rfm1** are left out of the lists (FirmwareListing.superseded); shown again if that file goes.
+- **Only each firmware's newest version** is listed, built in or imported (FirmwareListing.superseded); an older one
+  still loads a state made with it. An older version's state loads into the newer one plainly; only a newer
+  version's state asks "Load anyway?" and offers its own version.
 - **Editors:** always the author's page (the catalog's `editor`, else ManagerList.authors), never remotefm1.com's copies (ChoralRoot's had no Digitone .syx).
   An editor's file inputs open the app's picker: any file (.dnsnd was greyed out), the last folder remembered.
 - **Pickers** remember their folder: firmware, cartridge, editor, Restore (PickerFolder).
-- **Slow redraws** (Rainbow Mode redraws all the time): on dropouts a Wasm core's audio headroom doubles, 6 → 40 ms
-  (PerfGuard); the "too heavy" note only at 40 ms.
+- **Slow redraws** (Rainbow Mode redraws all the time; frame() and audio share the core thread): a Wasm core redraws
+  every 33 ms (the preview shows 30 fps), not 15, with 12 ms of headroom. On dropouts each window: headroom doubles
+  (to 40 ms) and the screen slows to 50, then 66 ms; kept per firmware for the app's run (PerfGuard). The "too
+  heavy" note only with nothing left. A real fix: docs/SPLIT-CARTS.md in FM1VST (screen on its own thread).
 - **"Sound source"** is now "Firmware runs on", with Audio output right under it.
 - **Screen view** shows the firmware's name; a tap opens it.
 - **Firmware sidebar:** a swipe in from the left edge; a tap switches and closes; it keeps its scroll.
