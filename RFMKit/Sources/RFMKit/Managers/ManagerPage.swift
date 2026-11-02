@@ -65,6 +65,7 @@ struct ManagerWebView: UIViewRepresentable {
         w.navigationDelegate = context.coordinator
         w.uiDelegate = context.coordinator
         context.coordinator.attach(w)
+
         w.load(URLRequest(url: url))
         return w
     }

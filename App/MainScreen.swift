@@ -226,7 +226,7 @@ struct MainScreen: View {
                                     withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
                                 })
                     .zIndex(1)
-                if !sidebarOpen, let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
+                if !sidebarOpen, !showManager, let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
                     RightEdgeSwipe { showManager = true }     // (a swipe in from the right: the firmware's editor)
                         .zIndex(1)
                 }
@@ -237,16 +237,25 @@ struct MainScreen: View {
                     .transition(.move(edge: .bottom))
                     .zIndex(2)
             }
+            // the firmware's web editor: a layer that slides in from the right (where the swipe that opens it starts)
+            // and back out on Done (a full-screen cover rose from the bottom)
+            if showManager, let c = player.current, let u = ManagerList.editor(for: c.firmwareID, details: catalog.details) {
+                ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name, details: catalog.details),
+                            firmware: c.name) { showManager = false }
+                    .transition(.move(edge: .trailing))
+                    .zIndex(4)
+            }
             // MIDI learn's bar and the toasts (over the sheet; above the perf note when it shows)
             FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && !player.perfNote.isEmpty ? 64 : 14,
                              barAtTop: ui.page == .controls && ui.deck == .buttons)
                 .zIndex(3)
         }
+        .animation(.easeInOut(duration: 0.3), value: showManager)
         .persistentSystemOverlays(.hidden)
         .statusBarHidden(ui.displayAlone)
         .onChange(of: player.current?.name, initial: true) { _, n in ui.firmwareName = n }
         .onChange(of: catalog.checked, initial: true) { FirmwareDetailsShare.save(catalog.details) }   // (the AU's panel)
-        .preferredColorScheme(ui.sheetOpen || ui.editorOpen || theme.body.luminance < 0.3 ? .dark : .light)
+        .preferredColorScheme(ui.sheetOpen || ui.editorOpen || showManager || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
         .sheet(isPresented: $showAbout) {
             AboutFirmware(info: player.current, onDelete: deleteAction(player.current))
@@ -275,13 +284,6 @@ struct MainScreen: View {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
         .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
-        .fullScreenCover(isPresented: $showManager) {
-            if let c = player.current, let u = ManagerList.editor(for: c.firmwareID, details: catalog.details) {
-                ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name, details: catalog.details), firmware: c.name) {
-                    showManager = false
-                }
-            }
-        }
         .onAppear(perform: launch)
         .sheet(item: $shareItem) { ActivitySheet(url: $0.url) }
         .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
