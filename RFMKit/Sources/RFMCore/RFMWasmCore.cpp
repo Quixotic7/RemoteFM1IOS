@@ -761,19 +761,23 @@ bool checkFile(WasmFile &f, std::string *err)
     for (int i = 0; i < F_N; i++) {
         const Export *e = findExport(FN[i].name);
         if (!e) {
-            if (i == F_INITIALIZE)
+            if (optionalExport(i))                  // (_initialize; ain1's two, which only an input cart has)
                 continue;
             return bad(std::string("it has no export ") + FN[i].name + " (section 2)");
         }
+        const bool ainExport = i == F_AUDIO_IN || i == F_AUDIO_IN_INFO;
         if (e->kind != 0 || e->index < importedFuncs || e->index - importedFuncs >= funcs.size())
             return bad(std::string("its export ") + FN[i].name + " is not a function of its own");
         const uint32_t ti = funcs[e->index - importedFuncs];
         if (ti >= types.size())
             return bad(std::string("its export ") + FN[i].name + " has no type");
         const FuncType want{std::vector<uint8_t>(FN[i].nargs, I32), std::vector<uint8_t>(FN[i].nret, I32)};
-        if (types[ti].params != want.params || types[ti].results != want.results)
+        if (types[ti].params != want.params || types[ti].results != want.results) {
+            if (ainExport)                          // (not the spec's: ignored, as an engine may do; never called)
+                continue;
             return bad(std::string("its export ") + FN[i].name + " has the signature " +
                        sigText(types[ti].params, types[ti].results) + ", not " + sigText(want.params, want.results));
+        }
     }
     return true;
 }
