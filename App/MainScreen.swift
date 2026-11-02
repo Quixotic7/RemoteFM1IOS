@@ -194,6 +194,8 @@ struct MainScreen: View {
             }
         }
         .ignoresSafeArea(turned ? .all : [])
+        // the theme's colour to every edge (landscape: the Dynamic Island's side showed the window's black)
+        .background(store.current.body.color.ignoresSafeArea())
     }
 
     private var screen: some View {
