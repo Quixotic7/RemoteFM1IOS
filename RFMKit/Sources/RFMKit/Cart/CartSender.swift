@@ -140,7 +140,9 @@ public final class CartSender {
 
     public private(set) var files: [CartFile] = []
     public private(set) var ports: [CartPort] = []
-    public var chosen: String?
+    public var chosen: String? {
+        didSet { if chosen != oldValue { firmware = .unknown; banks = nil } }   // (another target: its banks)
+    }
     public private(set) var state: State = .idle
     public private(set) var firmware: Firmware = .unknown
     public private(set) var banks: BankList?
@@ -268,11 +270,13 @@ public final class CartSender {
 
     /// the panel let go of the FM-1 for `work`, then started again; the list read again while still paused
     private func paused(_ port: CartPort, _ work: () async -> String?) async -> String? {
-        let restart = await panel?.pauseForCart() ?? false
-        await clock.sleep(ms: timing.afterPause)
+        // (RemoteFM1 in the app: no link to let go of)
+        let inApp = port.id == CoreCartTransport.port.id
+        let restart = inApp ? false : await panel?.pauseForCart() ?? false
+        if !inApp { await clock.sleep(ms: timing.afterPause) }
         let failure = await work()
         if firmware == .v031 { await list(port) }
-        panel?.resumeAfterCart(restart: restart)
+        if !inApp { panel?.resumeAfterCart(restart: restart) }
         return failure
     }
 

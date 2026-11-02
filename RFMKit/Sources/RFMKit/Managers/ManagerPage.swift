@@ -16,9 +16,12 @@ public struct ManagerPage: View {
     let url: URL
     let port: String
     let firmware: String
+    var title: String?
     let done: () -> Void
 
-    public init(player: CorePlayer, url: URL, port: String, firmware: String, done: @escaping () -> Void) {
+    public init(player: CorePlayer, url: URL, port: String, firmware: String, title: String? = nil,
+                done: @escaping () -> Void) {
+        self.title = title
         self.player = player
         self.url = url
         self.port = port
@@ -29,7 +32,7 @@ public struct ManagerPage: View {
     public var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(firmware) editor").font(RFMFonts.ui(17, 700)).foregroundStyle(Palette.sheetText)
+                Text(title ?? "\(firmware) editor").font(RFMFonts.ui(17, 700)).foregroundStyle(Palette.sheetText)
                 Spacer()
                 SheetButton("Done", accent: true, action: done)
             }

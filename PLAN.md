@@ -817,3 +817,12 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 - **Editors from the catalog:** RemoteFM1FW's catalog may carry `editor` (https) and `port` (the USB MIDI port name the
   editor looks for); both win over the site catalog and the app's lists (ManagerList.authors / ports stay as the
   fallback). Asked of the RFM1Manager session, 2026-11-01.
+- **RemoteFM1's editor in the app:** its DX7 cartridge page (what the website's RemoteFM1 editor is). The one sender
+  lists "RemoteFM1 in this app" (CoreCartTransport: the running core's SysEx in and MIDI out; while RemoteFM1 runs)
+  beside any FM-1 (CombinedCartTransport); the link is paused only for the real device. Open its editor / a swipe
+  from the right open it. (RemoteFM1 0.3.1 in the engine answers BANKS: 0 of 16.) Syncing banks between the two:
+  not yet.
+- **FIZZ's editor:** https://quixotic7.github.io/FIZZ/manager/.
+- **Screen reader:** Charles Vestal's FM-1 Screen Reader (charlesvestal.github.io/fm1-reader) opened like an editor
+  for the firmwares on its list (X0X, FoMni, AMB-1, Polly, MONK-1, Mocky, CTL-1); AMB-1 1.3, X0X 1.2.0, FoMni 0.4
+  answer its HELLO in the app's engine; Ripple 0.4 doesn't.

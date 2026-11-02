@@ -19,7 +19,11 @@ extension RemoteController: CartPanelPausing {
 extension CartSender {
     private static var appSender: CartSender?
 
-    /// the app's sender, made on first use for the app's link
+    /// the transport for RemoteFM1 running in the app (set by the app before the sender is first made)
+    @MainActor public static var coreTransport: CoreCartTransport?
+    @MainActor public static var coreRunning: @Sendable () -> Bool = { false }
+
+    /// the app's sender, made on first use for the app's link (and the RemoteFM1 running in the app, when given)
     public static func shared(for controller: RemoteController) -> CartSender {
         if let s = appSender { return s }
         var made: CartSender?
@@ -29,7 +33,7 @@ extension CartSender {
         demo = ProcessInfo.processInfo.arguments.contains("-cartdemo")
         #endif
         if controller.backend == .device && !demo, let t = try? CoreMIDICartTransport() {
-            made = CartSender(transport: t, panel: controller, simulated: false)
+            made = CartSender(transport: wrap(t), panel: controller, simulated: false)
         }
         #endif
         var banks: [UserBank] = []
@@ -41,9 +45,14 @@ extension CartSender {
         }
         #endif
         // (a pretend 0.3.1 FM-1: answers the bank requests, sends nothing anywhere)
-        let s = made ?? CartSender(transport: FakeCartTransport(fm1: FakeFM1(banks: banks)), panel: controller, simulated: true)
+        let s = made ?? CartSender(transport: wrap(FakeCartTransport(fm1: FakeFM1(banks: banks))), panel: controller, simulated: true)
         appSender = s
         return s
+    }
+
+    @MainActor private static func wrap(_ device: any CartTransport) -> any CartTransport {
+        guard let core = coreTransport else { return device }
+        return CombinedCartTransport(core: core, device: device, coreRunning: coreRunning)
     }
 }
 

@@ -84,7 +84,7 @@ public struct SendCartPage: View {
 
     @ViewBuilder private var bankList: some View {
         if sender.firmware == .v031, let l = sender.banks {
-            SheetSectionTitle("Banks on the FM-1: \(l.banks.count) of \(l.max)")
+            SheetSectionTitle("Banks \(where_): \(l.banks.count) of \(l.max)")
             if l.banks.isEmpty {
                 SheetNote("None yet. A cartridge sent goes to USER\(l.next + 1).")
             } else {
@@ -201,6 +201,11 @@ public struct SendCartPage: View {
         }
     }
 
+    /// the target is RemoteFM1 running in the app (CoreCartTransport), not an FM-1
+    private var inApp: Bool { sender.target?.id == CoreCartTransport.port.id }
+    private var toWhom: String { inApp ? "RemoteFM1 in this app" : "the FM-1" }
+    private var where_: String { inApp ? "in RemoteFM1 (this app)" : "on the FM-1" }
+
     @ViewBuilder private var send: some View {
         let n = sender.carts.count
         SheetSectionTitle("Send")
@@ -212,7 +217,7 @@ public struct SendCartPage: View {
             if sender.ports.isEmpty {
                 SheetNote("No FM-1 found. Connect it with USB (or Bluetooth MIDI).", color: .orange)
             }
-            SheetButton(n <= 1 ? "Send to the FM-1" : "Send \(n) cartridges to the FM-1", accent: true) {
+            SheetButton(n <= 1 ? "Send to \(toWhom)" : "Send \(n) cartridges to \(toWhom)", accent: true) {
                 Task { await sender.send() }
             }
             .disabled(n == 0 || sender.target == nil)
@@ -221,7 +226,7 @@ public struct SendCartPage: View {
             if case .done = sender.state {} else if let r = sender.resultText {
                 if case .sent = sender.state { SheetStatus(r, dot: Palette.linkedDot) } else { SheetNote(r, color: .orange) }
             }
-            SheetNote("The app's panel lets go of the FM-1 while it sends, then connects again.")
+            if !inApp { SheetNote("The app's panel lets go of the FM-1 while it sends, then connects again.") }
         }
     }
 }

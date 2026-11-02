@@ -27,6 +27,7 @@ public enum ManagerList {
         "mutabledreams": URL(string: "https://mutable-dreams.kidbee85.chatgpt.site/#device-editor")!,
         "rainbow": URL(string: "https://joshbartlettband-web.github.io/felucca-rainbow/webapp/editor/")!,
         "hortator": URL(string: "https://deadactive.github.io/hortator/webapp/editor/")!,
+        "fizz": URL(string: "https://quixotic7.github.io/FIZZ/manager/")!,     // (built in; not in the catalogs)
     ]
 
     /// each firmware's real USB MIDI port name (its USB iProduct string, which its editor matches): RemoteFM1FW's
@@ -51,6 +52,17 @@ public enum ManagerList {
         "choralroot": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
         "purplemonkey": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
     ]
+
+    /// Charles Vestal's FM-1 Screen Reader: reads out what the screen shows, for any firmware with its announce.c
+    /// (they answer its HELLO; the page knows no firmware). Opened like an editor, the app's Web MIDI in it
+    public static let reader = URL(string: "https://charlesvestal.github.io/fm1-reader/")!
+    /// the firmwares that speak to it (its README's list, 2026-11-01; AMB-1 1.3, X0X 1.2.0 and FoMni 0.4 answer its
+    /// HELLO in the app's engine. Ripple 0.4 and Fart Machine, though his, don't)
+    public static let readerFirmwares: Set<String> = ["x0x", "fomni", "amb", "polly", "monk", "mocky", "ctl"]
+
+    public static func hasReader(_ firmwareID: String, details _: [String: AvailableFirmware] = [:]) -> Bool {
+        readerFirmwares.contains(firmwareID)
+    }
 
     /// the author's editor known to the app, nil: none
     public static func url(for firmwareID: String) -> URL? { authors[firmwareID] }

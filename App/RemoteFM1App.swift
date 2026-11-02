@@ -56,6 +56,8 @@ struct RemoteFM1App: App {
         let ref = CoreRef(d.dictionary(forKey: "rfm1.coreRef"))
             ?? d.string(forKey: "rfm1.core").map { CoreRef(id: $0) }   // (a choice saved before M7)
         let p = CorePlayer(link: c, selected: core, ref: core == nil ? ref : nil)
+        CartSender.coreTransport = CoreCartTransport(player: p)       // (a cartridge to RemoteFM1 running in the app)
+        CartSender.coreRunning = { CoreCartTransport.running }
         _player = State(initialValue: p)
         let st = FirmwareStore(library: lib)
         st.didChange = { p.catalogChanged() }

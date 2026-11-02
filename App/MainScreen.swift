@@ -129,6 +129,8 @@ struct MainScreen: View {
     @State private var showAUTest = false
     @State private var showBluetooth = false
     @State private var showAbout = false
+    @State private var cartBack: AppSheetPage = .settings   // where the cartridge page goes back to
+    @State private var readerOpen = false              // the manager layer shows the screen reader, not the editor
     @State private var showManager = false             // (section 18 step 5) the firmware's own web manager
     @State private var askReset = false                 // Reset firmware… asked inline
     @State private var askRestore: String?              // the safety copy whose row asks "Restore?"
@@ -226,9 +228,18 @@ struct MainScreen: View {
                                     withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
                                 })
                     .zIndex(1)
-                if !sidebarOpen, !showManager, let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
-                    RightEdgeSwipe { showManager = true }     // (a swipe in from the right: the firmware's editor)
+                if !sidebarOpen, !showManager, let c = player.current {
+                    if ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
+                        RightEdgeSwipe { readerOpen = false; showManager = true }   // (a swipe in from the right: its editor)
+                            .zIndex(1)
+                    } else if c.firmwareID == CoreCartTransport.firmwareID {
+                        RightEdgeSwipe {                          // (RemoteFM1's editor: its cartridge page)
+                            cartBack = .firmware
+                            page = .cart
+                            withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+                        }
                         .zIndex(1)
+                    }
                 }
             }
             PullDownSheet(open: $ui.sheetOpen) { sheet }
@@ -239,9 +250,11 @@ struct MainScreen: View {
             }
             // the firmware's web editor: a layer that slides in from the right (where the swipe that opens it starts)
             // and back out on Done (a full-screen cover rose from the bottom)
-            if showManager, let c = player.current, let u = ManagerList.editor(for: c.firmwareID, details: catalog.details) {
+            if showManager, let c = player.current,
+               let u = readerOpen ? ManagerList.reader : ManagerList.editor(for: c.firmwareID, details: catalog.details) {
                 ManagerPage(player: player, url: u, port: ManagerList.port(for: c.firmwareID, name: c.name, details: catalog.details),
-                            firmware: c.name) { showManager = false }
+                            firmware: c.name, title: readerOpen ? "Screen reader" : nil) { showManager = false; readerOpen = false }
+                    .id(u)
                     .transition(.move(edge: .trailing))
                     .zIndex(4)
             }
@@ -254,6 +267,9 @@ struct MainScreen: View {
         .persistentSystemOverlays(.hidden)
         .statusBarHidden(ui.displayAlone)
         .onChange(of: player.current?.name, initial: true) { _, n in ui.firmwareName = n }
+        .onChange(of: player.current?.firmwareID, initial: true) { _, id in
+            CoreCartTransport.running = id == CoreCartTransport.firmwareID && player.mode == .core
+        }
         .onChange(of: catalog.checked, initial: true) { FirmwareDetailsShare.save(catalog.details) }   // (the AU's panel)
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || showManager || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
@@ -455,7 +471,11 @@ struct MainScreen: View {
             }
         case .settings: settingsPage
         case .install: InstallFirmwarePage(installer: .shared(for: controller)) { page = .settings }
-        case .cart: SendCartPage(sender: .shared(for: controller)) { page = .settings }
+        case .cart:
+            SendCartPage(sender: .shared(for: controller), backTitle: cartBack == .firmware ? "Firmware" : "Settings") {
+                page = cartBack
+            }
+            .onDisappear { CartSender.coreTransport?.close() }
         case nil: mainSheet
         }
     }
@@ -637,7 +657,12 @@ struct MainScreen: View {
             SheetSectionTitle("This firmware", top: 12)
             SheetList {
                 if let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
-                    SheetRow("Open its editor", value: "presets, backups") { showManager = true }
+                    SheetRow("Open its editor", value: "presets, backups") { readerOpen = false; showManager = true }
+                } else if player.current?.firmwareID == CoreCartTransport.firmwareID {
+                    SheetRow("Open its editor", value: "DX7 cartridges") { cartBack = .firmware; page = .cart }
+                }
+                if let c = player.current, ManagerList.hasReader(c.firmwareID, details: catalog.details) {
+                    SheetRow("Screen reader", value: "reads the screen out") { readerOpen = true; showManager = true }
                 }
                 SheetRow("About this firmware") { showAbout = true }
                     .disabled(player.current == nil)
@@ -1056,7 +1081,7 @@ struct MainScreen: View {
             SheetSectionTitle("FM-1 firmware")
             SheetList {
                 InstallFirmwareRow(installer: .shared(for: controller), divider: true) { page = .install }
-                SendCartRow(sender: .shared(for: controller)) { page = .cart }
+                SendCartRow(sender: .shared(for: controller)) { cartBack = .settings; page = .cart }
             }
             SheetNote("A DX7 cartridge (.syx) becomes a user bank on RemoteFM1 0.3.0 or later.")
             SheetSectionTitle("Your data").id("data")

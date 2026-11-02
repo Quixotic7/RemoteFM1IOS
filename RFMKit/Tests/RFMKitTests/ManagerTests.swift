@@ -51,13 +51,16 @@ final class ManagerTests: XCTestCase {
         XCTAssertEqual(ManagerList.url(for: "purplemonkey")?.absoluteString, "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")
         XCTAssertEqual(ManagerList.url(for: "felucca")?.absoluteString, "https://hugelton.github.io/Felucca/webapp/editor/")
         XCTAssertFalse(ManagerList.authors.values.contains { $0.host == "remotefm1.com" }, "never the site's copies")
-        XCTAssertNil(ManagerList.url(for: "fizz"))
+        XCTAssertEqual(ManagerList.url(for: "fizz")?.absoluteString, "https://quixotic7.github.io/FIZZ/manager/")
+        XCTAssertNil(ManagerList.url(for: "nonesuch"))
         XCTAssertNotNil(ManagerList.url(for: "mutabledreams"), "the site lists it as \"mutable\"")
         XCTAssertEqual(ManagerList.port(for: "rainbow", name: "Rainbow Mode"), "Felucca", "Felucca's editor looks for Felucca")
         XCTAssertEqual(ManagerList.port(for: "melodee", name: "Melodee"), "Melodee FM-1")
         // (RemoteFM1FW 31b8751, checked against the firmwares' USB descriptors)
         XCTAssertEqual(ManagerList.port(for: "jiant", name: "JIANT"), "FM-1", "10.26's; JIANT's editor matches FM-1")
         XCTAssertEqual(ManagerList.port(for: "hortator", name: "Hortator"), "Hortator")
+        XCTAssertTrue(ManagerList.hasReader("amb"))
+        XCTAssertFalse(ManagerList.hasReader("ripple"), "his, but no screen reader support (0.4)")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")
     }
 
@@ -88,7 +91,7 @@ final class ManagerTests: XCTestCase {
         moved.editor = "https://keremimo.github.io/melodee-next/editor/"
         XCTAssertEqual(ManagerList.editor(for: "melodee", details: ["melodee": moved])?.absoluteString, moved.editor,
                        "the catalog's link wins: the author may move it")
-        XCTAssertNil(ManagerList.editor(for: "fizz", details: d))
+        XCTAssertNil(ManagerList.editor(for: "nonesuch", details: d))
     }
 
     /// an older cache without `editor` still reads
