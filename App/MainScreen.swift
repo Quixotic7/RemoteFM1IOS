@@ -627,7 +627,9 @@ struct MainScreen: View {
         guard force || ProcessInfo.processInfo.arguments.dropFirst().allSatisfy({ !$0.hasPrefix("-") }) else { return }
         async let latest = UpdateNotice.latest()
         await catalog.refreshIfOlder(than: 86_400)
-        let ups = catalog.updates(builtIn: builtIn).map { (name: $0.displayName, version: $0.version) }
+        // (only RemoteFM1's own firmware: the owner, 2026-11-02; the other firmware's updates stay in Get firmware)
+        let ups = catalog.updates(builtIn: builtIn).filter { UpdateNotice.firmwareIDs.contains($0.id) }
+            .map { (name: $0.displayName, version: $0.version) }
         guard let n = UpdateNotice.make(build: Self.appBuild, latest: await latest, updates: ups),
               force || !n.dismissed() else { return }
         updateNotice = n

@@ -835,6 +835,6 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
   the session mixes with others while a page is open (CorePlayer.setMixing), and the page's audio session is
   "playback" (navigator.audioSession), so it plays with the phone on silent. Page errors go to the "manager" log.
 - **Launch notice (standalone app):** at launch, one alert when a newer build is out (release/ios.json, read from
-  GitHub: set `build` when a build reaches testers) or firmware here has updates; Open TestFlight / Get firmware /
+  GitHub: set `build` when a build reaches testers) or RemoteFM1's own firmware has an update (not the other firmware's); Open TestFlight / Get firmware /
   Close. Closed, it stays away until the set changes (UpdateNotice). Not for launches with options; -updatenotice
   forces it.

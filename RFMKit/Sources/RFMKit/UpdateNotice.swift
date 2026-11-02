@@ -2,7 +2,7 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // The launch notice (the owner, 2026-11-02: testers kept sending feedback from old builds): at the standalone app's
 // launch, one dismissible message when a newer app build is out (release/ios.json in this repository, read from
-// GitHub; TestFlight tells an app nothing) or firmware here has an update (Get firmware's own list). Closed, it stays
+// GitHub; TestFlight tells an app nothing) or RemoteFM1's own firmware here has an update (not the others': too many). Closed, it stays
 // closed until something newer comes out (the dismissed set is remembered).
 
 import Foundation
@@ -19,6 +19,9 @@ public struct UpdateNotice: Equatable, Sendable {
     public var url: URL?                       // where to get it (TestFlight's public link)
     public var firmware: [String]              // firmware here with an update, by name
     public var signature: String               // what it tells, for "already closed"
+
+    /// the firmware whose updates the notice tells of: RemoteFM1's own (the rest stay in Get firmware's list)
+    public static let firmwareIDs: Set<String> = ["remotefm1"]
 
     public static let latestURL = URL(string: "https://raw.githubusercontent.com/Quixotic7/RemoteFM1IOS/main/release/ios.json")!
     static let dismissedKey = "updateNotice.dismissed"
