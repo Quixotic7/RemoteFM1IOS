@@ -103,4 +103,19 @@ final class AudioInTests: XCTestCase {
         XCTAssertEqual(c.status.halted, 0, "running")
         print("elasticat: audio_in \(info.audio_in), mode \(rfme_ain_mode(c.e))")
     }
+
+    /// the AU: the music effect variant has one stereo input bus, the instrument none
+    func testTheEffectVariantHasAnInput() throws {
+        var c = RFMAudioUnit.Config()
+        c.runProbes = false
+        c.link = .none
+        c.defaultCore = nil
+        let fx = try RFMAudioUnit(componentDescription: RFMShared.effectComponent, options: [], config: c)
+        XCTAssertTrue(fx.isEffect)
+        XCTAssertEqual(fx.inputBusses.count, 1)
+        XCTAssertEqual(fx.inputBusses[0].format.channelCount, 2)
+        let inst = try RFMAudioUnit(componentDescription: RFMShared.component, options: [], config: c)
+        XCTAssertFalse(inst.isEffect)
+        XCTAssertEqual(inst.inputBusses.count, 0)
+    }
 }

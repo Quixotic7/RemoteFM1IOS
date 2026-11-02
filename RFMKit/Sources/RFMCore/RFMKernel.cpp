@@ -34,12 +34,16 @@ int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max
     k->maxFrames = max_frames;
     k->storage.assign((size_t)channels * max_frames, 0.0f);
     k->scratch.assign(max_frames, 0.0f);
+    k->inL.assign(max_frames, 0.0f);
+    k->inR.assign(max_frames, 0.0f);
     rfmhc_reset(&k->hc);                        // (not rendering: the render thread's state)
     k->bufs.resize(channels);
     for (uint32_t c = 0; c < channels; c++)
         k->bufs[c] = k->storage.data() + (size_t)c * max_frames;
     return 1;
 }
+
+void rfmk_set_input(rfmk_t *k, int on) { k->inputOn.store(on != 0, std::memory_order_relaxed); }
 
 void rfmk_deallocate(rfmk_t *k)
 {

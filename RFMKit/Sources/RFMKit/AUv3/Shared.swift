@@ -22,6 +22,11 @@ public enum RFMShared {
         componentType: kAudioUnitType_MusicDevice, componentSubType: fourCC("Rfm1"),
         componentManufacturer: fourCC("Qx7u"), componentFlags: 0, componentFlagsMask: 0)
 
+    /// (ain1) the same with an audio input: type aumf (a music effect), so a host can route another track's audio in
+    public static let effectComponent = AudioComponentDescription(
+        componentType: kAudioUnitType_MusicEffect, componentSubType: fourCC("Rfm1"),
+        componentManufacturer: fourCC("Qx7u"), componentFlags: 0, componentFlagsMask: 0)
+
     /// Darwin notification / notify(3) names: prefixed with the App Group (what a sandbox lets through)
     static func name(_ what: String, _ role: ProbeRole) -> String { "\(appGroup).\(what).\(role.rawValue)" }
 

@@ -22,6 +22,8 @@ void rfmk_free(rfmk_t *k);
 // buffers for hosts that pass NULL mData (channels x max_frames floats)
 int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max_frames);
 void rfmk_deallocate(rfmk_t *k);
+// (ain1) the music effect variant: the host's input bus pulled each render and given to the engine's audio input
+void rfmk_set_input(rfmk_t *k, int on);
 
 typedef struct {
     uint64_t renders, frames, midi_events, ticks;

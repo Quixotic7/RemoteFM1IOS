@@ -30,6 +30,27 @@
 					<key>version</key>
 					<integer>1</integer>
 				</dict>
+				<dict>
+					<key>description</key>
+					<string>RemoteFM1 (audio in)</string>
+					<key>manufacturer</key>
+					<string>Qx7u</string>
+					<key>name</key>
+					<string>Quixotic7: RemoteFM1 (audio in)</string>
+					<key>sandboxSafe</key>
+					<true/>
+					<key>subtype</key>
+					<string>Rfm1</string>
+					<key>tags</key>
+					<array>
+						<string>Effects</string>
+						<string>Synthesizer</string>
+					</array>
+					<key>type</key>
+					<string>aumf</string>
+					<key>version</key>
+					<integer>1</integer>
+				</dict>
 			</array>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>

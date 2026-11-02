@@ -838,3 +838,18 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
   GitHub: set `build` when a build reaches testers) or RemoteFM1's own firmware has an update (not the other firmware's); Open TestFlight / Get firmware /
   Close. Closed, it stays away until the set changes (UpdateNotice). Not for launches with options; -updatenotice
   forces it.
+
+## 22. Live audio input for .rfm1, ain1 (2026-11-02)
+
+Spec: RemoteFM1 web/engine/API.md section 6 (FM1VST docs/VIRTUAL-CARTS.md section 8). `"wants": ["ain1"]` or
+`"needs"` (virtual only); optional exports `rfm1_audio_in_info(state, latency)` on a change and
+`rfm1_audio_in(in, n)` right before `rfm1_audio(out, n)`; latency = the round trip at 44.1 kHz.
+- **Engine:** AudioIn ring (RFMCoreBackend.h) at 44.1 kHz, the reader held near a fixed level (512 frames), short =
+  silence, far behind = dropped to the level; WasmCore calls the two exports; `rfme_ain_*` (rfme_ain_push_f32
+  resamples float input, real-time safe). Tests: AudioInTests (Fixtures/ain_cart.rfm1 from RemoteFM1, Elasticat 0.4.0
+  from FM1VST's elasticat worktree when present).
+- **App:** Firmware page › Audio input for a firmware that takes it: on (the microphone asked then), the input (mic,
+  headset, interface); kept per firmware. playAndRecord (speaker), an AVAudioSinkNode on the input. Round trip:
+  input + output latency, two IO buffers, the ring, the headroom.
+- **AU:** a second component, "Quixotic7: RemoteFM1 (audio in)", type aumf: one input bus the host routes, pulled each
+  render into the ring; always on for a firmware that takes input.

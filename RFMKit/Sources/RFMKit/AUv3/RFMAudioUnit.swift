@@ -61,6 +61,9 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     public let backend: String                  // "none", "fake", "shared fake", "device"
     public let fakeLabel: String
     private let outBus: AUAudioUnitBus
+    /// (ain1) the music effect variant ("aumf", "Rfm1"): an input bus, routed by the host, as a firmware's audio input
+    public let isEffect: Bool
+    private var inBus: AUAudioUnitBus?
     private var outputs: AUAudioUnitBusArray!
     private var inputs: AUAudioUnitBusArray!
     private let lock = NSLock()                 // instanceState, channel
@@ -149,6 +152,12 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         }
         outBus = try AUAudioUnitBus(format: fmt)
         outBus.maximumChannelCount = 2
+        isEffect = componentDescription.componentType == kAudioUnitType_MusicEffect
+        if isEffect {
+            let b = try AUAudioUnitBus(format: fmt)
+            b.maximumChannelCount = 2
+            inBus = b
+        }
         if let link {
             var pc = config.panel
             pc.fake = mode != .device
@@ -159,7 +168,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         try super.init(componentDescription: componentDescription, options: options)
         rfmSetRenderContextEngine(e)            // (the core thread joins the host's render workgroup: RFMKernel.h)
         outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outBus])
-        inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: [])
+        inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: inBus.map { [$0] } ?? [])
+        if isEffect { rfmk_set_input(kernel, 1) }
         maximumFramesToRender = 4096
         probe.setInstance(instanceState.instance.uuidString)
         Self.register(self)
@@ -494,11 +504,21 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
             ok = rfme_boot(e, nil, 0)
         }
         applySettingsLocked()
+        audioInLocked()
         coreID = id
         coreError = ok != 0 ? "" : "boot failed"
         bootedFrom = from
         log.info("booted \(id, privacy: .public) from \(from, privacy: .public)")
         return ok != 0
+    }
+
+    /// (ain1) the effect variant gives a firmware that takes audio in the host's input bus, always on (the routing is
+    /// the host's). The round trip it reports: the input ring and the render-ahead headroom (the host's own latency
+    /// isn't known to an AU)
+    private func audioInLocked() {
+        guard isEffect, rfme_ain_mode(e) > 0 else { return }
+        let ring: UInt32 = 512
+        rfme_ain_set(e, 1, ring + UInt32(rfme_latency(e, 44100, 0)), ring)
     }
 
     /// (main thread, possibly while the host renders) flash_sync and the image, by the clock's rules: the clock

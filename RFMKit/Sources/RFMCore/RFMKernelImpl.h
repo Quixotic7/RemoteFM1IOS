@@ -24,6 +24,9 @@ struct rfmk {
     std::vector<float *> bufs;
     std::vector<float> scratch;                 // the second channel of a mono output
     rfme_t *engine = nullptr;
+    // (ain1: the music effect variant) the host's audio into the engine's input ring, pulled each render
+    std::atomic<bool> inputOn{false};
+    std::vector<float> inL, inR;                // maxFrames each
     void *midiOut = nullptr;                    // the host's AUMIDIOutputEventBlock (retained; RFMKernelBlock.mm)
     void *musical = nullptr, *transport = nullptr;  // its musicalContextBlock, transportStateBlock (retained)
 

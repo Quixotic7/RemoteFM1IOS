@@ -105,9 +105,20 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
     AUInternalRenderBlock block = ^AUAudioUnitStatus(AudioUnitRenderActionFlags *actionFlags,
                                                      const AudioTimeStamp *ts, AUAudioFrameCount frameCount,
                                                      NSInteger, AudioBufferList *outputData,
-                                                     const AURenderEvent *events, AURenderPullInputBlock) {
+                                                     const AURenderEvent *events, AURenderPullInputBlock pullInput) {
         if (frameCount > k->maxFrames)
             return kAudioUnitErr_TooManyFramesToProcess;
+        // (ain1, the music effect: the host's input, pulled into our buffers, into the engine's ring at 44.1 kHz)
+        if (pullInput && k->engine && k->inputOn.load(std::memory_order_relaxed) && !k->inL.empty()) {
+            struct { AudioBufferList l; AudioBuffer second; } abl;
+            abl.l.mNumberBuffers = 2;
+            abl.l.mBuffers[0] = {1, frameCount * (UInt32)sizeof(float), k->inL.data()};
+            abl.l.mBuffers[1] = {1, frameCount * (UInt32)sizeof(float), k->inR.data()};
+            AudioUnitRenderActionFlags f = 0;
+            if (pullInput(&f, ts, frameCount, 0, &abl.l) == noErr)
+                rfme_ain_push_f32(k->engine, (const float *)abl.l.mBuffers[0].mData,
+                                  (const float *)abl.l.mBuffers[1].mData, frameCount, k->sampleRate);
+        }
         k->nev = k->npev = 0;
         const bool clockOn = k->hostClockOn.load(std::memory_order_relaxed);
         rfmhc_input_t host{};
