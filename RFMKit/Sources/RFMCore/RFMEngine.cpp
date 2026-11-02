@@ -174,6 +174,7 @@ struct rfme final : rfm::HostParams::Panel {
     // the core (the control thread changes these only with the clock stopped)
     rfm::CoreFactory factory;               // makes the backend (the load's; a power cycle makes a new one with it)
     std::unique_ptr<rfm::CoreBackend> core; // the firmware (a native slot; later a Wasm module)
+    rfm::AudioIn ain;                       // (ain1) the host's audio input, for a core that takes it
     std::unique_ptr<rfm::CoreDevice> dev;   // its clock
     uint32_t stallUs = 0;                   // (tests) rfme_test_frame_stall
     uint8_t btnId[FM1P_NB] = {}, encId[FM1P_NE - 1] = {};   // the panel's label / role maps, as init left them
@@ -1226,6 +1227,8 @@ struct rfme final : rfm::HostParams::Panel {
             c = rfm::stallingCore(std::move(c), stallUs);
         std::lock_guard<std::mutex> g(hpViewLock);
         core = std::move(c);
+        ain.set(0, 0);                                  // (a new firmware: input off until the host says)
+        core->set_audio_in(&ain);
         dev = std::make_unique<rfm::CoreDevice>(*core);
         dev->set_frame_ms(frameMs.load(std::memory_order_relaxed));
         namesGen.fetch_add(1);
@@ -1453,6 +1456,25 @@ int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
     }
     (ok ? e->midiInCount : e->midiInDropped).fetch_add(1, std::memory_order_relaxed);
     return ok ? 1 : 0;
+}
+
+int rfme_ain_mode(rfme_t *e) { return e->core ? e->core->audio_in_mode() : 0; }
+
+void rfme_ain_set(rfme_t *e, int state, uint32_t latency_frames, uint32_t target_frames)
+{
+    if (target_frames)
+        e->ain.target.store(target_frames < 128 ? 128 : target_frames > 8192 ? 8192 : target_frames);
+    e->ain.set(state ? 1 : 0, latency_frames);
+}
+
+void rfme_ain_push(rfme_t *e, const int16_t *stereo, uint32_t frames) { e->ain.push(stereo, frames); }
+
+void rfme_ain_stats(rfme_t *e, uint32_t *short_frames, uint32_t *dropped_frames)
+{
+    if (short_frames)
+        *short_frames = e->ain.shortFrames.load();
+    if (dropped_frames)
+        *dropped_frames = e->ain.droppedFrames.load();
 }
 
 void rfme_set_realtime(rfme_t *e, int on)

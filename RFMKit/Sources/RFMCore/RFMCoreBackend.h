@@ -24,6 +24,8 @@
 // firmware down (fm1core.h: shutdown()) and frees what it holds (a slot is given back to the loader). A power cycle
 // destroys the backend and makes a new one with the same factory.
 #pragma once
+#include <atomic>
+#include <cstring>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -64,6 +66,83 @@ struct ParamDesc {
     uint32_t flags;
 };
 
+// Live audio input for an .rfm1 that lists "ain1" (RemoteFM1 web/engine/API.md section 6): the host writes
+// interleaved stereo int16 at 44.1 kHz (push, its audio input's thread), the core's thread takes one block before
+// each rfm1_audio (pull). The reader starts once `target` frames are in (silence until then) and keeps the ring near
+// it: short, the rest is silence (counted); more than target + 2048 behind, the oldest go. So the input lags the
+// output by about `target` frames, fixed while live: the host counts it in `latency`.
+struct AudioIn {
+    static constexpr uint32_t RING = 16384;             // stereo frames, a power of two
+    std::atomic<int> state{0};                          // the host's: 0 off, 1 live
+    std::atomic<uint32_t> latency{0};                   // the round trip at 44.1 kHz (0 unknown)
+    std::atomic<uint32_t> epoch{0};                     // moves when state or latency do (the host's set())
+    std::atomic<uint32_t> target{1024};
+    std::atomic<uint64_t> w{0}, r{0};
+    std::atomic<uint32_t> shortFrames{0}, droppedFrames{0};
+    bool started = false;                               // (the reader's)
+    int16_t buf[RING * 2] = {};
+
+    void set(int st, uint32_t lat)
+    {
+        state.store(st, std::memory_order_relaxed);
+        latency.store(lat, std::memory_order_relaxed);
+        epoch.fetch_add(1, std::memory_order_release);
+    }
+    // (the host's input thread) n frames; what doesn't fit is dropped
+    void push(const int16_t *stereo, uint32_t n)
+    {
+        uint64_t wp = w.load(std::memory_order_relaxed);
+        const uint64_t room = RING - (wp - r.load(std::memory_order_acquire));
+        if (n > room) {
+            droppedFrames.fetch_add(n - (uint32_t)room, std::memory_order_relaxed);
+            n = (uint32_t)room;
+        }
+        for (uint32_t i = 0; i < n; i++, wp++) {
+            const uint32_t k = (uint32_t)(wp & (RING - 1));
+            buf[2 * k] = stereo[2 * i];
+            buf[2 * k + 1] = stereo[2 * i + 1];
+        }
+        w.store(wp, std::memory_order_release);
+    }
+    // (the core's thread) n frames into out: input, or silence where there is none yet
+    void pull(int16_t *out, uint32_t n)
+    {
+        const uint64_t wp = w.load(std::memory_order_acquire);
+        uint64_t rp = r.load(std::memory_order_relaxed);
+        const uint32_t t = target.load(std::memory_order_relaxed);
+        uint64_t avail = wp - rp;
+        if (!started) {
+            if (avail < t) {
+                std::memset(out, 0, (size_t)n * 4);
+                return;
+            }
+            started = true;
+        }
+        if (avail > (uint64_t)t + 2048 + n) {           // (fallen behind: back to the target)
+            droppedFrames.fetch_add((uint32_t)(avail - t), std::memory_order_relaxed);
+            rp = wp - t;
+            avail = t;
+        }
+        const uint32_t k = avail < n ? (uint32_t)avail : n;
+        for (uint32_t i = 0; i < k; i++, rp++) {
+            const uint32_t j = (uint32_t)(rp & (RING - 1));
+            out[2 * i] = buf[2 * j];
+            out[2 * i + 1] = buf[2 * j + 1];
+        }
+        if (k < n) {
+            std::memset(out + 2 * k, 0, (size_t)(n - k) * 4);
+            shortFrames.fetch_add(n - k, std::memory_order_relaxed);
+        }
+        r.store(rp, std::memory_order_release);
+    }
+    // (the core's thread) input went off or on again: from empty
+    void restart()
+    {
+        r.store(w.load(std::memory_order_acquire), std::memory_order_release);
+        started = false;
+    }
+};
+
 class CoreBackend {
 public:
     virtual ~CoreBackend() = default;
@@ -87,6 +166,10 @@ public:
     virtual void frame() = 0;
     virtual void idle() = 0;
     virtual void audio(int16_t *stereo, uint32_t frames) = 0;               // frames: a multiple of FM1P_BLOCK
+    // (ain1) 0: no audio input; 1 its manifest "wants" it; 2 "needs" it (a Wasm core with ain1)
+    virtual int audio_in_mode() const { return 0; }
+    // the engine's input ring, read before each audio() block while live (nullptr: none)
+    virtual void set_audio_in(AudioIn * /*in*/) {}
     virtual int midi_in(uint32_t pkt) = 0;                                   // 0: no room, retry later
     virtual int midi_out_take(uint32_t *pkt) = 0;                            // 0: none
     virtual bool stats(uint32_t *shed, uint32_t *cpu_pct) = 0;               // false: the core has no stats()

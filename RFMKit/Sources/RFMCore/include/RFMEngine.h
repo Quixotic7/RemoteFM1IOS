@@ -154,6 +154,18 @@ void rfme_set_frame_ms(rfme_t *e, uint32_t ms);
 // ordinary thread at the highest QoS (0): for an interpreted core, whose screen redraws overrun any time constraint
 // and get the thread demoted
 void rfme_set_realtime(rfme_t *e, int on);
+
+// ---- (ain1) live audio input for an .rfm1 that lists it (RemoteFM1 web/engine/API.md section 6)
+// the running core: 0 takes no input; 1 its manifest "wants" ain1; 2 "needs" it
+int rfme_ain_mode(rfme_t *e);
+// (any thread) input live (1) or off (0); latency_frames: the round trip at 44.1 kHz, 0 unknown (the core gets
+// rfm1_audio_in_info on a change); target_frames: the input ring's level (its own delay, part of the round trip; 0
+// keeps it)
+void rfme_ain_set(rfme_t *e, int state, uint32_t latency_frames, uint32_t target_frames);
+// (the host's input thread) interleaved stereo int16 at 44.1 kHz
+void rfme_ain_push(rfme_t *e, const int16_t *stereo, uint32_t frames);
+// frames given as silence because none had come, frames dropped (the ring full, or fallen behind)
+void rfme_ain_stats(rfme_t *e, uint32_t *short_frames, uint32_t *dropped_frames);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
 // played; 0: none. _at also gives its frame in that render (the same latency as the audio)
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);

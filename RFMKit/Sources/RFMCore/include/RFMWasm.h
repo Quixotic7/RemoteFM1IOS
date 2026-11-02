@@ -30,6 +30,8 @@ typedef struct {
     // (rfm1_host_1); what its manifest's "folders" allow ("audio:r code:r data:rw")
     uint32_t is_virtual, uses_folder;
     char folders[40];
+    // (ain1, live audio input: RemoteFM1 web/engine/API.md section 6) 0 none, 1 its manifest "wants" it, 2 "needs" it
+    uint32_t audio_in;
 } rfmw_info_t;
 
 // the format's every check (section 7 step 1: the magic, the manifest, the imports, the exports, the memory) and one
