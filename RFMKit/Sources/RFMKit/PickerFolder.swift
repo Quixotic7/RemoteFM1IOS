@@ -2,7 +2,7 @@
 // Copyright (C) 2026 RemoteFM1 contributors
 // The folder a document picker last picked from (the cartridge page's .syx picker, Add firmware…, a web editor's Add files…, Restore), so the next one opens
 // there: a bookmark of the picked file's parent folder (its URL alone when the folder can't be bookmarked), in
-// UserDefaults by key. Gone, moved or unreadable: nil, and the picker opens where the system likes.
+// UserDefaults by key. A folder since gone: the picker opens where the system likes.
 
 import Foundation
 
@@ -43,10 +43,8 @@ public struct PickerFolder: @unchecked Sendable {
         }
         if u == nil, let s = defaults.string(forKey: key + ".url") { u = URL(string: s) }
         guard let u, u.isFileURL else { return nil }
-        let scoped = u.startAccessingSecurityScopedResource()
-        defer { if scoped { u.stopAccessingSecurityScopedResource() } }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        // (not checked for existence: the app could read only the picked file, never its folder, so a folder outside
+        // the app always looked missing and every picker opened in RemoteFM1. The picker copes with a folder gone)
         return u
     }
 }

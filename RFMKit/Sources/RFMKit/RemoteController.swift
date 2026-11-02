@@ -33,7 +33,9 @@ public final class RemoteController {
     public private(set) var master: Int?
     public private(set) var preview: CGImage?          // the frame being sent (also while not connected)
     public private(set) var midiSetupChanges = 0
-    public private(set) var panel: PanelStatus?        // (with a lease) who holds the FM-1
+    public private(set) var panel: PanelStatus?        // (with a lease) who holds the FM-1; its ages move at every poll
+    /// who holds the FM-1, set only when that changes: what pages read (not `panel`)
+    public private(set) var lease = LeaseSummary()
     @ObservationIgnored public private(set) var session: PanelSession?
 
     public static let maxEvents = 12
@@ -202,7 +204,8 @@ public final class RemoteController {
         guard let core else { return }
         var st = rfmc_status_t()
         rfmc_status(core, &st)
-        isRunning = st.wanted != 0
+        // (observation fires on every assignment, equal or not: a view reading these would redraw at every poll)
+        if (st.wanted != 0) != isRunning { isRunning = st.wanted != 0 }
         let s = Self.state(of: st, searchingSince: &searchingSince)
         if s != state { state = s }
         let text = Self.string(st.text), log = Self.string(st.log)
@@ -215,6 +218,8 @@ public final class RemoteController {
         if let session {
             let p = session.status()
             if p != panel { panel = p }
+            let l = LeaseSummary(p)
+            if l != lease { lease = l }
         }
 
         var buf = [rfmc_event_t](repeating: rfmc_event_t(), count: Self.maxEvents)

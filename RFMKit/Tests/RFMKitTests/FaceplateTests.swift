@@ -174,6 +174,13 @@ final class KeybedGeometryTests: XCTestCase {
         XCTAssertEqual(g.stripIndex(atX: g.stripCell(9).midX), 9)
         XCTAssertEqual(g.offset(centering: 0), 0)
         XCTAssertEqual(g.offset(centering: 15), g.maxOffset, accuracy: 0.001)
+        // let go anywhere: whole keys (no half key at the left); the right end as far as it goes
+        for o in stride(from: CGFloat(0), through: g.maxOffset, by: 0.13) {
+            let s = g.snap(o)
+            XCTAssertTrue(s == s.rounded() || s == g.maxOffset, "\(o) -> \(s)")
+            XCTAssertLessThanOrEqual(abs(s - o), 0.5 + 0.001)
+        }
+        XCTAssertTrue((0..<16).allSatisfy { let o = g.offset(centering: $0); return o == o.rounded() || o == g.maxOffset })
     }
 
     func testSpokenNames() {

@@ -338,7 +338,7 @@ final class CartTests: XCTestCase {
 }
 
 final class PickerFolderTests: XCTestCase {
-    func testRemembersTheParentAndForgetsWhenGone() throws {
+    func testRemembersTheParent() throws {
         let d = UserDefaults(suiteName: "PickerFolderTests")!
         d.removePersistentDomain(forName: "PickerFolderTests")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("pf-\(UUID().uuidString)")
@@ -348,6 +348,6 @@ final class PickerFolderTests: XCTestCase {
         f.remember([dir.appendingPathComponent("a.syx")])
         XCTAssertEqual(f.url?.standardizedFileURL.resolvingSymlinksInPath().path, dir.resolvingSymlinksInPath().path)
         try FileManager.default.removeItem(at: dir)
-        XCTAssertNil(f.url, "gone: nil")
+        XCTAssertNotNil(f.url, "not checked: the app can't see a folder outside it, only the picked file")
     }
 }

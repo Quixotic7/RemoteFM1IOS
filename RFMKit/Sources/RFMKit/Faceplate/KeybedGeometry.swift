@@ -98,8 +98,15 @@ public struct KeybedGeometry: Equatable, Sendable {
     /// the default scroll offset (the canvas: F3 in view for steps, else four naturals in, around C4)
     public var defaultOffset: CGFloat { min(maxOffset, 4) }
 
-    /// the offset that centres natural i
-    public func offset(centering i: Int) -> CGFloat { Self.clamp(CGFloat(i) - visible / 2 + 0.5, 0, maxOffset) }
+    /// the offset that centres natural i (as near as whole keys allow)
+    public func offset(centering i: Int) -> CGFloat { snap(CGFloat(i) - visible / 2 + 0.5) }
+
+    /// an offset moved to the nearest whole key (no key cut in half at the left; the right end as far as it goes)
+    public func snap(_ o: CGFloat) -> CGFloat {
+        let c = Self.clamp(o, 0, maxOffset)
+        let stops = [c.rounded(.down), min(c.rounded(.up), maxOffset), maxOffset]   // (the right end is a stop too)
+        return stops.min { abs($0 - c) < abs($1 - c) } ?? c
+    }
 
     /// the key under a point in the keybed's coordinates (scroll offset applied), nil: none (a gap, the strip)
     public func key(at p: CGPoint, offset: CGFloat = 0) -> Key? {

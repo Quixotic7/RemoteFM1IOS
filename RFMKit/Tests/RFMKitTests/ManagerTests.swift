@@ -52,6 +52,8 @@ final class ManagerTests: XCTestCase {
         XCTAssertEqual(ManagerList.url(for: "felucca")?.absoluteString, "https://hugelton.github.io/Felucca/webapp/editor/")
         XCTAssertFalse(ManagerList.authors.values.contains { $0.host == "remotefm1.com" }, "never the site's copies")
         XCTAssertNil(ManagerList.url(for: "fizz"))
+        XCTAssertNotNil(ManagerList.url(for: "mutabledreams"), "the site lists it as \"mutable\"")
+        XCTAssertEqual(ManagerList.port(for: "rainbow", name: "Rainbow Mode"), "Felucca", "Felucca's editor looks for Felucca")
         XCTAssertEqual(ManagerList.port(for: "melodee", name: "Melodee"), "Melodee FM-1")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")
     }

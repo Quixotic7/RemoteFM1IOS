@@ -22,6 +22,11 @@ public enum ManagerList {
         "melodee": URL(string: "https://keremimo.github.io/melodee/webapp/editor/")!,
         "jiant": URL(string: "https://juanjiant-bit.github.io/JIANT/webapp/editor/")!,
         "ghoulbox": URL(string: "https://jasonpersinger.me/ghoulbox-fm1-dungeon-synth/webapp/editor/")!,
+        // (not in the site catalog's editors: Mutable Dreams is listed there as "mutable"; Rainbow Mode and Hortator
+        // have Felucca's editor on their own sites)
+        "mutabledreams": URL(string: "https://mutable-dreams.kidbee85.chatgpt.site/#device-editor")!,
+        "rainbow": URL(string: "https://joshbartlettband-web.github.io/felucca-rainbow/webapp/editor/")!,
+        "hortator": URL(string: "https://deadactive.github.io/hortator/webapp/editor/")!,
     ]
 
     /// each firmware's real USB MIDI port name: the name the page's port takes (managers.json "ports")
@@ -31,6 +36,7 @@ public enum ManagerList {
         "melodee": "Melodee FM-1", "jiant": "JIANT FM", "fomni": "FoMni FM-1", "fimba": "FiMba FM-1",
         "loom": "LOOM-8 FM-1", "duell": "DUELL", "minitone": "Felucca", "fmini": "FM-1 Midi", "skiff": "Felucca",
         "grimm": "Felucca", "pigeon": "PIGEON", "tonitor": "FM-1 Tonitor", "speak37": "Speak37",
+        "rainbow": "Felucca", "hortator": "Felucca", "mutabledreams": "Mutable Dreams FM-1",
     ]
 
     /// managers opened at their author's page rather than the site's copy, which lags behind (ChoralRoot's reads

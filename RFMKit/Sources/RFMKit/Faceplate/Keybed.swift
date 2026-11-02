@@ -147,7 +147,9 @@ struct RangeStrip: View {
                 }
             }
             .onEnded { v in
-                if abs(v.translation.width) <= 4 { jump(g.offset(centering: g.stripIndex(atX: v.location.x))) }
+                if abs(v.translation.width) <= 4 { jump(g.offset(centering: g.stripIndex(atX: v.location.x))); return }
+                let mw = g.size.width - 2 * g.pad      // (let go: onto whole keys)
+                jump(g.snap((v.location.x - g.pad) / mw * 16 - g.visible / 2))
             })
     }
 }

@@ -805,3 +805,12 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
   image is made only when read.
 - **Editor dialogs:** WKWebView answers confirm() with false unless the app shows it, so the editor's "Place all?"
   was a Cancel. alert, confirm and prompt are now real dialogs.
+- **Menus, take 2:** the main screen read `controller.panel`, whose lease ages move at every 66 ms poll, and
+  `isRunning` was assigned each poll (observation fires on every assignment): 144 redraws of the main screen in 12 s
+  on the Firmware page, now 5. Pages read `controller.lease` (LeaseSummary), set only when ownership changes.
+- **Pickers:** the remembered folder isn't checked for existence (the app sees the picked file, never its folder, so
+  outside folders always looked missing).
+- **Key range:** let go, or a tap, puts it on whole keys (KeybedGeometry.snap).
+- **Swipe in from the right:** the running firmware's editor.
+- **More editors:** Mutable Dreams (listed on the site as "mutable"), Rainbow Mode and Hortator (Felucca's editor on
+  their own sites; port "Felucca").

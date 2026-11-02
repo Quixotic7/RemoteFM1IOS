@@ -73,6 +73,19 @@ public struct PanelStatus: Sendable, Equatable {
     public var heldElsewhere: Bool { !owner && !leaseEmpty && !ownerStale }
 }
 
+/// PanelStatus without what moves at every poll (ages, counters): whether this instance holds the FM-1, and who does
+public struct LeaseSummary: Sendable, Equatable {
+    public var owner = false
+    public var heldElsewhere = false
+    public var ownerName = ""
+    public init() {}
+    public init(_ p: PanelStatus?) {
+        owner = p?.owner ?? false
+        heldElsewhere = p?.heldElsewhere ?? false
+        ownerName = p?.ownerName ?? ""
+    }
+}
+
 public final class PanelSession: @unchecked Sendable {
     public struct Config: Sendable {
         public var leasePath: URL?                  // nil: RFMShared.leaseLocation()

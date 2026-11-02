@@ -416,3 +416,22 @@ public struct FirmwareSidebar: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
+
+/// a thin strip on the right edge: a swipe in from it (to the left) runs `action` (the firmware's web editor)
+public struct RightEdgeSwipe: View {
+    let action: () -> Void
+    public init(action: @escaping () -> Void) { self.action = action }
+
+    public var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Color.clear.frame(width: 14).contentShape(Rectangle())
+                .padding(.top, 90)                              // (not over the status row's firmware name)
+                .gesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                    .onEnded { v in
+                        if v.translation.width < -60 || v.predictedEndTranslation.width < -160 { action() }
+                    })
+                .accessibilityHidden(true)
+        }
+    }
+}

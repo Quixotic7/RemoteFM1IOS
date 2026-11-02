@@ -173,7 +173,7 @@ struct MainScreen: View {
 
     var chip: PanelChip {
         guard source == .fm1 else { return .emulator }
-        if controller.panel?.heldElsewhere == true { return .inUse }
+        if controller.lease.heldElsewhere { return .inUse }
         return controller.state.isConnected ? .linked : .searching
     }
 
@@ -226,6 +226,10 @@ struct MainScreen: View {
                                     withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
                                 })
                     .zIndex(1)
+                if !sidebarOpen, let c = player.current, ManagerList.editor(for: c.firmwareID, details: catalog.details) != nil {
+                    RightEdgeSwipe { showManager = true }     // (a swipe in from the right: the firmware's editor)
+                        .zIndex(1)
+                }
             }
             PullDownSheet(open: $ui.sheetOpen) { sheet }
             if ui.editorOpen {
@@ -403,7 +407,7 @@ struct MainScreen: View {
 
     private func pick(_ s: SoundSource) {
         guard s != source else {
-            if s == .fm1, !controller.isRunning, controller.panel?.heldElsewhere != true { controller.start() }
+            if s == .fm1, !controller.isRunning, !controller.lease.heldElsewhere { controller.start() }
             return
         }
         saveView()
@@ -412,7 +416,7 @@ struct MainScreen: View {
         withAnimation(.easeInOut(duration: 0.25)) { loadView(s) }
         switch s {
         case .phone: if controller.isRunning { controller.stop() }   // (the emulator: no link)
-        case .fm1: if controller.panel?.heldElsewhere != true { controller.start() }   // (else: Use this FM-1)
+        case .fm1: if !controller.lease.heldElsewhere { controller.start() }   // (else: Use this FM-1)
         }
     }
 
@@ -574,7 +578,8 @@ struct MainScreen: View {
     private var updates: Int { catalog.updates(builtIn: builtIn).count }
 
     private var fm1Line: String {
-        if let p = controller.panel, p.heldElsewhere {
+        if controller.lease.heldElsewhere {
+            let p = controller.lease
             return p.ownerName.isEmpty ? "In use by another instance" : "In use by \(p.ownerName)"
         }
         switch controller.state {
@@ -587,7 +592,7 @@ struct MainScreen: View {
     /// the FM-1 card's actions: Use this FM-1 (design section 10) and the Bluetooth pairing
     private var fm1Actions: some View {
         HStack(spacing: 8) {
-            if controller.panel?.heldElsewhere == true || (!controller.isRunning && controller.panel?.owner != true) {
+            if controller.lease.heldElsewhere || (!controller.isRunning && !controller.lease.owner) {
                 SheetButton("Use this FM-1", accent: true) { controller.start() }
             }
             SheetButton("Bluetooth…") { showBluetooth = true }
