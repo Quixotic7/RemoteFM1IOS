@@ -175,6 +175,8 @@ struct rfme final : rfm::HostParams::Panel {
     rfm::CoreFactory factory;               // makes the backend (the load's; a power cycle makes a new one with it)
     std::unique_ptr<rfm::CoreBackend> core; // the firmware (a native slot; later a Wasm module)
     rfm::AudioIn ain;                       // (ain1) the host's audio input, for a core that takes it
+    double ainPos = 0, ainRate = 0;          // (rfme_ain_push_f32: its linear resampler, the input thread's)
+    float ainPrevL = 0, ainPrevR = 0;
     std::unique_ptr<rfm::CoreDevice> dev;   // its clock
     uint32_t stallUs = 0;                   // (tests) rfme_test_frame_stall
     uint8_t btnId[FM1P_NB] = {}, encId[FM1P_NE - 1] = {};   // the panel's label / role maps, as init left them
@@ -1468,6 +1470,47 @@ void rfme_ain_set(rfme_t *e, int state, uint32_t latency_frames, uint32_t target
 }
 
 void rfme_ain_push(rfme_t *e, const int16_t *stereo, uint32_t frames) { e->ain.push(stereo, frames); }
+
+void rfme_ain_push_f32(rfme_t *e, const float *left, const float *right, uint32_t frames, double rate)
+{
+    if (!left || !frames || !(rate > 0))
+        return;
+    if (!right)
+        right = left;                                   // (mono: both channels)
+    if (rate != e->ainRate) {
+        e->ainRate = rate;
+        e->ainPos = 0;
+        e->ainPrevL = e->ainPrevR = 0;
+    }
+    const double step = rate / 44100.0;                 // input frames per output frame
+    int16_t out[2 * 256];
+    uint32_t n = 0;
+    auto s16 = [](float v) -> int16_t {
+        const float c = v > 1.f ? 1.f : v < -1.f ? -1.f : v;
+        return (int16_t)lrintf(c * 32767.f);
+    };
+    // ainPos: where the next output frame falls, in input frames relative to this buffer (-1..0: between the last
+    // buffer's final frame, kept in prev, and this one's first)
+    double pos = e->ainPos;
+    while (pos < (double)frames - 1.0 || (pos < (double)frames && pos < 0)) {
+        const int i = (int)std::floor(pos);
+        const float f = (float)(pos - i);
+        const float l0 = i < 0 ? e->ainPrevL : left[i], r0 = i < 0 ? e->ainPrevR : right[i];
+        const float l1 = left[i + 1], r1 = right[i + 1];
+        out[2 * n] = s16(l0 + (l1 - l0) * f);
+        out[2 * n + 1] = s16(r0 + (r1 - r0) * f);
+        if (++n == 256) {
+            e->ain.push(out, n);
+            n = 0;
+        }
+        pos += step;
+    }
+    if (n)
+        e->ain.push(out, n);
+    e->ainPrevL = left[frames - 1];
+    e->ainPrevR = right[frames - 1];
+    e->ainPos = pos - (double)frames;
+}
 
 void rfme_ain_stats(rfme_t *e, uint32_t *short_frames, uint32_t *dropped_frames)
 {

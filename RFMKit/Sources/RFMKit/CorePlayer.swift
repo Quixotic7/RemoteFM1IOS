@@ -43,6 +43,8 @@ public struct CoreInfo: Sendable, Equatable, Identifiable {
     /// a Fantasy CFW (its manifest's "virtual": runs only in RemoteFM1 hosts), and what its manifest's "folders" let
     /// it do in the RemoteFM1 folder ("audio": "r", "data": "rw"; empty: it doesn't use the folder)
     public var isVirtual = false
+    /// (ain1) live audio input: 0 none, 1 its manifest "wants" it, 2 "needs" it
+    public var audioIn = 0
     public var folders: [String: String] = [:]
 
     public var imported: Bool { kind == "wasm" }
@@ -411,7 +413,7 @@ public final class CorePlayer {
     /// (M7) the Wasm core can't keep up: its core thread over ~90 % of the audio time, or underruns piling up; ""
     /// otherwise
     public private(set) var perfNote = ""
-    @ObservationIgnored private var perf = PerfGuard()
+    @ObservationIgnored var perf = PerfGuard()
 
     // MARK: control
 
@@ -428,6 +430,9 @@ public final class CorePlayer {
         if let c = cores.first(where: { $0.id == id }) { FirmwareListing.used(c) }
         if mode == .core { _ = bootSelected() }
         refresh()
+        #if os(iOS)
+        restartAudioForInput()                          // (ain1: this firmware's input, or none)
+        #endif
     }
 
     public func setMode(_ m: Mode) {
@@ -519,6 +524,11 @@ public final class CorePlayer {
     }
     @ObservationIgnored private var batteryFrameMs = PerfGuard.defaultFrameMs
     @ObservationIgnored private var realtimeKind = ""
+    /// (ain1) the engine's input is on now; the input it uses
+    public internal(set) var inputLive = false
+    @ObservationIgnored var inputPortInUse: String?
+    /// the audio headroom the core runs with now (part of an input's round trip)
+    var headroomUs: UInt32 { perf.headroomUs }
 
     /// back from a battery stop: the clock and the sound as before
     public func resumeFromBattery() {
@@ -585,7 +595,7 @@ public final class CorePlayer {
         return ok != 0
     }
 
-    private func applyClock() {
+    func applyClock() {
         if audioOn {
             if !audioRunning { startAudio() }
             rfme_set_clock(e, Int32(audioRunning ? RFME_CLOCK_AUDIO : RFME_CLOCK_TIMER))
@@ -606,11 +616,22 @@ public final class CorePlayer {
         #endif
     }
 
-    private func startAudio() {
+    func startAudio() {
         #if os(iOS)
         do {
             let s = AVAudioSession.sharedInstance()
-            try s.setCategory(.playback, options: mixing ? [.mixWithOthers] : [])
+            // (ain1: recording too while this firmware's input is on; the speaker, not the earpiece)
+            if inputWanted {
+                try s.setCategory(.playAndRecord, mode: .default,
+                                  options: mixing ? [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers]
+                                                  : [.defaultToSpeaker, .allowBluetoothA2DP])
+                if let uid = AudioInput.preferredUID(for: current?.firmwareID ?? ""),
+                   let port = s.availableInputs?.first(where: { $0.uid == uid }) {
+                    try? s.setPreferredInput(port)
+                }
+            } else {
+                try s.setCategory(.playback, options: mixing ? [.mixWithOthers] : [])
+            }
             // ~10 ms buffers: the USB route (the FM-1 as a sound card) otherwise gets very short ones, and a firmware's
             // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
             try? s.setPreferredIOBufferDuration(0.010)
@@ -626,6 +647,9 @@ public final class CorePlayer {
         let n: AVAudioSourceNode = rfme_source_node(e, fmt)
         eng.attach(n)
         eng.connect(n, to: eng.mainMixerNode, format: fmt)
+        #if os(iOS)
+        if inputWanted { attachInput(eng) }
+        #endif
         do {
             try eng.start()
         } catch {
@@ -685,11 +709,12 @@ public final class CorePlayer {
         #endif
     }
 
-    private func stopAudio() {
+    func stopAudio() {
         if let o = configObserver { NotificationCenter.default.removeObserver(o) }
         configObserver = nil
         engine?.stop()
         engine = nil
+        if inputLive { rfme_ain_set(e, 0, 0, 0); inputLive = false }
         rfme_set_workgroup(e, nil)
         node = nil
         audioRunning = false

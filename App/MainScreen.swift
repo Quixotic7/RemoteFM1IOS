@@ -132,6 +132,7 @@ struct MainScreen: View {
     @State private var showBluetooth = false
     @State private var showAbout = false
     @State private var cartBack: AppSheetPage = .settings   // where the cartridge page goes back to
+    @State private var inputNote = ""                  // (ain1) why the input couldn't be turned on
     @State private var updateNotice: UpdateNotice?      // the launch notice (a newer build, firmware updates)
     @State private var readerOpen = false              // the manager layer shows the screen reader, not the editor
     @State private var showManager = false             // (section 18 step 5) the firmware's own web manager
@@ -619,6 +620,28 @@ struct MainScreen: View {
     /// when each imported file came (by SHA-256): of two of the same version, the lists show the later
     private var addedDates: [String: Date] { Dictionary(library.files.map { ($0.sha256, $0.added) }, uniquingKeysWith: max) }
 
+    /// (ain1) a firmware that takes audio in: on/off (the microphone asked on the first turn on), the input to use
+    @ViewBuilder private func audioInputSection(_ c: CoreInfo) -> some View {
+        let on = AudioInput.isOn(for: c.firmwareID) && AudioInput.granted
+        SheetSectionTitle("Audio input", top: 14)
+        SheetList {
+            SheetToggle("Use audio input", on: Binding(get: { on && player.inputLive }, set: { v in
+                Task { inputNote = await player.setAudioInput(v) ?? "" }
+            }), divider: on && player.inputLive)
+            if on && player.inputLive {
+                let inputs = player.audioInputs, now = player.currentInputName
+                ForEach(Array(inputs.enumerated()), id: \.element.uid) { i, p in
+                    SheetRow(p.name, divider: i < inputs.count - 1, chevron: false, check: p.name == now) {
+                        Task { inputNote = await player.setAudioInput(true, port: p.uid) ?? "" }
+                    }
+                }
+            }
+        }
+        SheetNote(c.audioIn == 2 ? "\(c.name) needs audio in: it plays silence without it."
+                  : "\(c.name) can take audio in: the microphone, a headset or an audio interface.")
+        if !inputNote.isEmpty { SheetNote(inputNote, color: .orange) }
+    }
+
     /// this app's build (CFBundleVersion)
     static var appBuild: Int { Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0 }
 
@@ -702,6 +725,7 @@ struct MainScreen: View {
                 .padding(.top, 12)
                 SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.running ? " · running" : "")")
                 if c.isVirtual { fantasyNote(c) }
+                if c.audioIn > 0 { audioInputSection(c) }
             }
             SheetSectionTitle("This firmware", top: 12)
             SheetList {

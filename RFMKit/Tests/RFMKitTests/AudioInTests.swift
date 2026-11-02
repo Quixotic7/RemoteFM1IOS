@@ -61,4 +61,46 @@ final class AudioInTests: XCTestCase {
                                                                            with: "Sources/RFMCore/RFMWasmCore.cpp"), encoding: .utf8)
         XCTAssertTrue(src.contains(#"KNOWN_NEEDS[] = {"fs1", "ain1"}"#))
     }
+
+    func testFloatInputIsResampledTo44k() throws {
+        let c = try WasmTestCore(path)
+        c.boot()
+        rfme_ain_set(c.e, 1, 0, 256)
+        // 48 kHz mono, 1 s, in 480-frame buffers: about 44100 frames reach the ring, the tone's level kept
+        var phase = 0.0
+        var got = rfme_audio_t()
+        for k in 0..<100 {
+            var buf = [Float](repeating: 0, count: 480)
+            for i in 0..<480 { buf[i] = Float(0.5 * sin(phase)); phase += 2 * .pi * 441 / 48000 }
+            buf.withUnsafeBufferPointer { rfme_ain_push_f32(c.e, $0.baseAddress, nil, 480, 48000) }
+            if k % 2 == 1 { got = c.run(20) }
+        }
+        XCTAssertGreaterThan(got.rms, 0.3, "a 0.5 sine: RMS about 0.35")
+        XCTAssertLessThan(got.rms, 0.4)
+        var short: UInt32 = 0, dropped: UInt32 = 0
+        rfme_ain_stats(c.e, &short, &dropped)
+        XCTAssertEqual(dropped, 0)
+    }
+
+    /// Elasticat 0.4.0 (FM1VST's elasticat worktree; skipped when absent): loads, says it takes input, boots, and
+    /// sounds with a tone in
+    func testElasticat() throws {
+        let p = "/Volumes/Q7Media-2025/Projects/Github/ChoralRootFM1/FM1VST/.claude/worktrees/elasticat/build-rfm1/rfm1/elasticat-0.4.0.rfm1"
+        guard FileManager.default.fileExists(atPath: p) else { throw XCTSkip("no elasticat-0.4.0.rfm1") }
+        var info = rfmw_info_t()
+        var err = [CChar](repeating: 0, count: 512)
+        XCTAssertEqual(rfmw_check(p, &info, &err, 512), 1, String(cString: err))
+        XCTAssertGreaterThan(info.audio_in, 0)
+        let c = try WasmTestCore(p)
+        c.boot()
+        XCTAssertGreaterThan(rfme_ain_mode(c.e), 0)
+        rfme_ain_set(c.e, 1, 2000, 512)
+        let t = tone(44100)
+        for k in 0..<20 {
+            t[(k * 2205 * 2)..<((k + 1) * 2205 * 2)].withUnsafeBufferPointer { rfme_ain_push(c.e, $0.baseAddress, 2205) }
+            c.run(50)
+        }
+        XCTAssertEqual(c.status.halted, 0, "running")
+        print("elasticat: audio_in \(info.audio_in), mode \(rfme_ain_mode(c.e))")
+    }
 }

@@ -164,13 +164,20 @@ public final class FirmwareCatalog: @unchecked Sendable {
     /// the entries as catalog cores
     /// (Fantasy CFW) the manifest's "virtual" and "folders" (the loader checked them)
     nonisolated static func fantasy(_ path: String) -> (Bool, [String: String]) {
+        let (v, f, _) = manifestFlags(path)
+        return (v, f)
+    }
+
+    /// the manifest's "virtual", the folders it uses (with fs1), its audio input (ain1: 1 "wants", 2 "needs")
+    nonisolated static func manifestFlags(_ path: String) -> (Bool, [String: String], Int) {
         var buf = [CChar](repeating: 0, count: 16384)
         guard rfmw_text(path, "manifest", &buf, UInt32(buf.count)) > 0,
               let j = try? JSONSerialization.jsonObject(with: Data(String(cString: buf).utf8)) as? [String: Any]
-        else { return (false, [:]) }
+        else { return (false, [:], 0) }
         let folders = (j["folders"] as? [String: String] ?? [:]).filter { ["audio", "code", "data"].contains($0.key) }
-        let needsFS = (j["needs"] as? [String] ?? []).contains("fs1")
-        return (j["virtual"] as? Bool ?? false, needsFS ? folders : [:])
+        let needs = j["needs"] as? [String] ?? [], wants = j["wants"] as? [String] ?? []
+        let ain = needs.contains("ain1") ? 2 : wants.contains("ain1") ? 1 : 0
+        return (j["virtual"] as? Bool ?? false, needs.contains("fs1") ? folders : [:], ain)
     }
 
     public func cores() -> [CoreInfo] {
@@ -186,7 +193,7 @@ public final class FirmwareCatalog: @unchecked Sendable {
             c.path = p
             c.fileSize = f.fileSize
             c.fileName = f.file
-            (c.isVirtual, c.folders) = Self.fantasy(p)
+            (c.isVirtual, c.folders, c.audioIn) = Self.manifestFlags(p)
             return c
         }
         .sorted { ($0.name.lowercased(), $0.version, $0.sha256) < ($1.name.lowercased(), $1.version, $1.sha256) }

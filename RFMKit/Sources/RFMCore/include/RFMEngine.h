@@ -164,6 +164,9 @@ int rfme_ain_mode(rfme_t *e);
 void rfme_ain_set(rfme_t *e, int state, uint32_t latency_frames, uint32_t target_frames);
 // (the host's input thread) interleaved stereo int16 at 44.1 kHz
 void rfme_ain_push(rfme_t *e, const int16_t *stereo, uint32_t frames);
+// (the host's real-time input thread) float input at its own rate, resampled to 44.1 kHz (linear) into the ring;
+// right nullptr: mono, on both channels. No allocation, no locks
+void rfme_ain_push_f32(rfme_t *e, const float *left, const float *right, uint32_t frames, double rate);
 // frames given as silence because none had come, frames dropped (the ring full, or fallen behind)
 void rfme_ain_stats(rfme_t *e, uint32_t *short_frames, uint32_t *dropped_frames);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
