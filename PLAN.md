@@ -826,3 +826,10 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 - **Screen reader:** Charles Vestal's FM-1 Screen Reader (charlesvestal.github.io/fm1-reader) opened like an editor
   for the firmwares on its list (X0X, FoMni, AMB-1, Polly, MONK-1, Mocky, CTL-1); AMB-1 1.3, X0X 1.2.0, FoMni 0.4
   answer its HELLO in the app's engine; Ripple 0.4 doesn't.
+- **Bank sync (RemoteFM1 in the app and an FM-1):** RemoteFM1 0.3.1 lists its banks with each one's CRC-32 but can't
+  send one back, so the app keeps every cartridge it sends (CartKeep: Files › RemoteFM1 › Cartridges, `<name>
+  <crc>.syx`; a .syx put there counts) and Sync copies each bank one side lacks from that copy, both ways, with its
+  name. A bank the app never had is named in the result. A real two-way copy needs a "send a bank" request in
+  RemoteFM1's SA_INFO (not there; the RemoteFM1 repo).
+- **The screen reader's voice:** pages may play sound without a tap (mediaTypesRequiringUserActionForPlayback),
+  and the session mixes with others while a page is open (CorePlayer.setMixing), so WebKit's audio is heard.

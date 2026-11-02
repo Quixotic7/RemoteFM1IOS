@@ -595,11 +595,22 @@ public final class CorePlayer {
         }
     }
 
+    /// (a web page open: an editor, the screen reader) the session mixes with others, so the page's own sound (the
+    /// reader's voice: WebKit plays it from another process) is heard beside the firmware; off again when it closes
+    @ObservationIgnored private var mixing = false
+    public func setMixing(_ on: Bool) {
+        guard on != mixing else { return }
+        mixing = on
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: on ? [.mixWithOthers] : [])
+        #endif
+    }
+
     private func startAudio() {
         #if os(iOS)
         do {
             let s = AVAudioSession.sharedInstance()
-            try s.setCategory(.playback)
+            try s.setCategory(.playback, options: mixing ? [.mixWithOthers] : [])
             // ~10 ms buffers: the USB route (the FM-1 as a sound card) otherwise gets very short ones, and a firmware's
             // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
             try? s.setPreferredIOBufferDuration(0.010)

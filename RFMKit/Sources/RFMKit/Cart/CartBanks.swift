@@ -133,7 +133,7 @@ public struct BankList: Equatable, Sendable {
 /// a pretend FM-1 for FakeCartTransport: 0.3.1 (16 slots, the replies, STORED after each dump) or, `silent`, 0.3.0
 public final class FakeFM1: @unchecked Sendable {
     private let lock = NSLock()
-    private var slots: [Int: UserBank] = [:]
+    private(set) var slots: [Int: UserBank] = [:]
     private var arrivals: UInt32 = 0
     private var target: Int?
     private var partial: [UInt8] = []

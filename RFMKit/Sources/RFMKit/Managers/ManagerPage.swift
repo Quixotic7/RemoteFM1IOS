@@ -63,6 +63,10 @@ struct ManagerWebView: UIViewRepresentable {
                                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1mgr")
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1pick")
+        // (a page may make sound by itself: the screen reader's own voice, eSpeak in Web Audio, speaks what MIDI
+        // brings, with no tap to start it. WebKit's default holds that back until a tap)
+        c.mediaTypesRequiringUserActionForPlayback = []
+        c.allowsInlineMediaPlayback = true
         let w = WKWebView(frame: .zero, configuration: c)
         w.isOpaque = false
         w.backgroundColor = .black
@@ -219,6 +223,7 @@ struct ManagerWebView: UIViewRepresentable {
             web = w
             Task { await player.safetyCopy(.beforeManagerWrite) }
             player.managerAttach(true)
+            player.setMixing(true)                  // (the page's own sound heard too)
             poll = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(10))
@@ -231,6 +236,7 @@ struct ManagerWebView: UIViewRepresentable {
             poll?.cancel()
             poll = nil
             player.managerAttach(false)
+            player.setMixing(false)
         }
 
         private func deliver() {

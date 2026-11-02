@@ -311,6 +311,7 @@ public final class CartSender {
         }
         if let e = SAInfo.words(r[2]) { return e }
         storedSlots.append(Int(r[1]))
+        CartKeep.keep(c)                                    // (a copy, for copying the bank elsewhere: CartKeep)
         return nil
     }
 
@@ -385,6 +386,81 @@ public final class CartSender {
         }
         state = .failed("Rename: the FM-1 said yes (status 0) but still lists USER\(slot + 1) as "
             + (seen.map { "\"\($0)\"" } ?? "nothing") + " after \(timing.nameSettle) ms. Refresh in a moment.")
+    }
+
+    // MARK: sync (RemoteFM1 in the app and an FM-1)
+
+    public struct SyncReport: Equatable, Sendable {
+        public var copied: [String: [String]] = [:]         // target name -> the banks copied there
+        public var both = 0                                 // banks already on both
+        public var noCopy: [String] = []                    // banks the app has no copy of (sent from elsewhere)
+        public var full: [String] = []                      // banks not copied: the other side has no free slot
+        public var failed: String?
+    }
+    public private(set) var lastSync: SyncReport?
+
+    /// the ports a sync works between: RemoteFM1 in the app and an FM-1 (the one chosen, else the first); nil: not both
+    public var syncPair: (app: CartPort, device: CartPort)? {
+        guard let a = ports.first(where: { $0.id == CoreCartTransport.port.id }) else { return nil }
+        let devices = ports.filter { $0.id != a.id }
+        guard let d = devices.first(where: { $0.id == chosen }) ?? devices.first else { return nil }
+        return (a, d)
+    }
+
+    /// every bank on one side and not the other copied across (from the app's kept copies, CartKeep), with its name
+    public func sync() async {
+        guard !busy else { return }
+        rescan()
+        guard let (a, d) = syncPair else { state = .failed("Run RemoteFM1 in the app and connect an FM-1 to sync."); return }
+        let back = chosen
+        var r = SyncReport()
+        state = .working("Reading both bank lists…")
+        guard await list(a), let la = banks else { state = .failed("RemoteFM1 in the app didn't list its banks."); return }
+        guard await list(d), let ld = banks else {
+            state = .failed("The FM-1 didn't list its banks: it needs RemoteFM1 0.3.1 or later.")
+            return
+        }
+        r.both = la.banks.filter { b in ld.banks.contains { $0.crc == b.crc } }.count
+        for (src, from, to) in [(la, a, d), (ld, d, a)] {
+            guard await list(to), var dst = banks else { r.failed = "\(to.name) stopped answering."; break }
+            let missing = src.banks.filter { b in !dst.banks.contains { $0.crc == b.crc } }
+            for b in missing {
+                guard let c = CartKeep.cart(crc: b.crc) else { r.noCopy.append(b.name); continue }
+                guard dst.banks.count < dst.max else { r.full.append(b.name); continue }
+                state = .working("Copying \(b.name) to \(to.name)…")
+                storedSlots = []
+                let failure = await paused(to) { await dump(c, to: to) }
+                if let failure { r.failed = "\(b.name) to \(to.name): \(failure)"; break }
+                if let slot = storedSlots.first, let body = Self.nameBody(slot: slot, b.name) {
+                    _ = await ask(body, to: to, timeout: timing.reply)     // (its name as on the other side)
+                    await clock.sleep(ms: timing.nameSettle / 6)
+                }
+                r.copied[to.name, default: []].append(b.name)
+                if await list(to), let l = banks { dst = l }
+            }
+            if r.failed != nil { break }
+            _ = from
+        }
+        chosen = back
+        firmware = .unknown
+        await list(target ?? d)
+        lastSync = r
+        state = r.failed.map { .failed($0) } ?? .done(Self.syncText(r))
+    }
+
+    nonisolated static func syncText(_ r: SyncReport) -> String {
+        var s: [String] = []
+        for (to, names) in r.copied.sorted(by: { $0.key < $1.key }) {
+            s.append("Copied \(names.count) bank\(names.count == 1 ? "" : "s") to \(to): \(names.joined(separator: ", ")).")
+        }
+        if s.isEmpty && r.noCopy.isEmpty && r.full.isEmpty { s.append("Both have the same banks.") }
+        if r.both > 0 { s.append("\(r.both) already on both.") }
+        if !r.noCopy.isEmpty {
+            s.append("Not copied, the app has no copy of: \(r.noCopy.joined(separator: ", ")). Send their .syx files once "
+                     + "from this page and they can be synced.")
+        }
+        if !r.full.isEmpty { s.append("No free slot for: \(r.full.joined(separator: ", ")).") }
+        return s.joined(separator: " ")
     }
 
     private func write(_ bytes: [UInt8], to port: CartPort) async throws {

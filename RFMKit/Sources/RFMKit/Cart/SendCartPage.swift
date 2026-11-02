@@ -59,6 +59,7 @@ public struct SendCartPage: View {
             files
             port
             send
+            sync
             if sender.simulated {
                 SheetNote("A simulated FM-1: nothing is sent to a real one.", color: .orange)
             }
@@ -198,6 +199,19 @@ public struct SendCartPage: View {
         }
         if let p = sender.target, p.bluetooth {
             SheetNote("Over Bluetooth a cartridge takes about a second. USB is faster and surer.")
+        }
+    }
+
+    /// RemoteFM1 in the app and an FM-1 both here: their banks made the same
+    @ViewBuilder private var sync: some View {
+        if let pair = sender.syncPair {
+            SheetSectionTitle("Sync")
+            SheetButton("Sync with \(pair.device.name)") { Task { await sender.sync() } }
+                .disabled(sender.busy)
+                .opacity(sender.busy ? 0.5 : 1)
+            SheetNote("Copies each bank RemoteFM1 in this app has and the FM-1 doesn't, and the other way, with its name. "
+                      + "RemoteFM1 can't send a bank back, so the app copies from the cartridges it has sent (Files › "
+                      + "RemoteFM1 › Cartridges; a .syx put there counts too). Nothing is removed on either side.")
         }
     }
 
