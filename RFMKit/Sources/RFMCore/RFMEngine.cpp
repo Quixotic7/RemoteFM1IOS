@@ -269,6 +269,7 @@ struct rfme final : rfm::HostParams::Panel {
     rfm::WorkgroupSlot workgroup;           // the host's audio workgroup, joined by the core thread
     std::atomic<uint32_t> periodUs{0};      // the host buffer's duration: the core thread's real-time period
     std::atomic<int> rtOk{0};
+    std::atomic<int> rtWant{1};             // the core thread real time (1), or high QoS (0: an interpreted core)
     bool timerRebase = true;                // (the core thread's)
     bool producing = false;                 // (the core thread's) inside produce(): the MIDI out is kept
     uint64_t outAt = 0;                     // (the core thread's) the ring position of the render running
@@ -862,15 +863,25 @@ struct rfme final : rfm::HostParams::Panel {
         gCoreThreads.fetch_add(1);
         pthread_setname_np("RFM core");
         uint32_t period = ~0u;
+        int rt = -1;
         for (;;) {
             if (quit.load(std::memory_order_acquire))
                 break;
             const uint32_t want = periodUs.load(std::memory_order_relaxed);
-            if (want != period) {                       // (real time, its period the host buffer's: when it changes)
+            const int rw = rtWant.load(std::memory_order_relaxed);
+            if (want != period || rw != rt) {           // (real time, its period the host buffer's: when it changes)
                 period = want;
-                rtOk.store(rfm::setRealtime(want ? want * 1e-6 : 0) ? 1 : 0, std::memory_order_relaxed);
+                rt = rw;
+                if (rt) {
+                    rtOk.store(rfm::setRealtime(want ? want * 1e-6 : 0) ? 1 : 0, std::memory_order_relaxed);
+                } else {                                // (an interpreted core: no time constraint, no workgroup)
+                    workgroup.leave();
+                    rfm::setHighPriority();
+                    rtOk.store(0, std::memory_order_relaxed);
+                }
             }
-            workgroup.adopt();
+            if (rt)
+                workgroup.adopt();
             const int c = clock.load(std::memory_order_seq_cst);
             if (c == RFME_CLOCK_AUDIO) {
                 produce();
@@ -949,18 +960,22 @@ struct rfme final : rfm::HostParams::Panel {
             const uint32_t tgt = target.load(std::memory_order_relaxed);
             if (fill >= tgt || fill + kChunk > kRingFrames)
                 break;
+            dev->set_behind(fill < tgt / 2);            // (low: the screen waits)
+            const uint64_t c0 = mach_absolute_time();
             renderChunk(w, kChunk, rate);
             posW.store(w + kChunk, std::memory_order_release);
             made += kChunk;
+            // (counted per chunk: a core that never catches up still shows its load)
+            const uint64_t cdt = mach_absolute_time() - c0;
+            coreTicks.fetch_add(cdt, std::memory_order_relaxed);
+            coreFrames.fetch_add(kChunk, std::memory_order_relaxed);
             if (offlineWaiting.load(std::memory_order_acquire))
                 produced.signal();
         }
         producing = false;
         if (made) {
             const uint64_t dt = mach_absolute_time() - t0;
-            coreTicks.fetch_add(dt, std::memory_order_relaxed);
             coreWakes.fetch_add(1, std::memory_order_relaxed);
-            coreFrames.fetch_add(made, std::memory_order_relaxed);
             if (dt > coreMaxTicks.load(std::memory_order_relaxed))
                 coreMaxTicks.store(dt, std::memory_order_relaxed);
         }
@@ -1438,6 +1453,12 @@ int rfme_midi_in(rfme_t *e, const uint8_t *data, uint32_t len, int to_firmware)
     }
     (ok ? e->midiInCount : e->midiInDropped).fetch_add(1, std::memory_order_relaxed);
     return ok ? 1 : 0;
+}
+
+void rfme_set_realtime(rfme_t *e, int on)
+{
+    e->rtWant.store(on ? 1 : 0, std::memory_order_relaxed);
+    e->wake.signal();
 }
 
 void rfme_set_frame_ms(rfme_t *e, uint32_t ms)

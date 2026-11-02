@@ -795,3 +795,13 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 - **Get more firmware** is a big button under the built-ins; Get firmware has thumbnails and All / Not installed /
   Recently updated. The firmware lists sort by Name / Recently used / Recently updated (release dates from the
   RemoteFM1FW releases).
+- **Rainbow Mode, take 3** (the phone: "0% of the audio time, 177 dropouts"): the core thread ran under a Mach time
+  constraint of half a host buffer, which a Wasm core's screen redraw overruns many times over, and Mach demotes a
+  thread that overruns. A Wasm core's thread is now an ordinary one at the highest QoS, out of the audio workgroup
+  (rfme_set_realtime). When the ring is under half its target, a due frame() waits (up to 200 ms): the sound first.
+  The load is counted per chunk, so a core that never catches up no longer reads 0%.
+- **Stuttery menus:** pages read player.status (polled every 66 ms, its counters always move), so the whole main
+  screen redrew 15 times a second. Pages read `running` now; live numbers sit in small `Live` views. The preview
+  image is made only when read.
+- **Editor dialogs:** WKWebView answers confirm() with false unless the app shows it, so the editor's "Place all?"
+  was a Cancel. alert, confirm and prompt are now real dialogs.

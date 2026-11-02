@@ -247,8 +247,20 @@ public final class CorePlayer {
     public private(set) var mode: Mode = .pattern
     public private(set) var audioOn = true
     public private(set) var audioRunning = false
+    /// the status, polled every 66 ms: its counters move each time, so a view that reads it redraws 15 times a
+    /// second. Read it only in a small view of its own (Live), never in a page's body
     public private(set) var status = CoreStatus()
-    public private(set) var preview: CGImage?
+    /// status.booted, set only when it changes (for pages)
+    public private(set) var running = false
+    /// the firmware's screen as an image, made when read (Diagnostics, the tests), not on every poll
+    public var preview: CGImage? {
+        guard previewVersion != 0 else { return nil }
+        if previewMade?.seq != previewVersion { previewMade = (previewVersion, RemoteController.image(rgba)) }
+        return previewMade?.image
+    }
+    /// moves with each new screen (what a view of `preview` observes)
+    public private(set) var previewVersion: UInt32 = 0
+    @ObservationIgnored private var previewMade: (seq: UInt32, image: CGImage?)?
     public private(set) var message = ""
     /// (section 18 step 4) the firmware wiped its memory after a version change: the copy from before, to offer back
     public private(set) var wipedCopy: FlashHistory.Snapshot?
@@ -506,6 +518,7 @@ public final class CorePlayer {
         rfme_set_frame_ms(e, max(ms, perf.frameMs))
     }
     @ObservationIgnored private var batteryFrameMs = PerfGuard.defaultFrameMs
+    @ObservationIgnored private var realtimeKind = ""
 
     /// back from a battery stop: the clock and the sound as before
     public func resumeFromBattery() {
@@ -1011,11 +1024,12 @@ public final class CorePlayer {
     public func refresh() {
         let s = Self.status(e)
         if s != status { status = s }
+        if s.booted != running { running = s.booted }
         updatePerf(s)
         let seq = rgba.withUnsafeMutableBufferPointer { rfme_preview(e, previewSeq, $0.baseAddress) }
         if seq != previewSeq, seq != 0 {
             previewSeq = seq
-            preview = RemoteController.image(rgba)
+            previewVersion = seq
         }
         _ = takeFlash()
         if s.halted && s.haltCode == 0x100 { powerCycle() }   // (CR_REBOOT: exit(0); others stay halted)
@@ -1028,6 +1042,10 @@ public final class CorePlayer {
 
     /// the Wasm core's load over the last ~2 s (perfNote)
     private func updatePerf(_ s: CoreStatus) {
+        if !s.kind.isEmpty, s.kind != realtimeKind {          // (an interpreted core: no time constraint to overrun)
+            realtimeKind = s.kind
+            rfme_set_realtime(e, s.kind == "wasm" ? 0 : 1)
+        }
         let had = perf.headroomUs, hadFrame = perf.frameMs
         let note = perf.update(s, name: current?.name ?? s.coreID)
         if perf.frameMs != hadFrame { rfme_set_frame_ms(e, max(batteryFrameMs, perf.frameMs)) }

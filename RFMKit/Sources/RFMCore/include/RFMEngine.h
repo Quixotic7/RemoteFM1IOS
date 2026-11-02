@@ -150,6 +150,10 @@ int rfme_sysex_in(rfme_t *e, const uint8_t *data, uint32_t len);
 // (the battery) the core's screen drawn (frame()) every `ms` device ms: 15 by default, slower when nobody sees it
 // (the app in the background with no FM-1 showing it); any thread
 void rfme_set_frame_ms(rfme_t *e, uint32_t ms);
+// (any thread) the core thread real time (1, the default: a time constraint, the host's audio workgroup), or an
+// ordinary thread at the highest QoS (0): for an interpreted core, whose screen redraws overrun any time constraint
+// and get the thread demoted
+void rfme_set_realtime(rfme_t *e, int on);
 // the render thread, after rfme_render_midi: one USB-MIDI packet of the core's that falls in the frames that render
 // played; 0: none. _at also gives its frame in that render (the same latency as the audio)
 int rfme_midi_out_take(rfme_t *e, uint32_t *pkt);

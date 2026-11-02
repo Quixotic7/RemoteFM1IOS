@@ -69,7 +69,11 @@ void CoreDevice::run_ms()
 {
     const uint32_t ms = dev_ms_++;
     b_.tick(ms);
-    const bool frame = ms == 0 || ms - last_frame_ >= frame_ms_.load(std::memory_order_relaxed);
+    bool frame = ms == 0 || ms - last_frame_ >= frame_ms_.load(std::memory_order_relaxed);
+    if (frame && behind_ && ms != 0 && ms - last_frame_ < 200u) {   // (the sound first: the redraw waits)
+        frame = false;
+        deferred_++;
+    }
     if (between_)
         between_(ms, frame);
     if (frame) {

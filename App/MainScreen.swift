@@ -620,11 +620,11 @@ struct MainScreen: View {
         let files = library.files
         return SheetPage(player.current?.name ?? "Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
             if let c = player.current {
-                FirmwareInfoCard(info: FirmwareInfo.lookup(c, details: catalog.details), running: player.status.booted) { u, done in
+                FirmwareInfoCard(info: FirmwareInfo.lookup(c, details: catalog.details), running: player.running) { u, done in
                     openURL(u) { done($0) }
                 }
                 .padding(.top, 12)
-                SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.status.booted ? " · running" : "")")
+                SheetNote("\(c.version)\(c.imported ? " · imported" : " · built in")\(player.running ? " · running" : "")")
                 if c.isVirtual { fantasyNote(c) }
             }
             SheetSectionTitle("This firmware", top: 12)
@@ -712,10 +712,10 @@ struct MainScreen: View {
                       : "Edit deletes imported firmware. Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware holds them.")
             ForEach(broken) { f in SheetNote("\(f.file): \(f.error ?? "")", color: .orange) }
             if !library.message.isEmpty { SheetNote(library.message) }
-            if player.current?.imported == true, player.status.booted {
-                SheetNote(player.status.coreWakes == 0 ? "Runs in the WebAssembly interpreter (no sound yet)."
+            if player.current?.imported == true, player.running {
+                Live { SheetNote(player.status.coreWakes == 0 ? "Runs in the WebAssembly interpreter (no sound yet)."
                           : String(format: "Runs in the WebAssembly interpreter: %u%% of the audio time on the core thread, "
-                                   + "%u underruns.", player.status.coreLoadPct, player.status.underruns))
+                                   + "%u underruns.", player.status.coreLoadPct, player.status.underruns)) }
             }
             if !player.perfNote.isEmpty { SheetNote(player.perfNote, color: .orange) }
             if player.mode != .core {
@@ -969,9 +969,11 @@ struct MainScreen: View {
                                divider: false)
             }
             if let h = AudioRoute.hint(player.outputs) { SheetNote(h) }
-            SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
-                                                                      player.status.latencyMs, player.status.underruns)
-                      : "No sound: the firmware runs on a timer.")
+            Live {
+                SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
+                                                                          player.status.latencyMs, player.status.underruns)
+                          : "No sound: the firmware runs on a timer.")
+            }
             SheetSectionTitle("MIDI")
             SheetList {
                 SheetRow("MIDI input", value: MidiInputList.value(midi.input)) { midiScroll = nil; page = .midiInput }
@@ -1217,4 +1219,11 @@ struct ActivitySheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+/// a small view that reads fast-changing state (the player's status) in its own body, so only it redraws, not the
+/// page around it (SwiftUI's observation tracks what a body reads)
+struct Live<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View { content() }
 }

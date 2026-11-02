@@ -34,6 +34,9 @@ private:
 // the calling thread as a Mach real-time (time-constraint) thread whose period is `period_s` (the host buffer's
 // duration): computation half the period, constraint the period, preemptible. false: refused
 bool setRealtime(double period_s);
+// the calling thread back to an ordinary one at the highest QoS (user-interactive): for work too lumpy for a time
+// constraint (an interpreted core's screen redraw can take many host buffers), which Mach demotes when it overruns
+bool setHighPriority();
 
 // An os_workgroup for one thread to join (Apple's AudioWorkInterval.h, cases 1 and 2). offer() from any thread
 // (real-time safe: an os_retain and an atomic exchange); adopt() on the joining thread leaves the one it is in and

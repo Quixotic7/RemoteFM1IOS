@@ -220,6 +220,48 @@ struct ManagerWebView: UIViewRepresentable {
             Task { @MainActor in self.enqueue(bytes) }
         }
 
+        // MARK: the page's alert, confirm and prompt (without these WKWebView answers at once: confirm() false, so
+        // the editor's "Place all 128 sounds?" was a Cancel and nothing was placed)
+
+        private func present(_ a: UIAlertController) -> Bool {
+            guard let w = web, var top = w.window?.rootViewController else { return false }
+            while let p = top.presentedViewController { top = p }
+            top.present(a, animated: true)
+            return true
+        }
+
+        func webView(_: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                     initiatedByFrame _: WKFrameInfo) async {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+                a.addAction(UIAlertAction(title: "OK", style: .default) { _ in c.resume() })
+                if !present(a) { c.resume() }
+            }
+        }
+
+        func webView(_: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                     initiatedByFrame _: WKFrameInfo) async -> Bool {
+            await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+                let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+                a.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in c.resume(returning: false) })
+                a.addAction(UIAlertAction(title: "OK", style: .default) { _ in c.resume(returning: true) })
+                if !present(a) { c.resume(returning: false) }
+            }
+        }
+
+        func webView(_: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                     initiatedByFrame _: WKFrameInfo) async -> String? {
+            await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+                let a = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+                a.addTextField { $0.text = defaultText }
+                a.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in c.resume(returning: nil) })
+                a.addAction(UIAlertAction(title: "OK", style: .default) { [weak a] _ in
+                    c.resume(returning: a?.textFields?.first?.text ?? "")
+                })
+                if !present(a) { c.resume(returning: nil) }
+            }
+        }
+
         // MARK: the page's file inputs (the app's picker: the last folder, any file)
 
         private var picking: [ObjectIdentifier: Int] = [:]

@@ -7,6 +7,7 @@
 #include <mach/thread_policy.h>
 #include <os/object.h>
 #include <pthread.h>
+#include <pthread/qos.h>
 
 namespace rfm {
 
@@ -26,6 +27,14 @@ bool setRealtime(double period_s)
     p.preemptible = 1;
     return thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
                              reinterpret_cast<thread_policy_t>(&p), THREAD_TIME_CONSTRAINT_POLICY_COUNT) == KERN_SUCCESS;
+}
+
+bool setHighPriority()
+{
+    thread_standard_policy_data_t s{};
+    const bool ok = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_STANDARD_POLICY,
+                                      reinterpret_cast<thread_policy_t>(&s), THREAD_STANDARD_POLICY_COUNT) == KERN_SUCCESS;
+    return pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0 && ok;
 }
 
 WorkgroupSlot::~WorkgroupSlot()

@@ -59,6 +59,10 @@ public:
     void set_between(Between b) { between_ = std::move(b); }
     // (the battery) the screen's frame() every this many device ms (15 by default; slower when nobody sees it)
     void set_frame_ms(uint32_t ms) { frame_ms_.store(ms < 15u ? 15u : ms, std::memory_order_relaxed); }
+    // (the engine, before each chunk) the audio is running low: a due frame() waits (idle instead), up to 200 ms,
+    // so a slow screen redraw never starves the sound
+    void set_behind(bool b) { behind_ = b; }
+    uint32_t frames_deferred() const { return deferred_; }
     uint32_t take_s16(int16_t *stereo, uint32_t max_frames);
     void discard() { ring_r_ = ring_w_; }   // drop what nobody took (the timer clock)
     // n host frames at host_rate (the device runs as far as needed; bypassed at exactly 44100)
@@ -90,6 +94,8 @@ private:
     double rs_rate_ = 0;
     uint64_t frame_max_ = 0, frame_last_ = 0;
     uint32_t at_ = 0;
+    bool behind_ = false;
+    uint32_t deferred_ = 0;
     Between between_;
 };
 
