@@ -35,7 +35,7 @@ public struct ManagerPage: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .background(Palette.sheetBackground)
-            ManagerWebView(player: player, url: url, port: port, firmware: firmware)
+            ManagerWebView(player: player, url: url, port: port, firmware: firmware, close: done)
                 .ignoresSafeArea(edges: .bottom)
         }
         .background(Palette.sheetBackground.ignoresSafeArea())
@@ -48,6 +48,7 @@ struct ManagerWebView: UIViewRepresentable {
     let url: URL
     let port: String
     let firmware: String
+    var close: () -> Void = {}
 
     func makeCoordinator() -> Bridge { Bridge(player: player) }
 
@@ -65,7 +66,13 @@ struct ManagerWebView: UIViewRepresentable {
         w.navigationDelegate = context.coordinator
         w.uiDelegate = context.coordinator
         context.coordinator.attach(w)
-
+        // a swipe to the right that starts at the left edge: back to the firmware (Done). A pan on the web view that
+        // takes only touches starting within 24 pt of its left edge, alongside the page's own recognizers
+        context.coordinator.close = close
+        let edge = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Bridge.edgeSwipe(_:)))
+        edge.delegate = context.coordinator
+        edge.cancelsTouchesInView = true
+        w.addGestureRecognizer(edge)
         w.load(URLRequest(url: url))
         return w
     }
@@ -176,12 +183,34 @@ struct ManagerWebView: UIViewRepresentable {
     """
 
     @MainActor final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
-                               UIDocumentPickerDelegate {
+                               UIDocumentPickerDelegate, UIGestureRecognizerDelegate {
         let player: CorePlayer
         private weak var web: WKWebView?
         private var poll: Task<Void, Never>?
 
+        var close: () -> Void = {}
+
         init(player: CorePlayer) { self.player = player }
+
+        static let edgeWidth: CGFloat = 24
+
+        @objc func edgeSwipe(_ g: UIPanGestureRecognizer) {
+            guard g.state == .ended, let v = g.view else { return }
+            let t = g.translation(in: v)
+            if (t.x > 50 || g.velocity(in: v).x > 400), abs(t.y) < max(40, t.x) { close() }
+        }
+
+        // (only a touch that starts at the left edge; it runs alongside the page's own recognizers)
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive t: UITouch) -> Bool {
+            guard let v = g.view, g is UIPanGestureRecognizer, g.delegate === self else { return true }
+            return t.location(in: v).x < Self.edgeWidth
+        }
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let p = g as? UIPanGestureRecognizer, let v = p.view, g.delegate === self else { return true }
+            let s = p.velocity(in: v)
+            return s.x > 0 && abs(s.y) < s.x
+        }
+        func gestureRecognizer(_: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer) -> Bool { true }
 
         func attach(_ w: WKWebView) {
             web = w
