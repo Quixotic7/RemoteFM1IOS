@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The folder a document picker last picked from (the cartridge page's .syx picker, Add firmware…), so the next one opens
+// The folder a document picker last picked from (the cartridge page's .syx picker, Add firmware…, a web editor's Add files…, Restore), so the next one opens
 // there: a bookmark of the picked file's parent folder (its URL alone when the folder can't be bookmarked), in
 // UserDefaults by key. Gone, moved or unreadable: nil, and the picker opens where the system likes.
 
@@ -12,6 +12,8 @@ public struct PickerFolder: @unchecked Sendable {
 
     public static let cart = PickerFolder(key: "picker.folder.cart")
     public static let firmware = PickerFolder(key: "picker.folder.firmware")
+    public static let editor = PickerFolder(key: "picker.folder.editor")      // (a firmware's web editor's file inputs)
+    public static let restore = PickerFolder(key: "picker.folder.restore")    // (States: restore, a transfer)
 
     public init(key: String, defaults: UserDefaults = .standard) {
         self.key = key

@@ -220,3 +220,199 @@ public struct FirmwareInfoCard: View {
         .onChange(of: info.id) { more = false; failed = false }
     }
 }
+
+/// the big "Get more firmware" button under the built-in firmware (testers missed the row at the bottom)
+public struct GetMoreButton: View {
+    let count: Int
+    let updates: Int
+    let action: () -> Void
+
+    public init(count: Int, updates: Int, action: @escaping () -> Void) {
+        self.count = count
+        self.updates = updates
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle.fill").font(.system(size: 28, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Get more firmware").font(RFMFonts.ui(17, 800))
+                    Text(sub).font(RFMFonts.ui(13, 600)).opacity(0.8)
+                }
+                Spacer(minLength: 0)
+                if updates > 0 {
+                    Text("\(updates)").font(RFMFonts.ui(13, 800)).foregroundStyle(Palette.sheetAccent)
+                        .padding(.horizontal, 8).frame(minWidth: 24, minHeight: 24)
+                        .background(Capsule().fill(Palette.sheetBackground))
+                }
+                Image(systemName: "chevron.right").font(.system(size: 15, weight: .bold))
+            }
+            .foregroundStyle(Palette.sheetBackground)
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Palette.sheetAccent))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Get more firmware\(updates > 0 ? ", \(updates) updates" : "")")
+    }
+
+    private var sub: String {
+        let more = count > 0 ? "\(count) to download" : "Download firmware from the catalog"
+        return updates > 0 ? "\(more) · \(updates) update\(updates == 1 ? "" : "s")" : more
+    }
+}
+
+/// a row of chips, one picked (sorting, filters)
+public struct ChipPicker<T: Hashable>: View {
+    let options: [(T, String)]
+    @Binding var selected: T
+
+    public init(_ options: [(T, String)], selected: Binding<T>) {
+        self.options = options
+        _selected = selected
+    }
+
+    public var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options, id: \.0) { o in
+                    let on = o.0 == selected
+                    Button { withAnimation(.easeInOut(duration: 0.15)) { selected = o.0 } } label: {
+                        Text(o.1).font(RFMFonts.ui(13, 700))
+                            .foregroundStyle(on ? Palette.sheetBackground : Palette.sheetText)
+                            .padding(.horizontal, 12).frame(height: 32)
+                            .background(Capsule().fill(on ? Palette.sheetAccent : Palette.sheetSurface))
+                            .overlay(Capsule().strokeBorder(on ? Color.clear : Palette.sheetBorder, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+        }
+    }
+}
+
+/// the firmware sidebar (the owner, 2026-11-01): a swipe in from the left edge shows one column of firmware; a tap
+/// switches to it and closes the sidebar. It stays in the view tree while closed (moved off screen), so it opens
+/// where it was scrolled to
+public struct FirmwareSidebar: View {
+    let cores: [CoreInfo]
+    let selected: String
+    @Binding var open: Bool
+    let select: (String) -> Void
+    let getMore: () -> Void
+    @GestureState private var drag: CGFloat = 0
+
+    public init(cores: [CoreInfo], selected: String, open: Binding<Bool>, select: @escaping (String) -> Void,
+                getMore: @escaping () -> Void) {
+        self.cores = cores
+        self.selected = selected
+        _open = open
+        self.select = select
+        self.getMore = getMore
+    }
+
+    public var body: some View {
+        GeometryReader { g in
+            let w = min(320, g.size.width * 0.78)
+            let shift = open ? min(0, drag) : -w - 24 + max(0, min(w + 24, drag))
+            let shown = (w + 24 + shift) / (w + 24)
+            ZStack(alignment: .leading) {
+                Color.black.opacity(0.45 * shown)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(open)
+                    .onTapGesture { close() }
+                    .accessibilityHidden(true)
+                list(width: w)
+                    .offset(x: shift)
+                    .gesture(DragGesture(minimumDistance: 12)
+                        .updating($drag) { v, s, _ in if open { s = v.translation.width } }
+                        .onEnded { v in if open, v.translation.width < -w / 4 || v.predictedEndTranslation.width < -w / 2 { close() } })
+                // (the edge: a drag in from the left opens it)
+                if !open {
+                    Color.clear.frame(width: 14).contentShape(Rectangle())
+                        .padding(.top, 90)                          // (not over the status row's chip)
+                        .gesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                            .updating($drag) { v, s, _ in s = v.translation.width }
+                            .onEnded { v in
+                                if v.translation.width > 60 || v.predictedEndTranslation.width > w / 2 {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) { open = true }
+                                }
+                            })
+                        .accessibilityHidden(true)
+                }
+            }
+            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.86), value: drag)
+        }
+    }
+
+    private func close() { withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { open = false } }
+
+    private func list(width: CGFloat) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 6) {
+                Text("Firmware").font(RFMFonts.ui(13, 800)).tracking(1.5).textCase(.uppercase)
+                    .foregroundStyle(Palette.sheetMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6).padding(.bottom, 4)
+                ForEach(cores) { c in row(c) }
+                Button {
+                    close()
+                    getMore()
+                } label: {
+                    Label("Get more firmware", systemImage: "arrow.down.circle.fill").font(RFMFonts.ui(15, 700))
+                        .foregroundStyle(Palette.sheetAccent)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.sheetAccent, lineWidth: 1.5))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 14)
+        }
+        .scrollIndicators(.hidden)
+        .frame(width: width)
+        .background(Palette.sheetBackground.opacity(0.97).ignoresSafeArea())
+        .overlay(alignment: .trailing) { Palette.sheetBorder.frame(width: 1).ignoresSafeArea() }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Firmware sidebar")
+        .accessibilityAction(.escape) { close() }
+    }
+
+    private func row(_ c: CoreInfo) -> some View {
+        let on = c.id == selected
+        return Button {
+            select(c.id)
+            close()
+        } label: {
+            HStack(spacing: 12) {
+                FirmwareThumb(id: c.firmwareID, name: c.name, corner: 10).frame(width: 52, height: 52)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(on ? Palette.sheetAccent : Palette.sheetBorder, lineWidth: on ? 2 : 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(c.name).font(RFMFonts.ui(15, 700)).foregroundStyle(on ? Palette.sheetAccent : Palette.sheetText)
+                            .lineLimit(1)
+                        if c.isVirtual { FantasyTag(small: true) }
+                    }
+                    Text(c.version + (c.imported ? "" : " · built in")).font(RFMFonts.ui(12, 500))
+                        .foregroundStyle(Palette.sheetMuted2).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if on {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Palette.sheetAccent)
+                }
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(on ? Palette.sheetRaised : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(c.name) \(c.version)")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}

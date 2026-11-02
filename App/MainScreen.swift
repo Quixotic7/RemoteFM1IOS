@@ -121,6 +121,8 @@ struct MainScreen: View {
     @State private var catalogItem: String?             // the firmware a Get firmware page shows
     @State private var modeSource: String?              // the mapping the Knob mode page shows
     @State private var midiScroll: String?              // where the MIDI & audio page opens (back from Knob mode)
+    @AppStorage("firmware.sort") private var firmwareSort = FirmwareListing.Sort.name
+    @State private var sidebarOpen = false              // the firmware sidebar (a swipe in from the left edge)
     @State private var editingFirmware = false          // the Firmware page's Edit: a delete control per imported row
     @State private var confirmDelete: String?           // the file (its name) whose row asks "Delete?"
     @State private var showDiagnostics = false
@@ -211,6 +213,20 @@ struct MainScreen: View {
                 .padding(.bottom, 12)
                 .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
             }
+            if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone && !midi.learn.active {
+                FirmwareSidebar(cores: FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected),
+                                                              by: firmwareSort, updated: catalog.updated),
+                                selected: player.selected, open: $sidebarOpen,
+                                select: { id in
+                                    player.select(id)
+                                    if player.mode != .core { player.setMode(.core) }
+                                },
+                                getMore: {
+                                    page = .getFirmware
+                                    withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+                                })
+                    .zIndex(1)
+            }
             PullDownSheet(open: $ui.sheetOpen) { sheet }
             if ui.editorOpen {
                 ThemeEditor(store: store, feed: feed) { withAnimation { ui.editorOpen = false } }
@@ -237,6 +253,7 @@ struct MainScreen: View {
             guard case .success(let urls) = result else { return }
             if importingBackup {
                 importingBackup = false
+                PickerFolder.restore.remember(urls)
                 let xfer = urls.filter { $0.pathExtension.lowercased() == TransferFile.fileExtension }
                 if let u = xfer.first { openTransfer(u) }
                 let rest = urls.filter { $0.pathExtension.lowercased() != TransferFile.fileExtension }
@@ -249,7 +266,7 @@ struct MainScreen: View {
             player.catalogChanged()
             if let f = last, f.error == nil { player.select(f.key) }
         }
-        .fileDialogDefaultDirectory(showImporter ? PickerFolder.firmware.url : nil)
+        .fileDialogDefaultDirectory(showImporter ? (importingBackup ? PickerFolder.restore : PickerFolder.firmware).url : nil)
         .fullScreenCover(isPresented: $showDiagnostics) {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
@@ -280,6 +297,7 @@ struct MainScreen: View {
             withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
         }
         .task { await catalog.refreshIfOlder(than: 86_400) }     // (at launch, at most once a day)
+        .task { await catalog.loadVersions(maxAge: 86_400) }     // (the release dates: sorting by Recently updated)
         .onChange(of: ui.page) { _, _ in saveView() }
         .onChange(of: ui.deck) { _, _ in saveView() }
         .onChange(of: ui.knobSet) { _, _ in saveView() }
@@ -502,14 +520,25 @@ struct MainScreen: View {
                     SheetSectionTitle(player.current.map { "\($0.name) \($0.version)" } ?? "Firmware", top: 18)
                         .accessibilityLabel("This firmware")
                     dataRows(from: nil)
-                    SheetSectionTitle("Sound source")
+                    // (was "Sound source": testers read it as where the sound comes out. This picks where the
+                    // firmware runs; where the sound comes out is Audio output, right under it)
+                    SheetSectionTitle("Firmware runs on")
                     HStack(spacing: 8) {
-                        SourceCard(title: "This iPhone", sub: "Emulator, play by touch", selected: source == .phone,
+                        SourceCard(title: "This \(UIDevice.current.model)", sub: "Emulator, play by touch", selected: source == .phone,
                                    dot: Palette.sheetAccent) { pick(.phone) }
-                        SourceCard(title: "FM-1", sub: fm1Line, selected: source == .fm1,
+                        SourceCard(title: "My FM-1", sub: fm1Line, selected: source == .fm1,
                                    dot: chip == .inUse ? Palette.sheetAccent : Palette.linkedDot) { pick(.fm1) }
                     }
                     if source == .fm1, chip != .linked { fm1Actions }     // (not linked: claim it, or pair it)
+                    if source == .phone {
+                        SheetList {
+                            AudioOutputRow(value: AudioRoute.name(player.outputs.isEmpty ? AudioRoute.current : player.outputs),
+                                           divider: false)
+                        }
+                        .padding(.top, 10)
+                    } else {
+                        SheetNote("The FM-1 plays through its own speaker and headphone jack; this \(UIDevice.current.model) is its remote.")
+                    }
                     SheetSectionTitle("View · or swipe sideways")
                     ViewTiles(ui: ui)
                     SheetList {
@@ -549,9 +578,9 @@ struct MainScreen: View {
             return p.ownerName.isEmpty ? "In use by another instance" : "In use by \(p.ownerName)"
         }
         switch controller.state {
-        case .connected(let ble): return "RemoteFM1 · \(ble ? "Bluetooth" : "USB")\(controller.backend.isFake ? " (fake)" : "")"
+        case .connected(let ble): return "Remote control · \(ble ? "Bluetooth" : "USB")\(controller.backend.isFake ? " (fake)" : "")"
         case .notFound: return "Not found · pair over Bluetooth"
-        default: return "RemoteFM1 · Bluetooth"
+        default: return "Remote control · Bluetooth"
         }
     }
 
@@ -583,8 +612,10 @@ struct MainScreen: View {
     }
 
     private var firmwarePage: some View {
-        let builtIn = player.cores.filter { !$0.imported }
-        let imported = player.cores.filter(\.imported)
+        let shown = FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected),
+                                           by: firmwareSort, updated: catalog.updated)
+        let builtIn = shown.filter { !$0.imported }
+        let imported = shown.filter(\.imported)
         let broken = library.files.filter { $0.error != nil }
         let files = library.files
         return SheetPage(player.current?.name ?? "Firmware", scrollTo: options.sheetScroll, back: { page = nil }) {
@@ -607,9 +638,16 @@ struct MainScreen: View {
             }
             dataRows(from: .firmware).padding(.top, 12)
                 .id("reset")
-            SheetSectionTitle("Built in")
+            SheetSectionTitle("Sort")
+            ChipPicker(FirmwareListing.Sort.allCases.map { ($0, $0.title) }, selected: $firmwareSort)
+            SheetSectionTitle("Built in", top: 14)
             FirmwareTileGrid(cores: builtIn, selected: player.selected) { player.select($0) }
                 .id("builtin")
+            GetMoreButton(count: catalog.list(builtIn: self.builtIn).filter {
+                if case .notInstalled = catalog.state($0) { true } else { false }
+            }.count, updates: updates) { page = .getFirmware }
+                .padding(.top, 14)
+                .id("getmore")
             SheetSectionTitle("Imported")
                 .overlay(alignment: .bottomTrailing) {
                     if !files.isEmpty {
@@ -662,8 +700,7 @@ struct MainScreen: View {
                     }
                 }
                 if !editingFirmware {
-                    SheetRow("Get firmware", badge: updates) { page = .getFirmware }
-                    SheetRow("Add firmware…", divider: false) { showImporter = true }
+                    SheetRow("Add firmware file…", divider: false) { showImporter = true }
                 }
             }
             SheetNote(files.isEmpty

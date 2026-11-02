@@ -31,9 +31,17 @@ public enum ManagerList {
         "grimm": "Felucca", "pigeon": "PIGEON", "tonitor": "FM-1 Tonitor", "speak37": "Speak37",
     ]
 
+    /// managers opened at their author's page rather than the site's copy, which lags behind (ChoralRoot's reads
+    /// Digitone .syx, .dn2pst and .dn2snd; the site's copy of 2026-11 didn't). The app's Web MIDI works on any page
+    public static let upstream: [String: URL] = [
+        "choralroot": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
+        "purplemonkey": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
+    ]
+
     /// the manager page for a firmware, nil: none
     public static func url(for firmwareID: String) -> URL? {
-        managers[firmwareID].flatMap { URL(string: "\($0)/", relativeTo: base)?.absoluteURL }
+        if let u = upstream[firmwareID] { return u }
+        return managers[firmwareID].flatMap { URL(string: "\($0)/", relativeTo: base)?.absoluteURL }
     }
 
     public static func port(for firmwareID: String, name: String) -> String { ports[firmwareID] ?? name }

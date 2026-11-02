@@ -18,11 +18,39 @@ struct GetFirmwarePage: View {
     let back: () -> Void
     let open: (String) -> Void
 
+    @AppStorage("getfirmware.filter") private var filter = Filter.all
+
+    enum Filter: String { case all, notInstalled, updated }
+
+    /// the list under the filter: Not installed (no file of the id here); Recently updated (newest release first)
+    private func filtered(_ all: [AvailableFirmware]) -> [AvailableFirmware] {
+        switch filter {
+        case .all: return all
+        case .notInstalled: return all.filter { if case .notInstalled = store.state($0) { true } else { false } }
+        case .updated:
+            return all.enumerated().sorted { a, b in
+                switch (store.updated(a.element.id), store.updated(b.element.id)) {
+                case let (x?, y?) where x != y: x > y
+                case (_?, nil): true
+                case (nil, _?): false
+                default: a.offset < b.offset
+                }
+            }.map(\.element)
+        }
+    }
+
     var body: some View {
-        let list = store.list(builtIn: builtIn)
+        let all = store.list(builtIn: builtIn)
+        let list = filtered(all)
         SheetPage("Get firmware", backTitle: "Firmware", scrollTo: scrollTo, back: back) {
-            SheetSectionTitle("Available", top: 12)
-            if list.isEmpty {
+            ChipPicker([(Filter.all, "All"), (.notInstalled, "Not installed"), (.updated, "Recently updated")],
+                       selected: $filter)
+                .padding(.top, 12)
+            SheetSectionTitle(filter == .notInstalled ? "Not installed" : filter == .updated ? "Newest releases first" : "Available",
+                              top: 14)
+            if list.isEmpty, !all.isEmpty {
+                SheetNote(filter == .notInstalled ? "Every firmware in the catalog is on this device." : "No firmware here.")
+            } else if list.isEmpty {
                 SheetNote(store.checking ? "Getting the list…" : store.problem.isEmpty ? "No firmware to download yet." : store.problem,
                           color: store.problem.isEmpty || store.checking ? Palette.sheetMuted : .orange)
             } else {
@@ -48,6 +76,7 @@ struct GetFirmwarePage: View {
             if !store.report.isEmpty { SheetNote("Last check: " + store.report.joined(separator: "; ")) }
         }
         .task { await store.refreshIfOlder(than: 600) }     // (opening the page checks, unless it just did)
+        .task { await store.loadVersions() }                // (the release dates: Recently updated)
     }
 }
 
@@ -224,6 +253,10 @@ struct CatalogRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Button(action: open) {
+                HStack(spacing: 12) {
+                FirmwareThumb(id: item.id, name: item.displayName, corner: 10)
+                    .frame(width: 56, height: 56)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.sheetBorder, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(item.displayName).font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText).lineLimit(1)
@@ -238,14 +271,15 @@ struct CatalogRow: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows its details")
             CatalogAction(state: state, progress: progress, busy: busy, install: install, cancel: cancel)
         }
-        .padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 10)
-        .frame(minHeight: 64)
+        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 10)
+        .frame(minHeight: 76)
         .overlay(alignment: .bottom) { if divider { Palette.sheetLine.frame(height: 1) } }
     }
 }

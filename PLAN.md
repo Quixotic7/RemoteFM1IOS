@@ -776,3 +776,18 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
   `code/<id>/` is empty.
 - Step 2, not done: a File Provider, so the App Group folder itself shows in Files and the AU's `data/` is shared.
 
+
+## 21. Testers' list, 2026-11-01
+
+- **Built-ins with a newer .rfm1** are left out of the lists (FirmwareListing.superseded); shown again if that file goes.
+- **Editors:** ChoralRoot opens its own page (quixotic7.github.io), not remotefm1.com's stale copy (no Digitone .syx).
+  An editor's file inputs open the app's picker: any file (.dnsnd was greyed out), the last folder remembered.
+- **Pickers** remember their folder: firmware, cartridge, editor, Restore (PickerFolder).
+- **Slow redraws** (Rainbow Mode redraws all the time): on dropouts a Wasm core's audio headroom doubles, 6 → 40 ms
+  (PerfGuard); the "too heavy" note only at 40 ms.
+- **"Sound source"** is now "Firmware runs on", with Audio output right under it.
+- **Screen view** shows the firmware's name; a tap opens it.
+- **Firmware sidebar:** a swipe in from the left edge; a tap switches and closes; it keeps its scroll.
+- **Get more firmware** is a big button under the built-ins; Get firmware has thumbnails and All / Not installed /
+  Recently updated. The firmware lists sort by Name / Recently used / Recently updated (release dates from the
+  RemoteFM1FW releases).

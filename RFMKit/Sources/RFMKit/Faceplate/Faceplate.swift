@@ -535,12 +535,12 @@ struct ScreenOnlyView: View {
         ZStack(alignment: .topLeading) {
             if chrome {
                 if portrait, size.width < 600 {
-                    StatusRow(theme: theme, chip: chip, spec: FaceplateLayout.phoneStatus, m: m, word: "SCREEN",
-                              openSheet: openSheet)
+                    StatusRow(theme: theme, chip: chip, spec: FaceplateLayout.phoneStatus, m: m, word: ui.word,
+                              onWord: ui.onWord, openSheet: openSheet)
                 } else if portrait {
                     StatusRow(theme: theme, chip: chip, spec: FaceplateLayout.padStatus,
                               m: FaceplateLayout.Mapper(ref: FaceplateLayout.Kind.padPortrait.ref, size: size),
-                              word: "SCREEN", openSheet: openSheet)
+                              word: ui.word, onWord: ui.onWord, openSheet: openSheet)
                 } else {
                     Grabber(theme: theme, width: 88, bar: 40, height: 20, open: openSheet)
                         .position(x: size.width / 2, y: 22)

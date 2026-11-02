@@ -21,7 +21,8 @@ extension FirmwareStore {
         dec.dateDecodingStrategy = .iso8601
         guard let d = try? Data(contentsOf: versionsCacheURL), let c = try? dec.decode(VersionsCache.self, from: d) else { return }
         allVersions = c.versions
-        versionsChecked = c.fetched
+        // (a cache from build 17 or older has no release dates: read again)
+        versionsChecked = c.versions.values.contains { $0.contains { $0.released != nil } } ? c.fetched : nil
     }
 
     /// the releases read again when the list is older than maxAge (a failure keeps the cached list)
@@ -54,6 +55,12 @@ extension FirmwareStore {
             if e.name.isEmpty { e.name = AvailableFirmware.name(fromID: id) }
             return e
         }
+    }
+
+    /// when a firmware's newest version came out (the releases); nil: not known yet
+    public func updated(_ id: String) -> Date? {
+        guard let v = allVersions[id] else { return nil }
+        return v.first?.released ?? v.compactMap(\.released).max()
     }
 
     /// one version of a firmware (the latest list's entry when it is that version)

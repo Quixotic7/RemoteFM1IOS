@@ -53,19 +53,28 @@ public struct CoreInfo: Sendable, Equatable, Identifiable {
 }
 
 /// (M7) whether a Wasm core keeps up: its core thread's time over the audio's in windows of ~2 s (from the status's
-/// totals); the note when it is over ~90 %, or 3 or more underruns in a window. Native cores: never a note
+/// totals). A core whose screen redraws are slow (Rainbow Mode redraws all the time) drops out with a low average load:
+/// on dropouts the ring's headroom doubles, up to maxHeadroomUs (a little more latency, no crackles). The note when it is over ~90 %, or 3 or more underruns in a window at the most headroom. Native
+/// cores: never a note, the default headroom
 public struct PerfGuard: Sendable {
+    public static let defaultHeadroomUs: UInt32 = 6000      // (RFMEngine.cpp kDefaultHeadroomUs)
+    public static let maxHeadroomUs: UInt32 = 40000
     private var window: (at: Date, ticks: Double, frames: UInt64, underruns: UInt32)?
+    private var core = ""
     public private(set) var load = 0.0          // the last window's (0..1+)
     public private(set) var note = ""
+    /// the ring's headroom this core needs (rfme_set_latency)
+    public private(set) var headroomUs = PerfGuard.defaultHeadroomUs
     public init() {}
 
     public mutating func update(_ s: CoreStatus, name: String, now: Date = Date()) -> String {
         guard s.kind == "wasm", s.booted, s.coreWakes > 0, s.rate > 0 else {
             window = nil
             note = ""
+            if s.kind != "wasm" || s.coreID != core { headroomUs = Self.defaultHeadroomUs; core = "" }
             return note
         }
+        if s.coreID != core { core = s.coreID; headroomUs = Self.defaultHeadroomUs }
         let ticks = Double(s.coreAvgUs) * Double(s.coreWakes)
         guard let w = window, s.coreFrames >= w.frames, ticks >= w.ticks else {
             window = (now, ticks, s.coreFrames, s.underruns)      // (the first, or the stats were reset)
@@ -74,8 +83,12 @@ public struct PerfGuard: Sendable {
         guard now.timeIntervalSince(w.at) >= 2 else { return note }
         let audioUs = Double(s.coreFrames - w.frames) / s.rate * 1e6
         load = audioUs > 0 ? (ticks - w.ticks) / audioUs : 0
-        let under = s.underruns >= w.underruns ? s.underruns - w.underruns : 0
+        var under = s.underruns >= w.underruns ? s.underruns - w.underruns : 0
         window = (now, ticks, s.coreFrames, s.underruns)
+        if under > 0, headroomUs < Self.maxHeadroomUs {             // (dropouts: more headroom first)
+            headroomUs = min(Self.maxHeadroomUs, headroomUs * 2)
+            under = 0
+        }
         note = Self.note(load: load, underruns: under, name: name)
         return note
     }
@@ -372,6 +385,7 @@ public final class CorePlayer {
             bootedID = nil
         }
         selected = id
+        if let c = cores.first(where: { $0.id == id }) { FirmwareListing.used(c) }
         if mode == .core { _ = bootSelected() }
         refresh()
     }
@@ -982,7 +996,12 @@ public final class CorePlayer {
 
     /// the Wasm core's load over the last ~2 s (perfNote)
     private func updatePerf(_ s: CoreStatus) {
+        let had = perf.headroomUs
         let note = perf.update(s, name: current?.name ?? s.coreID)
+        if perf.headroomUs != had {
+            rfme_set_latency(e, perf.headroomUs, 0)
+            log.info("core headroom \(self.perf.headroomUs / 1000, privacy: .public) ms (\(s.coreID, privacy: .public))")
+        }
         if note != perfNote { perfNote = note }
     }
 

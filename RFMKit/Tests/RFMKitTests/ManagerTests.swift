@@ -47,8 +47,9 @@ final class ManagerTests: XCTestCase {
     }
 
     func testManagerList() {
-        XCTAssertEqual(ManagerList.url(for: "choralroot")?.absoluteString, "https://remotefm1.com/managers/choralroot/")
-        XCTAssertEqual(ManagerList.url(for: "purplemonkey")?.absoluteString, "https://remotefm1.com/managers/choralroot/")
+        XCTAssertEqual(ManagerList.url(for: "choralroot")?.absoluteString, "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")
+        XCTAssertEqual(ManagerList.url(for: "purplemonkey")?.absoluteString, "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")
+        XCTAssertEqual(ManagerList.url(for: "felucca")?.absoluteString, "https://remotefm1.com/managers/felucca/")
         XCTAssertNil(ManagerList.url(for: "fizz"))
         XCTAssertEqual(ManagerList.port(for: "melodee", name: "Melodee"), "Melodee FM-1")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")

@@ -133,11 +133,14 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
     /// a Fantasy CFW (the catalogs' "virtual"; the file's manifest is the authority once installed)
     public var isVirtual = false
     public var downloads: [Download] = []   // the same version from each feed, the first tried first
+    /// (the RemoteFM1FW releases) when this version was first released; nil: not known
+    public var released: Date?
 
     public init(id: String) { self.id = id }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, version, author, category, summary, about, license, sourceURL, site, editor, image, repo, beta, isVirtual, downloads
+        case released
     }
 
     /// (a cache from an older build lacks the newer fields: those take their defaults)
@@ -152,6 +155,7 @@ public struct AvailableFirmware: Codable, Sendable, Hashable, Identifiable {
         beta = (try? c.decodeIfPresent(Bool.self, forKey: .beta)) ?? nil ?? false
         isVirtual = (try? c.decodeIfPresent(Bool.self, forKey: .isVirtual)) ?? nil ?? false
         downloads = (try? c.decodeIfPresent([Download].self, forKey: .downloads)) ?? nil ?? []
+        released = (try? c.decodeIfPresent(Date.self, forKey: .released)) ?? nil
     }
 
     public var size: Int { downloads.first { $0.size > 0 }?.size ?? 0 }
@@ -326,13 +330,21 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
     public static func versions(_ data: Data, feed: String) throws -> [String: [AvailableFirmware]] {
         guard let list = try? JSONDecoder().decode([Lossy<ReleaseJSON>].self, from: data) else { throw ParseError() }
         var out: [String: [AvailableFirmware]] = [:]
+        let iso = ISO8601DateFormatter()
         for case let r? in list.map(\.value) where !(r.draft ?? false) {
+            let published = r.published_at.flatMap { iso.date(from: $0) }
             for a in r.assets {
                 guard let (id, version) = idAndVersion(a.name), let url = URL(string: a.browser_download_url),
-                      url.scheme == "https", !(out[id] ?? []).contains(where: { $0.version == version }) else { continue }
+                      url.scheme == "https" else { continue }
+                // (newest release first, the releases cumulative: an older release with this version moves its date back)
+                if let i = out[id]?.firstIndex(where: { $0.version == version }) {
+                    if let p = published { out[id]![i].released = p }
+                    continue
+                }
                 var e = AvailableFirmware(id: id)
                 e.version = version
                 e.beta = version.contains("-")
+                e.released = published
                 let d = a.digest ?? ""
                 e.downloads = [.init(url: url, feed: feed, sha256: d.hasPrefix("sha256:") ? String(d.dropFirst(7)).lowercased() : "",
                                      size: a.size ?? 0, fileName: a.name)]
@@ -429,6 +441,7 @@ private struct SiteJSON: Decodable {
 private struct ReleaseJSON: Decodable {
     var tag_name: String?
     var draft: Bool?
+    var published_at: String?
     var assets: [Asset]
 
     struct Asset: Decodable {

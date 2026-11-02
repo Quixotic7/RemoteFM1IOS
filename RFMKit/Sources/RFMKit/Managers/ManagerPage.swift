@@ -9,6 +9,7 @@
 #if os(iOS)
 import SwiftUI
 import WebKit
+import UniformTypeIdentifiers
 
 public struct ManagerPage: View {
     let player: CorePlayer
@@ -57,6 +58,7 @@ struct ManagerWebView: UIViewRepresentable {
         c.userContentController.addUserScript(WKUserScript(source: Self.webMIDI.replacingOccurrences(of: "%STATE%", with: json),
                                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1mgr")
+        c.userContentController.add(WeakHandler(context.coordinator), name: "fm1pick")
         let w = WKWebView(frame: .zero, configuration: c)
         w.isOpaque = false
         w.backgroundColor = .black
@@ -71,6 +73,7 @@ struct ManagerWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ w: WKWebView, coordinator: Bridge) {
         w.configuration.userContentController.removeScriptMessageHandler(forName: "fm1mgr")
+        w.configuration.userContentController.removeScriptMessageHandler(forName: "fm1pick")
         coordinator.detach()
     }
 
@@ -129,13 +132,50 @@ struct ManagerWebView: UIViewRepresentable {
         const q = G.navigator.permissions.query.bind(G.navigator.permissions);
         G.navigator.permissions.query = (d) => (d && d.name === "midi") ? Promise.resolve({ state: "granted", onchange: null }) : q(d);
       }
+      // (file inputs: the app's own picker, which opens in the folder last picked from and takes any file. iOS's
+      // picker for web pages always opens in RemoteFM1's folder and greys out files whose extension it has no type
+      // for, Digitone's .dnsnd, .dn2pst and .dn2snd among them, even when the page accepts them)
+      const picks = new Map(); let pickN = 0;
+      const canPick = () => { try { return !!G.webkit.messageHandlers.fm1pick; } catch (_) { return false; } };
+      const openPicker = (el) => { const id = ++pickN; picks.set(id, el);
+        G.webkit.messageHandlers.fm1pick.postMessage({ id, multiple: !!el.multiple }); };
+      const clickFile = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function () {
+        if (this.type === "file" && canPick()) { if (!this.disabled) openPicker(this); return; }
+        return clickFile.apply(this, arguments);
+      };
+      if (HTMLInputElement.prototype.showPicker) {
+        const show = HTMLInputElement.prototype.showPicker;
+        HTMLInputElement.prototype.showPicker = function () {
+          if (this.type === "file" && canPick()) { if (!this.disabled) openPicker(this); return; }
+          return show.apply(this, arguments);
+        };
+      }
+      G.addEventListener("click", (e) => {
+        const t = e.target; if (!t || !canPick()) return;
+        const lab = t.closest ? t.closest("label") : null;
+        const el = (t.tagName === "INPUT" && t.type === "file") ? t : (lab && lab.control && lab.control.type === "file" ? lab.control : null);
+        if (!el || el.disabled) return;
+        e.preventDefault(); e.stopPropagation(); openPicker(el);
+      }, true);
+      G.__fm1pick = (id, files) => {
+        const el = picks.get(id); picks.delete(id); if (!el) return;
+        if (!files || !files.length) { el.dispatchEvent(new Event("cancel", { bubbles: true })); return; }
+        const dt = new DataTransfer();
+        for (const f of files) { const bin = atob(f.b64), u = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+          dt.items.add(new File([u], f.name, { type: f.type || "", lastModified: f.modified || Date.now() })); }
+        el.files = dt.files;
+        el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true }));
+      };
       G.__fm1player = { midi(list) { if (input._conn !== "open") return; for (const b of list) input.dispatchEvent(msgEvent(Uint8Array.from(b))); } };
       G.__fm1app = true;
       G.__fm1shim = { app: true, manager: state.firmware, framed: false };   // (the site's fm1-shim.js: stand aside)
     })(window);
     """
 
-    @MainActor final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    @MainActor final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate,
+                               UIDocumentPickerDelegate {
         let player: CorePlayer
         private weak var web: WKWebView?
         private var poll: Task<Void, Never>?
@@ -169,9 +209,57 @@ struct ManagerWebView: UIViewRepresentable {
         }
 
         nonisolated func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "fm1pick" {
+                guard let d = message.body as? [String: Any], let id = (d["id"] as? NSNumber)?.intValue else { return }
+                let multiple = (d["multiple"] as? NSNumber)?.boolValue ?? false
+                Task { @MainActor in self.pick(id, multiple: multiple) }
+                return
+            }
             guard let a = message.body as? [Any] else { return }
             let bytes = a.compactMap { ($0 as? NSNumber)?.intValue }.filter { (0...255).contains($0) }.map { UInt8($0) }
             Task { @MainActor in self.enqueue(bytes) }
+        }
+
+        // MARK: the page's file inputs (the app's picker: the last folder, any file)
+
+        private var picking: [ObjectIdentifier: Int] = [:]
+        static let maxPickBytes = 64 << 20
+
+        private func pick(_ id: Int, multiple: Bool) {
+            guard let w = web, var top = w.window?.rootViewController else { return answer(id, []) }
+            while let p = top.presentedViewController { top = p }
+            let p = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: false)
+            p.allowsMultipleSelection = multiple
+            p.directoryURL = PickerFolder.editor.url
+            p.delegate = self
+            picking[ObjectIdentifier(p)] = id
+            top.present(p, animated: true)
+        }
+
+        func documentPicker(_ c: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let id = picking.removeValue(forKey: ObjectIdentifier(c)) else { return }
+            PickerFolder.editor.remember(urls)
+            var files: [[String: Any]] = [], total = 0
+            for u in urls {
+                let scoped = u.startAccessingSecurityScopedResource()
+                defer { if scoped { u.stopAccessingSecurityScopedResource() } }
+                guard let d = try? Data(contentsOf: u), total + d.count <= Self.maxPickBytes else { continue }
+                total += d.count
+                let modified = (try? u.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                files.append(["name": u.lastPathComponent, "b64": d.base64EncodedString(),
+                              "modified": Int((modified ?? Date()).timeIntervalSince1970 * 1000)])
+            }
+            answer(id, files)
+        }
+
+        func documentPickerWasCancelled(_ c: UIDocumentPickerViewController) {
+            if let id = picking.removeValue(forKey: ObjectIdentifier(c)) { answer(id, []) }
+        }
+
+        private func answer(_ id: Int, _ files: [[String: Any]]) {
+            guard let web, let d = try? JSONSerialization.data(withJSONObject: files),
+                  let js = String(data: d, encoding: .utf8) else { return }
+            web.evaluateJavaScript("window.__fm1pick && window.__fm1pick(\(id), \(js))")
         }
 
         // MARK: downloads (an editor's backups, presets) and new windows
