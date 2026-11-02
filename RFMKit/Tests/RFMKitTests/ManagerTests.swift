@@ -59,6 +59,8 @@ final class ManagerTests: XCTestCase {
         // (RemoteFM1FW 31b8751, checked against the firmwares' USB descriptors)
         XCTAssertEqual(ManagerList.port(for: "jiant", name: "JIANT"), "FM-1", "10.26's; JIANT's editor matches FM-1")
         XCTAssertEqual(ManagerList.port(for: "hortator", name: "Hortator"), "Hortator")
+        XCTAssertNil(ManagerList.url(for: "hortator"), "its firmware answers no editor (RemoteFM1FW 5bcbb65)")
+        XCTAssertTrue(ManagerList.hasReader("ctl1"), "CTL-1's catalog id")
         XCTAssertTrue(ManagerList.hasReader("amb"))
         XCTAssertFalse(ManagerList.hasReader("ripple"), "his, but no screen reader support (0.4)")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")

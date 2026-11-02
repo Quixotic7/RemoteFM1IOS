@@ -22,11 +22,10 @@ public enum ManagerList {
         "melodee": URL(string: "https://keremimo.github.io/melodee/webapp/editor/")!,
         "jiant": URL(string: "https://juanjiant-bit.github.io/JIANT/webapp/editor/")!,
         "ghoulbox": URL(string: "https://jasonpersinger.me/ghoulbox-fm1-dungeon-synth/webapp/editor/")!,
-        // (not in the site catalog's editors: Mutable Dreams is listed there as "mutable"; Rainbow Mode and Hortator
-        // have Felucca's editor on their own sites)
+        // (not in the site catalog's editors: Mutable Dreams is listed there as "mutable"; Rainbow Mode has Felucca's
+        // editor on its own site. Hortator's site has one too, but its firmware answers no editor: RemoteFM1FW 5bcbb65)
         "mutabledreams": URL(string: "https://mutable-dreams.kidbee85.chatgpt.site/#device-editor")!,
         "rainbow": URL(string: "https://joshbartlettband-web.github.io/felucca-rainbow/webapp/editor/")!,
-        "hortator": URL(string: "https://deadactive.github.io/hortator/webapp/editor/")!,
         "fizz": URL(string: "https://quixotic7.github.io/FIZZ/manager/")!,     // (built in; not in the catalogs)
     ]
 
@@ -58,7 +57,7 @@ public enum ManagerList {
     public static let reader = URL(string: "https://charlesvestal.github.io/fm1-reader/")!
     /// the firmwares that speak to it (its README's list, 2026-11-01; AMB-1 1.3, X0X 1.2.0 and FoMni 0.4 answer its
     /// HELLO in the app's engine. Ripple 0.4 and Fart Machine, though his, don't)
-    public static let readerFirmwares: Set<String> = ["x0x", "fomni", "amb", "polly", "monk", "mocky", "ctl"]
+    public static let readerFirmwares: Set<String> = ["x0x", "fomni", "amb", "polly", "monk", "mocky", "ctl", "ctl1"]
 
     public static func hasReader(_ firmwareID: String, details _: [String: AvailableFirmware] = [:]) -> Bool {
         readerFirmwares.contains(firmwareID)
