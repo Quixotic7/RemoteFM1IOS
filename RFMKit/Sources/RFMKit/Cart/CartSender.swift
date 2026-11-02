@@ -407,7 +407,9 @@ public final class CartSender {
         return (a, d)
     }
 
-    /// every bank on one side and not the other copied across (from the app's kept copies, CartKeep), with its name
+    /// every bank RemoteFM1 in the app has and the FM-1 doesn't copied to the FM-1 (from the app's kept copies,
+    /// CartKeep), with its name. One way (the owner: sounds are made in the app, not on the FM-1); the FM-1's own
+    /// banks are left alone
     public func sync() async {
         guard !busy else { return }
         rescan()
@@ -421,7 +423,7 @@ public final class CartSender {
             return
         }
         r.both = la.banks.filter { b in ld.banks.contains { $0.crc == b.crc } }.count
-        for (src, from, to) in [(la, a, d), (ld, d, a)] {
+        for (src, from, to) in [(la, a, d)] {
             guard await list(to), var dst = banks else { r.failed = "\(to.name) stopped answering."; break }
             let missing = src.banks.filter { b in !dst.banks.contains { $0.crc == b.crc } }
             for b in missing {
@@ -457,7 +459,7 @@ public final class CartSender {
         if r.both > 0 { s.append("\(r.both) already on both.") }
         if !r.noCopy.isEmpty {
             s.append("Not copied, the app has no copy of: \(r.noCopy.joined(separator: ", ")). Send their .syx files once "
-                     + "from this page and they can be synced.")
+                     + "to RemoteFM1 in this app from this page and they can be copied.")
         }
         if !r.full.isEmpty { s.append("No free slot for: \(r.full.joined(separator: ", ")).") }
         return s.joined(separator: " ")

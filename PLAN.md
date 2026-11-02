@@ -828,8 +828,9 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
   answer its HELLO in the app's engine; Ripple 0.4 doesn't.
 - **Bank sync (RemoteFM1 in the app and an FM-1):** RemoteFM1 0.3.1 lists its banks with each one's CRC-32 but can't
   send one back, so the app keeps every cartridge it sends (CartKeep: Files › RemoteFM1 › Cartridges, `<name>
-  <crc>.syx`; a .syx put there counts) and Sync copies each bank one side lacks from that copy, both ways, with its
-  name. A bank the app never had is named in the result. A real two-way copy needs a "send a bank" request in
+  <crc>.syx`; a .syx put there counts) and "Copy this app's banks to FM-1" copies each bank the app has and the FM-1
+  lacks from that copy, with its name. One way (the owner: sounds are made in the app); the FM-1's own banks stay. A bank the app never had is named in the result. A real two-way copy needs a "send a bank" request in
   RemoteFM1's SA_INFO (not there; the RemoteFM1 repo).
 - **The screen reader's voice:** pages may play sound without a tap (mediaTypesRequiringUserActionForPlayback),
-  and the session mixes with others while a page is open (CorePlayer.setMixing), so WebKit's audio is heard.
+  the session mixes with others while a page is open (CorePlayer.setMixing), and the page's audio session is
+  "playback" (navigator.audioSession), so it plays with the phone on silent. Page errors go to the "manager" log.

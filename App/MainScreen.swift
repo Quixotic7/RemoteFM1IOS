@@ -51,6 +51,7 @@ struct LaunchOptions {
     var firmwareEdit: String?                           // (DEBUG) -firmwareedit [ask]: the Firmware page in Edit (ask:
                                                         // the first imported row asks "Delete?")
     var askReset = false                                // (DEBUG) -askreset: the Firmware page asks "Reset firmware?"
+    var openReader = false                              // (DEBUG) -openreader: the screen reader
     var openManager = false                             // (DEBUG) -openmanager: the running firmware's web manager
     var safetyDemo = false                              // (DEBUG) -safetydemo: a few made-up safety copies
     var statesDemo = false                              // (DEBUG) -statesdemo: a few made-up states (one of another version)
@@ -90,6 +91,7 @@ struct LaunchOptions {
         if a.contains("-firmwareedit") { firmwareEdit = value("-firmwareedit") ?? "" }
         askReset = a.contains("-askreset")
         openManager = a.contains("-openmanager")
+        openReader = a.contains("-openreader")
         safetyDemo = a.contains("-safetydemo")
         statesDemo = a.contains("-statesdemo")
         statesSave = a.contains("-statessave")
@@ -364,6 +366,7 @@ struct MainScreen: View {
         if options.cartDemo { CartSender.shared(for: controller).addDemo() }
         if options.askReset { askReset = true }
         if options.openManager, options.catalogGet == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showManager = true } }
+        if options.openReader { DispatchQueue.main.asyncAfter(deadline: .now() + 2) { readerOpen = true; showManager = true } }
         if options.safetyDemo { safetyDemo() }
         if options.statesDemo { statesDemo() }
         syncMirror()

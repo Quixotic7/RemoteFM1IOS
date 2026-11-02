@@ -206,12 +206,12 @@ public struct SendCartPage: View {
     @ViewBuilder private var sync: some View {
         if let pair = sender.syncPair {
             SheetSectionTitle("Sync")
-            SheetButton("Sync with \(pair.device.name)") { Task { await sender.sync() } }
+            SheetButton("Copy this app's banks to \(pair.device.name)") { Task { await sender.sync() } }
                 .disabled(sender.busy)
                 .opacity(sender.busy ? 0.5 : 1)
-            SheetNote("Copies each bank RemoteFM1 in this app has and the FM-1 doesn't, and the other way, with its name. "
-                      + "RemoteFM1 can't send a bank back, so the app copies from the cartridges it has sent (Files › "
-                      + "RemoteFM1 › Cartridges; a .syx put there counts too). Nothing is removed on either side.")
+            SheetNote("Copies each bank RemoteFM1 in this app has and the FM-1 doesn't to the FM-1, with its name. The "
+                      + "FM-1's own banks stay. RemoteFM1 can't send a bank back, so the app copies from the cartridges "
+                      + "it has sent (Files › RemoteFM1 › Cartridges; a .syx put there counts too).")
         }
     }
 

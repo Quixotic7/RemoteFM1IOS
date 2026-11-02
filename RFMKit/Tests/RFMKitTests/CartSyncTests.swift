@@ -28,17 +28,18 @@ final class CartSyncTests: XCTestCase {
         return try DX7Cart.parse(b)
     }
 
-    func testSyncCopiesBothWaysFromKeptCopies() async throws {
+    func testSyncCopiesTheAppsBanksToTheFM1() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keep-\(UUID().uuidString)")
         let (a, b, c) = (try cart(3), try cart(5), try cart(7))
         let t = TwoUnits()
         var timing = CartSender.Timing()
         timing.reply = 50; timing.stored = 50; timing.poll = 1; timing.namePoll = 1; timing.nameSettle = 6
         let s = CartSender(transport: t, panel: nil, clock: SystemCartClock(), timing: timing, simulated: true)
-        // a on the app's side, b on the FM-1, c on the FM-1 but never kept by the app
+        // a and c in the app (c never kept: put there another way), b on both
         _ = t.app.receive(a.bytes)
+        _ = t.app.receive(b.bytes)
+        _ = t.app.receive(c.bytes)
         _ = t.dev.receive(b.bytes)
-        _ = t.dev.receive(c.bytes)
         CartKeep.keep(a, in: dir)
         CartKeep.keep(b, in: dir)
         XCTAssertEqual(CartKeep.cart(crc: CartKeep.crc(b), in: dir)?.bytes, b.bytes)
@@ -50,11 +51,12 @@ final class CartSyncTests: XCTestCase {
         await s.sync()
         let r = try XCTUnwrap(s.lastSync)
         XCTAssertNil(r.failed)
-        XCTAssertEqual(r.copied["FM-1"]?.count, 1)
-        XCTAssertEqual(r.copied[CoreCartTransport.port.name]?.count, 1)
-        XCTAssertEqual(r.noCopy.count, 1, "c: the app never had it")
-        XCTAssertEqual(Set(t.dev.slots.values.map(\.crc)), Set([a, b, c].map(CartKeep.crc)))
-        XCTAssertEqual(Set(t.app.slots.values.map(\.crc)), Set([a, b].map(CartKeep.crc)))
+        XCTAssertEqual(r.copied["FM-1"]?.count, 1, "a")
+        XCTAssertNil(r.copied[CoreCartTransport.port.name], "one way: nothing back to the app")
+        XCTAssertEqual(r.both, 1)
+        XCTAssertEqual(r.noCopy.count, 1, "c: the app never had a copy")
+        XCTAssertEqual(Set(t.dev.slots.values.map(\.crc)), Set([a, b].map(CartKeep.crc)))
+        XCTAssertEqual(Set(t.app.slots.values.map(\.crc)), Set([a, b, c].map(CartKeep.crc)))
         XCTAssertTrue(CartSender.syncText(r).contains("no copy of"))
     }
 }

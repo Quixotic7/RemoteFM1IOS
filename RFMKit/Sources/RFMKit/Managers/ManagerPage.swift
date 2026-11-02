@@ -63,6 +63,10 @@ struct ManagerWebView: UIViewRepresentable {
                                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1mgr")
         c.userContentController.add(WeakHandler(context.coordinator), name: "fm1pick")
+        c.userContentController.add(WeakHandler(context.coordinator), name: "fm1log")
+        // (the page's errors into the app's log, "manager": a page that fails quietly in the app can be seen)
+        c.userContentController.addUserScript(WKUserScript(source: Self.logScript, injectionTime: .atDocumentStart,
+                                                           forMainFrameOnly: true))
         // (a page may make sound by itself: the screen reader's own voice, eSpeak in Web Audio, speaks what MIDI
         // brings, with no tap to start it. WebKit's default holds that back until a tap)
         c.mediaTypesRequiringUserActionForPlayback = []
@@ -89,6 +93,7 @@ struct ManagerWebView: UIViewRepresentable {
     static func dismantleUIView(_ w: WKWebView, coordinator: Bridge) {
         w.configuration.userContentController.removeScriptMessageHandler(forName: "fm1mgr")
         w.configuration.userContentController.removeScriptMessageHandler(forName: "fm1pick")
+        w.configuration.userContentController.removeScriptMessageHandler(forName: "fm1log")
         coordinator.detach()
     }
 
@@ -96,6 +101,20 @@ struct ManagerWebView: UIViewRepresentable {
     /// set as window.__fm1shim first so that one stands aside): one input and one output named as the firmware's USB
     /// port, always connected, sysex granted; what the page sends goes to the app (fm1mgr), the app's
     /// __fm1player.midi(list) comes in on the input. Any editor page works, the site's copies and the authors' own
+    static let logScript = """
+    (function (G) {
+      const send = (k, a) => { try { G.webkit.messageHandlers.fm1log.postMessage(k + ": " + Array.from(a).map((x) => {
+        try { return x instanceof Error ? (x.message + " " + (x.stack || "")) : typeof x === "string" ? x : JSON.stringify(x); }
+        catch (_) { return String(x); } }).join(" ").slice(0, 600)); } catch (_) {} };
+      for (const k of ["error", "warn"]) { const f = console[k]; console[k] = function () { send(k, arguments); return f.apply(console, arguments); }; }
+      G.addEventListener("error", (e) => send("uncaught", [e.message, e.filename + ":" + e.lineno]));
+      G.addEventListener("unhandledrejection", (e) => send("rejection", [e.reason]));
+      // a page's sound plays like the app's (WebKit's Audio Session API): heard with the ring/silent switch on silent,
+      // as the firmware is. The screen reader's voice was silent on a phone set to silent
+      try { if (G.navigator.audioSession) G.navigator.audioSession.type = "playback"; } catch (_) {}
+    })(window);
+    """
+
     static let webMIDI = """
     (function (G) {
       "use strict";
@@ -197,6 +216,8 @@ struct ManagerWebView: UIViewRepresentable {
 
         var close: () -> Void = {}
 
+        nonisolated static let log = RFMShared.log("manager")
+
         init(player: CorePlayer) { self.player = player }
 
         static let edgeWidth: CGFloat = 24
@@ -248,6 +269,10 @@ struct ManagerWebView: UIViewRepresentable {
         }
 
         nonisolated func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "fm1log" {
+                if let t = message.body as? String { Self.log.error("page \(t, privacy: .public)") }
+                return
+            }
             if message.name == "fm1pick" {
                 guard let d = message.body as? [String: Any], let id = (d["id"] as? NSNumber)?.intValue else { return }
                 let multiple = (d["multiple"] as? NSNumber)?.boolValue ?? false
