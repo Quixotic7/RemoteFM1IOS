@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// The firmwares' own web managers (PLAN.md section 18 step 5), as remotefm1.com hosts them: managers/<id>/ loads
-// managers/fm1-shim.js, which replaces Web MIDI with a port named as the firmware's USB port and talks to "the player"
-// over a BroadcastChannel ("remotefm1-managers") when the page isn't framed. In the app the player is a script this
-// file injects (ManagerBridge.playerScript): it answers the shim's hello with the port, and passes MIDI both ways
-// through a WKScriptMessageHandler. What the page sends goes to the running firmware's MIDI in (SysEx whole:
+// The firmwares' own web editors (PLAN.md section 18 step 5), opened at their authors' pages. The app injects a whole
+// Web MIDI into the page (ManagerPage.webMIDI): one port named as the firmware's USB port, MIDI both ways through a
+// WKScriptMessageHandler. What the page sends goes to the running firmware's MIDI in (SysEx whole:
 // rfme_sysex_in; the rest: rfme_midi_in to the firmware); what the firmware sends (rfme_midi_out_take's USB-MIDI
 // packets, put back together by UsbMidiDecoder) goes to the page.
 //   ManagerList     the managers the site has, by firmware id, and each firmware's USB port name
@@ -12,14 +10,18 @@
 
 import Foundation
 
-/// the site's managers (web/managers/managers.json at RemoteFM1's main, as remotefm1.com serves them)
+/// the firmwares' editors: always the author's own page (the owner, 2026-11-01). remotefm1.com's copies of five of
+/// them (made for the site's player, which needs its fm1-shim.js) fell behind their authors' pages; the app needs no
+/// copy, as its Web MIDI works on any page
 public enum ManagerList {
-    public static let base = URL(string: "https://remotefm1.com/managers/")!
-
-    /// firmware id -> its manager's folder on the site
-    public static let managers: [String: String] = [
-        "choralroot": "choralroot", "purplemonkey": "choralroot", "felucca": "felucca", "melodee": "melodee",
-        "jiant": "jiant", "ghoulbox": "ghoulbox",
+    /// the authors' pages for the firmwares the catalog may not list an editor for (or before the catalog is read)
+    public static let authors: [String: URL] = [
+        "choralroot": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
+        "purplemonkey": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
+        "felucca": URL(string: "https://hugelton.github.io/Felucca/webapp/editor/")!,
+        "melodee": URL(string: "https://keremimo.github.io/melodee/webapp/editor/")!,
+        "jiant": URL(string: "https://juanjiant-bit.github.io/JIANT/webapp/editor/")!,
+        "ghoulbox": URL(string: "https://jasonpersinger.me/ghoulbox-fm1-dungeon-synth/webapp/editor/")!,
     ]
 
     /// each firmware's real USB MIDI port name: the name the page's port takes (managers.json "ports")
@@ -38,20 +40,16 @@ public enum ManagerList {
         "purplemonkey": URL(string: "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")!,
     ]
 
-    /// the manager page for a firmware, nil: none
-    public static func url(for firmwareID: String) -> URL? {
-        if let u = upstream[firmwareID] { return u }
-        return managers[firmwareID].flatMap { URL(string: "\($0)/", relativeTo: base)?.absoluteURL }
-    }
+    /// the author's editor known to the app, nil: none
+    public static func url(for firmwareID: String) -> URL? { authors[firmwareID] }
 
     public static func port(for firmwareID: String, name: String) -> String { ports[firmwareID] ?? name }
 
-    /// the editor page to open: the site's hosted copy (its fixes, the site's shim) when there is one, else the
-    /// firmware's own editor from the catalog (`editor`, https only); nil: none known
+    /// the editor page to open: the catalog's `editor` (the author's page, https only), else the one the app knows;
+    /// nil: none
     public static func editor(for firmwareID: String, details: [String: AvailableFirmware]) -> URL? {
-        if let u = url(for: firmwareID) { return u }
-        guard let s = details[firmwareID]?.editor, let u = URL(string: s), u.scheme == "https" else { return nil }
-        return u
+        if let s = details[firmwareID]?.editor, let u = URL(string: s), u.scheme == "https" { return u }
+        return url(for: firmwareID)
     }
 }
 

@@ -780,7 +780,7 @@ Host-only `.rfm1` firmwares (FM1VST docs/VIRTUAL-CARTS.md): `"virtual": true`, u
 ## 21. Testers' list, 2026-11-01
 
 - **Built-ins with a newer .rfm1** are left out of the lists (FirmwareListing.superseded); shown again if that file goes.
-- **Editors:** ChoralRoot opens its own page (quixotic7.github.io), not remotefm1.com's stale copy (no Digitone .syx).
+- **Editors:** always the author's page (the catalog's `editor`, else ManagerList.authors), never remotefm1.com's copies (ChoralRoot's had no Digitone .syx).
   An editor's file inputs open the app's picker: any file (.dnsnd was greyed out), the last folder remembered.
 - **Pickers** remember their folder: firmware, cartridge, editor, Restore (PickerFolder).
 - **Slow redraws** (Rainbow Mode redraws all the time): on dropouts a Wasm core's audio headroom doubles, 6 → 40 ms

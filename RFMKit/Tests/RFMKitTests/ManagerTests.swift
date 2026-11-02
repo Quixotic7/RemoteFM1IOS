@@ -49,7 +49,8 @@ final class ManagerTests: XCTestCase {
     func testManagerList() {
         XCTAssertEqual(ManagerList.url(for: "choralroot")?.absoluteString, "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")
         XCTAssertEqual(ManagerList.url(for: "purplemonkey")?.absoluteString, "https://quixotic7.github.io/ChoralRootFM1/webapp/installer/manager.html")
-        XCTAssertEqual(ManagerList.url(for: "felucca")?.absoluteString, "https://remotefm1.com/managers/felucca/")
+        XCTAssertEqual(ManagerList.url(for: "felucca")?.absoluteString, "https://hugelton.github.io/Felucca/webapp/editor/")
+        XCTAssertFalse(ManagerList.authors.values.contains { $0.host == "remotefm1.com" }, "never the site's copies")
         XCTAssertNil(ManagerList.url(for: "fizz"))
         XCTAssertEqual(ManagerList.port(for: "melodee", name: "Melodee"), "Melodee FM-1")
         XCTAssertEqual(ManagerList.port(for: "nonesuch", name: "Nonesuch"), "Nonesuch")
@@ -65,7 +66,7 @@ final class ManagerTests: XCTestCase {
         return out
     }
 
-    /// the page: the site's hosted copy first, else the catalog's own editor link (https only)
+    /// the page: the catalog's editor link (the author's, https only), else the author's page the app knows
     func testEditorPage() {
         var sloop = AvailableFirmware(id: "sloop")
         sloop.editor = "https://isod89.github.io/sloop-fm1/webapp/editor/"
@@ -75,8 +76,13 @@ final class ManagerTests: XCTestCase {
         felucca.editor = "https://hugelton.github.io/Felucca/webapp/editor/"
         let d = ["sloop": sloop, "old": bad, "felucca": felucca]
         XCTAssertEqual(ManagerList.editor(for: "sloop", details: d)?.absoluteString, sloop.editor)
-        XCTAssertEqual(ManagerList.editor(for: "felucca", details: d)?.absoluteString, "https://remotefm1.com/managers/felucca/")
+        XCTAssertEqual(ManagerList.editor(for: "felucca", details: d)?.absoluteString, "https://hugelton.github.io/Felucca/webapp/editor/")
         XCTAssertNil(ManagerList.editor(for: "old", details: d), "not https")
+        XCTAssertEqual(ManagerList.editor(for: "choralroot", details: d), ManagerList.authors["choralroot"], "not in the catalog")
+        var moved = AvailableFirmware(id: "melodee")
+        moved.editor = "https://keremimo.github.io/melodee-next/editor/"
+        XCTAssertEqual(ManagerList.editor(for: "melodee", details: ["melodee": moved])?.absoluteString, moved.editor,
+                       "the catalog's link wins: the author may move it")
         XCTAssertNil(ManagerList.editor(for: "fizz", details: d))
     }
 
