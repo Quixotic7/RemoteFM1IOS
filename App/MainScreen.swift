@@ -132,6 +132,7 @@ struct MainScreen: View {
     @State private var showBluetooth = false
     @State private var showAbout = false
     @State private var cartBack: AppSheetPage = .settings   // where the cartridge page goes back to
+    @State private var updateNotice: UpdateNotice?      // the launch notice (a newer build, firmware updates)
     @State private var readerOpen = false              // the manager layer shows the screen reader, not the editor
     @State private var showManager = false             // (section 18 step 5) the firmware's own web manager
     @State private var askReset = false                 // Reset firmware… asked inline
@@ -321,6 +322,23 @@ struct MainScreen: View {
             withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
         }
         .task { await catalog.refreshIfOlder(than: 86_400) }     // (at launch, at most once a day)
+        .task { await checkUpdates() }                            // (the launch notice: a newer build, firmware updates)
+        .alert(updateNotice?.title ?? "", isPresented: Binding(get: { updateNotice != nil }, set: { if !$0 { closeNotice() } }),
+               presenting: updateNotice) { n in
+            if n.newBuild != nil, let u = n.url {
+                Button("Open TestFlight") { closeNotice(); UIApplication.shared.open(u) }
+            }
+            if !n.firmware.isEmpty {
+                Button("Get firmware") {
+                    closeNotice()
+                    page = .getFirmware
+                    withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+                }
+            }
+            Button("Close", role: .cancel) { closeNotice() }
+        } message: { n in
+            Text(n.message(current: Self.appBuild))
+        }
         .task { await catalog.loadVersions(maxAge: 86_400) }     // (the release dates: sorting by Recently updated)
         .onChange(of: ui.page) { _, _ in saveView() }
         .onChange(of: ui.deck) { _, _ in saveView() }
@@ -598,6 +616,27 @@ struct MainScreen: View {
 
     /// when each imported file came (by SHA-256): of two of the same version, the lists show the later
     private var addedDates: [String: Date] { Dictionary(library.files.map { ($0.sha256, $0.added) }, uniquingKeysWith: max) }
+
+    /// this app's build (CFBundleVersion)
+    static var appBuild: Int { Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0 }
+
+    /// the launch notice, once per launch (not for launches with options: the screenshots, the tests; -updatenotice
+    /// shows it anyway, its dismissal forgotten)
+    private func checkUpdates() async {
+        let force = ProcessInfo.processInfo.arguments.contains("-updatenotice")
+        guard force || ProcessInfo.processInfo.arguments.dropFirst().allSatisfy({ !$0.hasPrefix("-") }) else { return }
+        async let latest = UpdateNotice.latest()
+        await catalog.refreshIfOlder(than: 86_400)
+        let ups = catalog.updates(builtIn: builtIn).map { (name: $0.displayName, version: $0.version) }
+        guard let n = UpdateNotice.make(build: Self.appBuild, latest: await latest, updates: ups),
+              force || !n.dismissed() else { return }
+        updateNotice = n
+    }
+
+    private func closeNotice() {
+        updateNotice?.dismiss()
+        updateNotice = nil
+    }
 
     /// the cores built into the app (Get firmware doesn't list them)
     private var builtIn: [CoreInfo] { player.cores.filter { !$0.imported } }
