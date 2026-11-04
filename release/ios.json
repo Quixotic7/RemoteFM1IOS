@@ -1,6 +1,6 @@
 {
   "about": "The newest RemoteFM1 iOS build on TestFlight. The app reads this at launch (RFMKit UpdateNotice) and tells testers on an older build. Update build when a new build is out to testers.",
-  "build": 19,
+  "build": 20,
   "version": "0.1",
   "url": "https://testflight.apple.com/join/e6A47Xap"
 }
