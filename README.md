@@ -352,6 +352,11 @@ off (PLAN.md section 17).
   itself on FM1Kit's SimulatedFM1 (stops at the confirmation; installs; installs; is cut off at 45 %), for
   `MATCH=install scripts/sim_shots.sh`.
 
+## Thanks
+
+- Brian White, for the idea of skins: a background image behind the faceplate, and firmware with its own look
+  (PLAN.md section 23).
+
 ## Licence
 
 GPL-3.0-only (`LICENSE`), except these files, which are MPL-2.0 (`LICENSES/MPL-2.0.txt`; the author's decision,

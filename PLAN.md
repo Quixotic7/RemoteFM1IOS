@@ -856,7 +856,7 @@ Spec: RemoteFM1 web/engine/API.md section 6 (FM1VST docs/VIRTUAL-CARTS.md sectio
 
 ## 23. Skins (2026-11-04)
 
-An image behind the faceplate, like Koala Sampler's backgrounds (Skin.swift, SkinSettings.swift).
+An image behind the faceplate, like Koala Sampler's backgrounds (Skin.swift, SkinSettings.swift). Brian White's idea.
 - **The user's:** the sheet's Background section: Background image (from Photos, stored scaled to 2048 px as a JPEG in
   the App Group's Skins folder, so the AU shows it too), Dim (0–0.8, default 0.25: the faceplate's colour over the image, so its labels stay legible), Remove. The theme's colours still
   draw the controls.

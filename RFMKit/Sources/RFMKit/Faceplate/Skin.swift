@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// Skins: an image behind the faceplate (PLAN.md section 23).
+// Skins: an image behind the faceplate (PLAN.md section 23; Brian White's idea).
 //   the user's    Settings › Theme › Background image: one photo for every firmware, kept in the App Group's
 //                 Skins folder (re-encoded, at most 2048 px), so the AU shows it too; the dim lays the faceplate's
 //                 colour over it, so the labels (chosen for contrast on that colour) stay legible
