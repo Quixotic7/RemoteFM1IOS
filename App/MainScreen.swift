@@ -160,6 +160,7 @@ struct MainScreen: View {
     private static let mirrorQueue = DispatchQueue(label: "rfm1.mirror", qos: .utility)
     @State private var turned = false                  // (-orientation landscape refused: drawn turned, for screenshots)
     private let store = ThemeStore.shared
+    private let skins = SkinStore.shared
     private let options = LaunchOptions()
 
     init(controller: RemoteController, player: CorePlayer, library: FirmwareLibrary, catalog: FirmwareStore, midi: AppMidi,
@@ -196,13 +197,19 @@ struct MainScreen: View {
         }
         .ignoresSafeArea(turned ? .all : [])
         // the theme's colour to every edge (landscape: the Dynamic Island's side showed the window's black)
-        .background(store.current.body.color.ignoresSafeArea())
+        .background(faceTheme.body.color.ignoresSafeArea())
     }
 
+    /// the image behind the faceplate: the playing firmware's own skin, else the user's background (SkinStore)
+    private var skin: Skin? { skins.skin(for: player.mode == .core ? player.current?.id : nil) }
+    /// the theme, or the firmware skin's colours
+    private var faceTheme: Theme { skin?.theme ?? store.current }
+
     private var screen: some View {
-        let theme = store.current
+        let skin = skin
+        let theme = skin?.theme ?? store.current
         return ZStack {
-            FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip)
+            FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip, skin: skin)
                 .equatable()
                 .ignoresSafeArea()
             if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone {
@@ -361,6 +368,7 @@ struct MainScreen: View {
         guard !launched else { return }
         launched = true
         store.observe()
+        skins.observe()
         prompter.start()
         ui.onWord = { openFirmwarePanel() }
         loadView(source)
@@ -603,6 +611,8 @@ struct MainScreen: View {
                     SheetNote("Double-tap the display to see it alone; double-tap again or swipe down to close.")
                     SheetSectionTitle("Theme")
                     ThemeSwatches(store: store) { withAnimation { ui.editorOpen = true } }
+                    SheetSectionTitle("Background")
+                    SkinSettings(skins: skins)
                     SheetList {
                         SheetRow("Firmware", value: player.current?.name ?? "–", badge: updates) { page = .firmware }
                         SheetRow("MIDI & audio") { page = .midi }

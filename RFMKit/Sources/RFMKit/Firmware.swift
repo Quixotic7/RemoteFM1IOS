@@ -371,6 +371,15 @@ extension RFMShared {
 }
 
 extension RFMShared {
+    /// the App Group's Skins folder (the user's background image); without an App Group, Application Support/Skins
+    public static func skinsFolder() -> URL? {
+        groupContainer()?.appendingPathComponent("Skins")
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("Skins")
+    }
+}
+
+extension RFMShared {
     /// the App Group's CoreSlots folder (CoreSlotMirror: Mac only), nil without an App Group
     public static func coreSlotsMirror() -> URL? { groupContainer()?.appendingPathComponent("CoreSlots") }
 }

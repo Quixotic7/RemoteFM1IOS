@@ -18,11 +18,14 @@ import SwiftUI
 struct AUView: View {
     @Bindable var model: AUViewModel
     private let store = ThemeStore.shared
+    private let skins = SkinStore.shared
 
     var body: some View {
         GeometryReader { geo in
+            let skin = skins.skin(for: model.status.coreKey.isEmpty ? nil : model.status.coreKey)
             ZStack {
-                FaceplateView(feed: model.feed, ui: model.ui, theme: store.current, chip: model.chip)
+                FaceplateView(feed: model.feed, ui: model.ui, theme: skin?.theme ?? store.current, chip: model.chip,
+                              skin: skin)
                     .equatable()
                 if !model.ui.sheetOpen && !model.ui.displayAlone {
                     VStack { Spacer(); PerfBanner(model.perfNote).padding(.bottom, 8) }
@@ -39,6 +42,7 @@ struct AUView: View {
         .ignoresSafeArea()
         .onAppear {
             store.observe()
+            skins.observe()
             model.ui.onWord = { [model] in       // (the word: the firmware's name) the sheet on the Firmware page
                 model.page = .firmware
                 withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
@@ -106,6 +110,8 @@ struct AUSheet: View {
                         if model.macWindow { windowSection.id("window") }
                         SheetSectionTitle("Theme")
                         ThemeSwatches(store: store, edit: nil)
+                        SheetSectionTitle("Background")
+                        SkinSettings(skins: .shared, picker: false)
                         SheetList {
                             SheetRow("Firmware", value: model.status.coreName.isEmpty ? "–" : model.status.coreName) {
                                 model.page = .firmware

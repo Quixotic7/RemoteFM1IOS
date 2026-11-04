@@ -78,9 +78,11 @@ public struct FaceplateView: View, @MainActor Equatable {
     let chip: PanelChip
     var kind: FaceplateLayout.Kind?                 // nil: from the view's size
     var chrome = true                               // the status row / grabber (it sets ui.sheetOpen)
+    var skin: Skin?                                 // an image behind it (SkinStore)
 
     public init(feed: PanelFeed, ui: FaceplateUI, theme: Theme, chip: PanelChip, kind: FaceplateLayout.Kind? = nil,
-                chrome: Bool = true) {
+                chrome: Bool = true, skin: Skin? = nil) {
+        self.skin = skin
         self.feed = feed
         self.ui = ui
         self.theme = theme
@@ -92,7 +94,7 @@ public struct FaceplateView: View, @MainActor Equatable {
     /// (equal inputs: SwiftUI skips the faceplate when its host redraws for something else)
     public static func == (a: FaceplateView, b: FaceplateView) -> Bool {
         a.feed === b.feed && a.ui === b.ui && a.theme == b.theme && a.chip == b.chip && a.kind == b.kind
-            && a.chrome == b.chrome
+            && a.chrome == b.chrome && a.skin == b.skin
     }
 
     private func openSheet() { withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true } }
@@ -103,7 +105,10 @@ public struct FaceplateView: View, @MainActor Equatable {
             let k = kind ?? FaceplateLayout.Kind.pick(size)
             ZStack(alignment: .topLeading) {
                 // the background: sideways swipes change the view (controls on top get their own touches)
-                theme.body.color
+                ZStack {
+                    theme.body.color
+                    if let skin { SkinBackground(skin: skin, size: size, tint: theme.body.color) }
+                }
                     .contentShape(Rectangle())
                     .gesture(swipe { ui.move($0) })
                     .accessibilityHidden(true)

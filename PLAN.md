@@ -853,3 +853,15 @@ Spec: RemoteFM1 web/engine/API.md section 6 (FM1VST docs/VIRTUAL-CARTS.md sectio
   input + output latency, two IO buffers, the ring, the headroom.
 - **AU:** a second component, "Quixotic7: RemoteFM1 (audio in)", type aumf: one input bus the host routes, pulled each
   render into the ring; always on for a firmware that takes input.
+
+## 23. Skins (2026-11-04)
+
+An image behind the faceplate, like Koala Sampler's backgrounds (Skin.swift, SkinSettings.swift).
+- **The user's:** the sheet's Background section: Background image (from Photos, stored scaled to 2048 px as a JPEG in
+  the App Group's Skins folder, so the AU shows it too), Dim (0–0.8, default 0.25: the faceplate's colour over the image, so its labels stay legible), Remove. The theme's colours still
+  draw the controls.
+- **A firmware's:** docs/RFM1-FORMAT.md section 8 (`rfm1.skin` JSON with dim and colours, `rfm1.skin.background`,
+  `.landscape`), added to any built file with scripts/rfm1_skin.py. Shown while that firmware plays in the app (not
+  when the app is a remote for an FM-1) and in the AU, with its colours in place of the theme. Firmware skins (on by
+  default) turns them off. Built-in native cores have none.
+- Tests: SkinTests (sections read back, a skinned file still loads and plays, sizes, the store, which skin wins).
