@@ -327,6 +327,9 @@ public struct FirmwareSidebar: View {
                     .accessibilityHidden(true)
                 list(width: w)
                     .offset(x: shift)
+                    // (closed: not drawn at all. Its background reaches into the safe area, so in landscape it
+                    // showed past the left edge as a dark bar; kept in the tree, so its scroll position stays)
+                    .opacity(shown > 0.001 ? 1 : 0)
                     .gesture(DragGesture(minimumDistance: 12)
                         .updating($drag) { v, s, _ in if open { s = v.translation.width } }
                         .onEnded { v in if open, v.translation.width < -w / 4 || v.predictedEndTranslation.width < -w / 2 { close() } })

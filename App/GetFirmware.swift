@@ -39,10 +39,38 @@ struct GetFirmwarePage: View {
         }
     }
 
+    @State private var updatingAll = false
+    @State private var stopAll = false
+    @State private var updateDone = 0
+    @State private var updateTotal = 0
+
+    /// each update installed in turn (stopped by a tap; a failure doesn't stop the rest: Get firmware's notes say it)
+    private func updateAll(_ list: [AvailableFirmware]) async {
+        updatingAll = true
+        stopAll = false
+        updateTotal = list.count
+        updateDone = 0
+        for e in list {
+            if stopAll { break }
+            _ = await store.install(e)
+            updateDone += 1
+        }
+        updatingAll = false
+    }
+
     var body: some View {
         let all = store.list(builtIn: builtIn)
         let list = filtered(all)
+        let updates = store.updates(builtIn: builtIn)
         SheetPage("Get firmware", backTitle: "Firmware", scrollTo: scrollTo, back: back) {
+            // (every update in one go, one after another: each the same install as its own Update button)
+            if !updates.isEmpty || updatingAll {
+                SheetButton(updatingAll ? "Updating \(updateDone + 1) of \(updateTotal)… (tap to stop)"
+                            : "Update all (\(updates.count))", accent: !updatingAll) {
+                    if updatingAll { stopAll = true; store.cancel() } else { Task { await updateAll(updates) } }
+                }
+                .padding(.top, 12)
+            }
             ChipPicker([(Filter.all, "All"), (.notInstalled, "Not installed"), (.updated, "Recently updated")],
                        selected: $filter)
                 .padding(.top, 12)
