@@ -47,9 +47,14 @@ struct AUView: View {
                 model.page = .firmware
                 withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
             }
-            model.ui.onChip = { [model] in       // (the chip) the sheet's first page: Use this FM-1, Bluetooth
-                model.page = nil
-                withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
+            model.ui.onChip = { [model] in       // (the chip) this instance takes the FM-1 now; with none, the sheet
+                let p = model.status.panel
+                if let p, p.hasUnit, !p.owner {
+                    model.claim()
+                } else if p?.hasUnit != true {
+                    model.page = nil
+                    withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
+                }
             }
         }
         .onChange(of: model.status.coreName, initial: true) { _, n in model.ui.firmwareName = n }

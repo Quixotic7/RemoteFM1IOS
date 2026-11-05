@@ -130,6 +130,7 @@ struct MainScreen: View {
     @State private var showDiagnostics = false
     @State private var settingsOpened = Date.distantPast    // (a tap so soon after is the press that opened it)
     @State private var showBluetooth = false
+    @State private var chipMenu = false                 // the chip's quick menu: where the firmware runs, Bluetooth
     @State private var showAbout = false
     @State private var cartBack: AppSheetPage = .settings   // where the cartridge page goes back to
     @State private var inputNote = ""                  // (ain1) why the input couldn't be turned on
@@ -227,6 +228,9 @@ struct MainScreen: View {
                 }
                 .padding(.bottom, 12)
                 .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
+            }
+            if chipMenu && !ui.sheetOpen && !ui.editorOpen {
+                chipMenuView.zIndex(4)
             }
             if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone && !midi.learn.active {
                 FirmwareSidebar(cores: FirmwareListing.sorted(FirmwareListing.visible(player.cores, selected: player.selected, added: addedDates),
@@ -370,10 +374,7 @@ struct MainScreen: View {
         skins.observe()
         prompter.start()
         ui.onWord = { openFirmwarePanel() }
-        ui.onChip = {                                   // (the sheet's first page: Firmware runs on, Bluetooth)
-            page = nil
-            withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
-        }
+        ui.onChip = { withAnimation(.easeOut(duration: 0.15)) { chipMenu = true } }   // (the quick menu under it)
         loadView(source)
         if let p = options.page { ui.page = p }
         if let d = options.deck { ui.deck = d }
@@ -693,6 +694,33 @@ struct MainScreen: View {
         case .connected(let ble): return "Remote control · \(ble ? "Bluetooth" : "USB")\(controller.backend.isFake ? " (fake)" : "")"
         case .notFound: return "Not found · pair over Bluetooth"
         default: return "Remote control · Bluetooth"
+        }
+    }
+
+    /// the chip's quick menu (a tap on the chip; the grabber opens the full sheet): where the firmware runs, the FM-1's
+    /// Use this FM-1 when another instance has it, Bluetooth. Any choice or a tap outside closes it.
+    private var chipMenuView: some View {
+        let done = { withAnimation(.easeOut(duration: 0.15)) { chipMenu = false } }
+        return ZStack(alignment: .topLeading) {
+            Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { done() }
+                .accessibilityLabel("Close").accessibilityAddTraits(.isButton)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("FIRMWARE RUNS ON").font(RFMFonts.ui(11, 700)).tracking(1.2).foregroundStyle(Palette.sheetMuted)
+                    .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+                SheetRow("This \(UIDevice.current.model)", chevron: false, check: source == .phone) { pick(.phone); done() }
+                SheetRow("My FM-1", value: source == .fm1 ? chip.text : nil, chevron: false, check: source == .fm1) { pick(.fm1); done() }
+                if source == .fm1, controller.lease.heldElsewhere || (!controller.isRunning && !controller.lease.owner) {
+                    SheetRow("Use this FM-1", chevron: false) { controller.start(); done() }
+                }
+                SheetRow("Bluetooth…", divider: false) { done(); showBluetooth = true }
+            }
+            .frame(width: 290)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Palette.sheetSurface)
+                .shadow(color: .black.opacity(0.35), radius: 18, y: 10))
+            .environment(\.colorScheme, .dark)
+            .padding(.leading, 14)
+            .padding(.top, 54)
+            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topLeading)))
         }
     }
 
