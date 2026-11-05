@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 
@@ -301,6 +302,12 @@ void RemoteLink::runOnce()
         mc.use_midi = 1;
         mc.use_bulk = hasBulk() ? 1 : 0;
         mc.midi_restart = 0;                     // (never MIDIRestart() inside a host: the DAW's ports would drop)
+        if (const char *v = std::getenv("RFM1_VIRTUAL_UNIT"); v && *v)
+            mc.virtual_name = v;                 // (a fake unit on a virtual CoreMIDI port of this exact name: demos)
+#ifdef RFM1_DEMO_UNIT
+        else
+            mc.virtual_name = RFM1_DEMO_UNIT;    // (Package.swift: a Debug build also scans for the demo fake)
+#endif
         mc.log = [](void *ctx, const char *m) { cbLog(ctx, m); };
         mc.log_ctx = this;
         mac_ = rfm_mac_new(&mc, err, sizeof err);

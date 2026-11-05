@@ -79,6 +79,9 @@ let package = Package(
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
                 .headerSearchPath("\(vendorRFM)/host/src/macos"),      // mac_priv.h (RFMProbe: cm_scan)
                 .define("FM1_REMOTE_NO_BULK", to: "1"),
+                // a Debug build also links to a fake unit on a virtual CoreMIDI port of this name (RemoteLink.cpp;
+                // elasticatfm1 tools/promo/fake_fm1.py): an iPad app on a Mac gets no environment or arguments
+                .define("RFM1_DEMO_UNIT", to: "\"FM-1 promo\"", .when(configuration: .debug)),
             ],
             linkerSettings: [.linkedFramework("AudioToolbox"), .linkedFramework("AVFoundation")]
         ),

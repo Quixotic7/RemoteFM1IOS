@@ -38,6 +38,9 @@ struct RemoteFM1App: App {
         RFMFonts.register()
         DispatchQueue.global(qos: .utility).async { CoreSlotMirror.syncOnMac() }   // (a Mac only: the AU's way to the cores)
         guard !args.contains("-autest") && !args.contains("-aucoretest") else { return }
+        if let i = args.firstIndex(of: "-virtualunit"), i + 1 < args.count {   // (a fake unit on a virtual CoreMIDI
+            setenv("RFM1_VIRTUAL_UNIT", args[i + 1], 1)                        // port of that name: demos, RemoteLink.cpp)
+        }
         let backend = Self.backend(args)
         let d = UserDefaults.standard
         let id = d.string(forKey: "rfm1.instance").flatMap(UUID.init(uuidString:)) ?? UUID()
