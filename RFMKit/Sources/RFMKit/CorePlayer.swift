@@ -504,10 +504,15 @@ public final class CorePlayer {
                         inputs: UInt64(r.keys_pressed) + UInt64(r.events_applied) + UInt64(r.midi_in) + UInt64(r.midi_to_core))
     }
 
-    /// the firmware saved, its clock and the sound stopped, the audio session let go: iOS may suspend the app
-    public func suspendForBattery(_ why: String) async {
+    /// the firmware saved, its clock and the sound stopped, the audio session let go: iOS may suspend the app.
+    /// stillWanted is asked after the save: false (the app came back meanwhile) leaves it running
+    public func suspendForBattery(_ why: String, stillWanted: @MainActor () -> Bool = { true }) async {
         guard !suspended, mode == .core else { return }
         await saveNow()
+        guard stillWanted(), !suspended, mode == .core else {
+            log.info("battery: not stopped, the app came back (\(why, privacy: .public))")
+            return
+        }
         suspended = true
         rfme_set_clock(e, Int32(RFME_CLOCK_NONE))
         stopAudio()

@@ -30,6 +30,7 @@ import SwiftUI
     public var displayAlone = false                 // the display alone, full size (a double tap on it)
     public var firmwareName: String?                // the running firmware: the status row's word
     @ObservationIgnored public var onWord: (() -> Void)?   // a tap on the word (the host's Firmware panel)
+    @ObservationIgnored public var onChip: (() -> Void)?   // a tap on the chip (where the firmware runs, Bluetooth)
 
     public init() {}
 
@@ -155,6 +156,7 @@ struct StatusRow: View {
     let m: FaceplateLayout.Mapper
     var word = "REMOTE FM1"
     var onWord: (() -> Void)?
+    var onChip: (() -> Void)?
     let openSheet: () -> Void
 
     var body: some View {
@@ -163,6 +165,11 @@ struct StatusRow: View {
         ZStack {
             HStack {
                 Chip(theme: theme, chip: chip, height: spec.chipHeight * s, pad: spec.chipPad * s, font: spec.chipFont * s)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onChip?() }
+                    .accessibilityAddTraits(onChip == nil ? [] : .isButton)
+                    .accessibilityHint(onChip == nil ? "" : "Where the firmware runs, and Bluetooth")
                 Spacer()
                 Text(word)
                     .font(RFMFonts.hardware(spec.wordFont * s))
@@ -179,6 +186,7 @@ struct StatusRow: View {
         }
         .frame(width: (m.ref.width - 2 * spec.margin) * m.sx, height: h)
         .position(x: m.ox + m.ref.width * m.sx / 2, y: y + h / 2)
+        .zIndex(1)      // (over the controls: on a wide screen KN4's touch area reached over the word)
     }
 }
 
@@ -270,7 +278,7 @@ struct FullView: View {
         let s = m.s
         ZStack(alignment: .topLeading) {
             if chrome, let st = L.status {
-                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, openSheet: openSheet)
+                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, onChip: ui.onChip, openSheet: openSheet)
             } else if chrome, let gr = L.grabber {
                 Grabber(theme: theme, width: gr.width * s, bar: 40 * s, height: gr.height * s, open: openSheet)
                     .position(x: size.width / 2, y: max(22, m.y(gr.midY)))
@@ -382,7 +390,7 @@ struct ControlsView: View {
         let s = m.s
         ZStack(alignment: .topLeading) {
             if chrome, let st = L.status {
-                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, openSheet: openSheet)
+                StatusRow(theme: theme, chip: chip, spec: st, m: m, word: ui.word, onWord: ui.onWord, onChip: ui.onChip, openSheet: openSheet)
             } else if chrome, let gr = L.grabber {
                 Grabber(theme: theme, width: gr.width * s, bar: 40 * s, height: gr.height * s, open: openSheet)
                     .position(x: size.width / 2, y: max(22, m.y(gr.midY)))
@@ -541,11 +549,11 @@ struct ScreenOnlyView: View {
             if chrome {
                 if portrait, size.width < 600 {
                     StatusRow(theme: theme, chip: chip, spec: FaceplateLayout.phoneStatus, m: m, word: ui.word,
-                              onWord: ui.onWord, openSheet: openSheet)
+                              onWord: ui.onWord, onChip: ui.onChip, openSheet: openSheet)
                 } else if portrait {
                     StatusRow(theme: theme, chip: chip, spec: FaceplateLayout.padStatus,
                               m: FaceplateLayout.Mapper(ref: FaceplateLayout.Kind.padPortrait.ref, size: size),
-                              word: ui.word, onWord: ui.onWord, openSheet: openSheet)
+                              word: ui.word, onWord: ui.onWord, onChip: ui.onChip, openSheet: openSheet)
                 } else {
                     Grabber(theme: theme, width: 88, bar: 40, height: 20, open: openSheet)
                         .position(x: size.width / 2, y: 22)

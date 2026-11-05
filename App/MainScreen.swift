@@ -128,7 +128,7 @@ struct MainScreen: View {
     @State private var editingFirmware = false          // the Firmware page's Edit: a delete control per imported row
     @State private var confirmDelete: String?           // the file (its name) whose row asks "Delete?"
     @State private var showDiagnostics = false
-    @State private var showAUTest = false
+    @State private var settingsOpened = Date.distantPast    // (a tap so soon after is the press that opened it)
     @State private var showBluetooth = false
     @State private var showAbout = false
     @State private var cartBack: AppSheetPage = .settings   // where the cartridge page goes back to
@@ -312,7 +312,6 @@ struct MainScreen: View {
         .fullScreenCover(isPresented: $showDiagnostics) {
             DiagnosticsScreen(controller: controller, player: player) { showDiagnostics = false }
         }
-        .fullScreenCover(isPresented: $showAUTest) { AUTestView(host: AUTestHost(auto: false)).preferredColorScheme(.dark) }
         .onAppear(perform: launch)
         .sheet(item: $shareItem) { ActivitySheet(url: $0.url) }
         .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
@@ -371,6 +370,10 @@ struct MainScreen: View {
         skins.observe()
         prompter.start()
         ui.onWord = { openFirmwarePanel() }
+        ui.onChip = {                                   // (the sheet's first page: Firmware runs on, Bluetooth)
+            page = nil
+            withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+        }
         loadView(source)
         if let p = options.page { ui.page = p }
         if let d = options.deck { ui.deck = d }
@@ -1149,6 +1152,7 @@ struct MainScreen: View {
 
     private var settingsPage: some View {
         SheetPage("Settings", scrollTo: options.sheetScroll, back: { page = nil }) {
+            Color.clear.frame(height: 0).onAppear { settingsOpened = Date() }
             backgroundSection
             SheetSectionTitle("Keys")
             SheetList {
@@ -1157,10 +1161,12 @@ struct MainScreen: View {
             SheetNote("Shows 1–16 on the lower keys, for a firmware in a step mode.")
             SheetSectionTitle("Diagnostics")
             SheetList {
-                SheetRow("Diagnostics") { showDiagnostics = true }
-                SheetRow("AU test", divider: false) { showAUTest = true }
+                // (not in the first half second: a slow tap on Settings landed here; the AU test is inside Diagnostics)
+                SheetRow("Diagnostics", divider: false) {
+                    if Date().timeIntervalSince(settingsOpened) > 0.5 { showDiagnostics = true }
+                }
             }
-            SheetNote("Diagnostics has the link, the core, the unit's HELLO_R and the test pattern mode.")
+            SheetNote("Diagnostics has the link, the core, the unit's HELLO_R, the test pattern mode and the AU test.")
             SheetSectionTitle("FM-1 firmware")
             SheetList {
                 InstallFirmwareRow(installer: .shared(for: controller), divider: true) { page = .install }

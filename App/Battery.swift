@@ -40,6 +40,7 @@ final class Battery {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
+                if Task.isCancelled { break }       // (cancelled on return: no last check, it would stop it again)
                 self?.check()
             }
         }
@@ -61,17 +62,20 @@ final class Battery {
 
     private func check() {
         frameRate()
-        guard !player.suspended, player.mode == .core else { return }
+        guard background, !player.suspended, player.mode == .core else { return }
         watch.feed(player.activity)
-        if let why = policy.stop(fm1Linked: controller.state.isConnected, idleFor: watch.idleFor()) { stop(why) }
+        if let why = policy.stop(fm1Linked: controller.state.isConnected, idleFor: watch.idleFor()) {
+            stop(why, onlyInBackground: true)
+        }
     }
 
-    private func stop(_ why: String) {
+    /// onlyInBackground: (the setting's stops) not if the app came back while the firmware was being saved
+    private func stop(_ why: String, onlyInBackground: Bool = false) {
         lastStop = why
         loop?.cancel()
         loop = nil
         Task {
-            await player.suspendForBattery(why)
+            await player.suspendForBattery(why) { [weak self] in !onlyInBackground || (self?.background ?? false) }
             nowPlaying()
         }
     }

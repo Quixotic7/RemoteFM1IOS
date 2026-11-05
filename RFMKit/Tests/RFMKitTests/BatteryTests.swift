@@ -65,4 +65,51 @@ final class BatteryTests: XCTestCase {
         XCTAssertGreaterThan(fast, 0)
         XCTAssertLessThan(slow * 3, fast, "a slower screen should draw much less (FIZZ writes only what changed)")
     }
+
+    // MARK: stopped in the background, then back (Battery.swift)
+
+    @MainActor private func player() throws -> (CorePlayer, () -> Void) {
+        guard FileManager.default.fileExists(atPath: CoreTests.coresDir) else { throw XCTSkip("no built cores") }
+        let suite = "rfm-battery-\(UUID().uuidString)"
+        let d = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let flash = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        let p = CorePlayer(link: nil, slotsDir: CoreTests.coresDir, flashDir: flash, selected: "fizz", midiDefaults: d)
+        p.setAudio(false)
+        p.setMode(.core)
+        return (p, { p.stop(); d.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: flash) })
+    }
+
+    @MainActor private func devMsAdvances(_ p: CorePlayer) async -> Bool {
+        let a = p.activity.devMs
+        try? await Task.sleep(for: .milliseconds(300))
+        return p.activity.devMs > a
+    }
+
+    @MainActor func testStoppedThenBackItRunsAgain() async throws {
+        let (p, done) = try player()
+        defer { done() }
+        XCTAssertTrue(p.status.booted, p.message)
+        let running = await devMsAdvances(p)
+        XCTAssertTrue(running, "playing before")
+        for round in 1...3 {                    // (more than once: each return must bring it back)
+            await p.suspendForBattery("test")
+            XCTAssertTrue(p.suspended)
+            let still = await devMsAdvances(p)
+            XCTAssertFalse(still, "round \(round): stopped: its clock doesn't move")
+            p.resumeFromBattery()
+            XCTAssertFalse(p.suspended)
+            let again = await devMsAdvances(p)
+            XCTAssertTrue(again, "round \(round): back: the firmware runs again")
+            XCTAssertTrue(p.status.booted, p.message)
+        }
+    }
+
+    @MainActor func testAStopThatEndsAfterTheReturnIsDropped() async throws {
+        let (p, done) = try player()
+        defer { done() }
+        await p.suspendForBattery("test") { false }   // (the app came back while it saved)
+        XCTAssertFalse(p.suspended)
+        let running = await devMsAdvances(p)
+        XCTAssertTrue(running, "still playing")
+    }
 }

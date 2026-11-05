@@ -47,6 +47,10 @@ struct AUView: View {
                 model.page = .firmware
                 withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
             }
+            model.ui.onChip = { [model] in       // (the chip) the sheet's first page: Use this FM-1, Bluetooth
+                model.page = nil
+                withAnimation(.easeInOut(duration: 0.28)) { model.ui.sheetOpen = true }
+            }
         }
         .onChange(of: model.status.coreName, initial: true) { _, n in model.ui.firmwareName = n }
     }
