@@ -39,6 +39,7 @@ struct LaunchOptions {
     var sheet = false
     var sheetPage: AppSheetPage?
     var themeEditor = false
+    var faceFrame: CGSize?                              // (DEBUG) -faceframe 353x284: the faceplate in a box that size (an AU in AUM)
     var landscape: Bool?
     var steps = false
     var learn = false                                   // (M8) learn mode at launch; learnPick: a control picked
@@ -75,6 +76,9 @@ struct LaunchOptions {
         sheet = a.contains("-sheet")
         sheetPage = value("-sheetpage").flatMap(AppSheetPage.init(rawValue:))
         themeEditor = a.contains("-themeeditor")
+        if let f = value("-faceframe")?.split(separator: "x").compactMap({ Double($0) }), f.count == 2 {
+            faceFrame = CGSize(width: f[0], height: f[1])
+        }
         if let o = value("-orientation") { landscape = o == "landscape" }
         steps = a.contains("-steps")
         displayAlone = a.contains("-displayalone")
@@ -210,9 +214,15 @@ struct MainScreen: View {
         let skin = skin
         let theme = skin?.theme ?? store.current
         return ZStack {
-            FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip, skin: skin)
-                .equatable()
-                .ignoresSafeArea()
+            if let f = options.faceFrame {                // (DEBUG) the AU's size in a host
+                FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip, skin: skin)
+                    .frame(width: f.width, height: f.height)
+                    .border(Color.white)
+            } else {
+                FaceplateView(feed: feed, ui: ui, theme: theme, chip: chip, skin: skin)
+                    .equatable()
+                    .ignoresSafeArea()
+            }
             if !ui.sheetOpen && !ui.editorOpen && !ui.displayAlone {
                 VStack(spacing: 10) {
                     Spacer()

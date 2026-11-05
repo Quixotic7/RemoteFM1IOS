@@ -25,7 +25,8 @@ public enum FaceplateLayout {
         /// high the phone's, else the iPad's
         public static func pick(_ size: CGSize) -> Kind {
             if size.height >= size.width { return size.width < 600 ? .phonePortrait : .padPortrait }
-            return size.height < 500 ? .phoneLandscape : .padLandscape
+            // (by shape: an AU's boxy view in a host gets the iPad's arrangement, scaled, not the phone's long one)
+            return size.width / size.height > 1.8 ? .phoneLandscape : .padLandscape
         }
 
         public var landscape: Bool { self == .phoneLandscape || self == .padLandscape }
@@ -66,6 +67,7 @@ public enum FaceplateLayout {
         public var chipHeight: CGFloat, chipPad: CGFloat, chipFont: CGFloat
         public var grabberWidth: CGFloat, barWidth: CGFloat
         public var wordFont: CGFloat, wordTracking: CGFloat
+        public var height: CGFloat = 32
     }
 
     /// knobs in a 2 x 2 grid (or a row) of cells `width / columns` wide
@@ -106,6 +108,9 @@ public enum FaceplateLayout {
 
     static let phoneStatus = Status(y: 50, margin: 16, chipHeight: 28, chipPad: 11, chipFont: 12, grabberWidth: 88,
                                     barWidth: 40, wordFont: 12, wordTracking: 0.14)
+    /// (phone landscape) a thin row above the display and the knobs, the grabber between the chip and the word
+    static let phoneWideStatus = Status(y: 0, margin: 198, chipHeight: 20, chipPad: 8, chipFont: 10, grabberWidth: 88,
+                                        barWidth: 40, wordFont: 10, wordTracking: 0.14, height: 18)
     static let padStatus = Status(y: 26, margin: 48, chipHeight: 30, chipPad: 12, chipFont: 13, grabberWidth: 96,
                                   barWidth: 48, wordFont: 13, wordTracking: 0.16)
 
@@ -121,7 +126,7 @@ public enum FaceplateLayout {
                         buttons: Buttons(x: 21, y: 400, bw: 48, bh: 42, gap: 8),
                         keybed: CGRect(x: 16, y: 530, width: 358, height: 272), keyWidth: 40, pageDots: true)
         case .phoneLandscape:
-            return Full(kind: k, status: nil, grabber: CGRect(x: 378, y: 0, width: 88, height: 20),
+            return Full(kind: k, status: phoneWideStatus, grabber: nil,
                         main: Cluster(x: 54, y: 20, width: 132, knob: 38, rowGap: 2),
                         oct: Well(x: 54, y: 144, width: 132, height: 48, pad: 3, gap: 4, radius: 12, buttonRadius: 9,
                                   font: 12),
@@ -184,7 +189,9 @@ public enum FaceplateLayout {
                                       buttonRadius: 10, font: 13),
                             keybed: CGRect(x: 16, y: 611, width: 358, height: 186), keyWidth: 40)
         }
-        return Controls(ref: Kind.phoneLandscape.ref, status: nil, grabber: CGRect(x: 378, y: 0, width: 88, height: 20),
+        var st = phoneWideStatus
+        st.margin = 40
+        return Controls(ref: Kind.phoneLandscape.ref, status: st, grabber: nil,
                         display: CGPoint(x: 40, y: 32), displaySize: 330,
                         knobRow: CGRect(x: 404, y: 30, width: 410, height: 67), knob: 46,
                         setSwitch: CGRect(x: 529, y: 98, width: 160, height: 30),

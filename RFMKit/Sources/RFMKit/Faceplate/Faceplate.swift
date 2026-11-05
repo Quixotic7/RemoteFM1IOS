@@ -98,12 +98,29 @@ public struct FaceplateView: View, @MainActor Equatable {
             && a.chrome == b.chrome && a.skin == b.skin
     }
 
+    /// the smallest scale a layout is drawn at; below it the view is zoomed out instead (1: no zoom)
+    static let minScale: CGFloat = 0.6
+
+    static func zoom(page: FaceplateUI.Page, kind: FaceplateLayout.Kind, size: CGSize) -> CGFloat {
+        let ref: CGSize = switch page {
+        case .full: kind.ref
+        case .controls: FaceplateLayout.controls(landscape: size.width > size.height).ref
+        case .screen: CGSize(width: 1, height: 1)
+        }
+        let s = min(size.width / ref.width, size.height / ref.height)
+        return s < minScale ? max(s / minScale, 0.2) : 1
+    }
+
     private func openSheet() { withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true } }
 
     public var body: some View {
         GeometryReader { geo in
-            let size = geo.size
-            let k = kind ?? FaceplateLayout.Kind.pick(size)
+            let real = geo.size
+            let k = kind ?? FaceplateLayout.Kind.pick(real)
+            // too small for the layout (an AU in a host): laid out bigger and the whole picture scaled down, so labels,
+            // buttons and touch areas shrink together instead of running into each other
+            let z = Self.zoom(page: ui.page, kind: k, size: real)
+            let size = CGSize(width: real.width / z, height: real.height / z)
             ZStack(alignment: .topLeading) {
                 // the background: sideways swipes change the view (controls on top get their own touches)
                 ZStack {
@@ -131,6 +148,8 @@ public struct FaceplateView: View, @MainActor Equatable {
                 }
             }
             .frame(width: size.width, height: size.height)
+            .scaleEffect(z, anchor: .topLeading)
+            .frame(width: real.width, height: real.height, alignment: .topLeading)
         }
         .onAppear { feed.start() }
         .onDisappear { feed.stop() }
@@ -160,7 +179,7 @@ struct StatusRow: View {
     let openSheet: () -> Void
 
     var body: some View {
-        let y = m.y(spec.y), h = m.len(32)
+        let y = m.y(spec.y), h = m.len(spec.height)
         let s = m.s
         ZStack {
             HStack {
