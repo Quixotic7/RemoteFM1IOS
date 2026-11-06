@@ -233,7 +233,8 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
     public var fetched: Date
     public var firmware: [AvailableFirmware]            // the downloadable ones
     public var details: [String: AvailableFirmware]     // a site catalog: every firmware's details by id (no downloads)
-    /// a GitHub release's tag (nil: not a release, or a cache from an older build)
+    /// a GitHub release's tag and title ("current 2026-11-07": changes with each publish; the catalog images key on
+    /// it); nil: not a release, or a cache from an older build
     public var release: String?
 
     public init(feed: FirmwareFeed, fetched: Date, firmware: [AvailableFirmware], details: [String: AvailableFirmware] = [:],
@@ -310,7 +311,10 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
                                      size: a.size ?? 0, fileName: a.name)]
                 list.append(e)
             }
-            return FeedSnapshot(feed: feed, fetched: fetched, firmware: list, release: j.tag_name)
+            // (RemoteFM1FW since 2026-11-06: Latest is a rolling release tagged "current", updated in place and titled
+            // with the dated tag of its last publish; tag and title together change with every publish)
+            let key = [j.tag_name, j.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            return FeedSnapshot(feed: feed, fetched: fetched, firmware: list, release: key.isEmpty ? nil : key)
         case .catalog:
             guard let j = try? dec.decode(FWCatalogJSON.self, from: data) else { throw ParseError() }
             var details: [String: AvailableFirmware] = [:]
@@ -342,7 +346,9 @@ public struct FeedSnapshot: Codable, Sendable, Equatable {
         guard let list = try? JSONDecoder().decode([Lossy<ReleaseJSON>].self, from: data) else { throw ParseError() }
         var out: [String: [AvailableFirmware]] = [:]
         let iso = ISO8601DateFormatter()
-        for case let r? in list.map(\.value) where !(r.draft ?? false) {
+        // (not the rolling "current" release: everything in it is also in a dated one, and its date would overwrite
+        // each newer version's)
+        for case let r? in list.map(\.value) where !(r.draft ?? false) && r.tag_name != "current" {
             let published = r.published_at.flatMap { iso.date(from: $0) }
             for a in r.assets {
                 guard let (id, version) = idAndVersion(a.name), let url = URL(string: a.browser_download_url),
@@ -451,6 +457,7 @@ private struct SiteJSON: Decodable {
 /// a GitHub release (the fields used)
 private struct ReleaseJSON: Decodable {
     var tag_name: String?
+    var name: String?                           // (the rolling "current" release: titled with its latest dated tag)
     var draft: Bool?
     var published_at: String?
     var assets: [Asset]

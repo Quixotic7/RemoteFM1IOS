@@ -52,7 +52,10 @@ final class FirmwareListingTests: XCTestCase {
             ["tag_name": tag, "draft": false, "published_at": at,
              "assets": names.map { ["name": $0, "size": 10, "browser_download_url": "https://github.com/x/\(tag)/\($0)"] }]
         }
-        let list = [release("c", "2026-11-01T20:00:00Z", ["choralroot-0.29.rfm1", "amb-1.3.rfm1"]),
+        // (RemoteFM1FW's rolling "current" release, newest of all, holds every file again: skipped, or its date
+        // would be every version's)
+        let list = [release("current", "2026-11-06T12:00:00Z", ["choralroot-0.29.rfm1", "amb-1.3.rfm1", "choralroot-0.26.1.rfm1"]),
+                    release("c", "2026-11-01T20:00:00Z", ["choralroot-0.29.rfm1", "amb-1.3.rfm1"]),
                     release("b", "2026-10-20T10:00:00Z", ["choralroot-0.28.rfm1", "amb-1.3.rfm1"]),
                     release("a", "2026-10-01T10:00:00Z", ["choralroot-0.26.1.rfm1"])]
         let v = try FeedSnapshot.versions(JSONSerialization.data(withJSONObject: list), feed: "test")
@@ -66,6 +69,11 @@ final class FirmwareListingTests: XCTestCase {
         dec.dateDecodingStrategy = .iso8601
         let back = try dec.decode(AvailableFirmware.self, from: enc.encode(v["amb"]!.first!))
         XCTAssertEqual(back.released, v["amb"]?.first?.released)
+
+        // the Latest feed: the rolling release's tag and title (each publish retitles it), so catalog images refetch
+        let latest: [String: Any] = ["tag_name": "current", "name": "2026-11-07", "draft": false, "assets": []]
+        let snap = try FeedSnapshot.parse(JSONSerialization.data(withJSONObject: latest), feed: .releases)
+        XCTAssertEqual(snap.release, "current 2026-11-07")
     }
 
     func testHeadroomAndScreenOnDropouts() {
