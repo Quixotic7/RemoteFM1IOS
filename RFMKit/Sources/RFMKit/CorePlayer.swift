@@ -312,6 +312,10 @@ public final class CorePlayer {
     @ObservationIgnored private var bootedID: String?
     @ObservationIgnored private var fallbackNote = ""    // (kept as the message until another core is picked)
     @ObservationIgnored private var configObserver: NSObjectProtocol?
+    /// (a device change) engines just stopped, kept a moment: freeing one at once raced AVFAudio's own teardown of its
+    /// parameter tree on a background queue (a crash in -[AUParameter dealloc])
+    @ObservationIgnored private var retired: [AVAudioEngine] = []
+    @ObservationIgnored private var restartPending = false     // a configuration change waiting to settle
     @ObservationIgnored private var routeObserver: NSObjectProtocol?
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
@@ -664,8 +668,14 @@ public final class CorePlayer {
         engine = eng
         node = n
         audioRunning = true
-        // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup)
-        if let au = eng.outputNode.audioUnit { rfme_use_output_workgroup(e, UnsafeMutableRawPointer(au)) }
+        // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup),
+        // asked a moment later and only of the engine still playing: asked during a device change it crashed in the HAL
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak eng] in
+            MainActor.assumeIsolated {
+                guard let self, let eng, self.engine === eng, eng.isRunning, let au = eng.outputNode.audioUnit else { return }
+                rfme_use_output_workgroup(self.e, UnsafeMutableRawPointer(au))
+            }
+        }
         observeRoute()
         #if os(iOS)
         outputs = AudioRoute.current
@@ -673,7 +683,7 @@ public final class CorePlayer {
         updateAudioText()
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: eng, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.audioConfigurationChanged() }
+            MainActor.assumeIsolated { self?.configurationChangeSoon() }
         }
     }
 
@@ -699,7 +709,7 @@ public final class CorePlayer {
         switch AudioRoute.action(cause, audioOn: mode == .core && audioOn, engineRunning: engine?.isRunning ?? false) {
         case .none: break
         case .rename: updateAudioText()
-        case .restart: audioConfigurationChanged()
+        case .restart: configurationChangeSoon()
         }
     }
 
@@ -717,7 +727,13 @@ public final class CorePlayer {
     func stopAudio() {
         if let o = configObserver { NotificationCenter.default.removeObserver(o) }
         configObserver = nil
-        engine?.stop()
+        if let old = engine {
+            old.stop()
+            retired.append(old)                     // (freed on the main thread in a moment, not now)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                MainActor.assumeIsolated { self?.retired.removeAll { $0 === old } }
+            }
+        }
         engine = nil
         if inputLive { rfme_ain_set(e, 0, 0, 0); inputLive = false }
         rfme_set_workgroup(e, nil)
@@ -726,7 +742,20 @@ public final class CorePlayer {
         audioText = ""
     }
 
-    private func audioConfigurationChanged() {   // (a route or rate change: a new engine at the new rate)
+    /// a burst of configuration changes (a device switch sends several): one restart once they settle
+    func configurationChangeSoon() {
+        guard !restartPending else { return }
+        restartPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.restartPending = false
+                self.audioConfigurationChanged()
+            }
+        }
+    }
+
+    func audioConfigurationChanged() {   // (a route or rate change: a new engine at the new rate)
         guard mode == .core, audioOn else { return }
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
         stopAudio()
