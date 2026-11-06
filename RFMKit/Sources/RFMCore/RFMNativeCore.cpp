@@ -27,6 +27,11 @@ namespace {
 
 std::string str(const char *s) { return s ? s : ""; }
 
+// (aout1) fm1core.h's optional pair (FM1VST branch aout1-multichannel 63e9c04), looked up by name: the vendored
+// header predates them. Same meaning as the .rfm1 exports (RFM1-FORMAT.md section 9)
+using AudioOutInfoFn = uint32_t (*)(void);
+using AudioOutFn = void (*)(int16_t *buf, uint32_t frames);
+
 class NativeCore final : public CoreBackend {
 public:
     explicit NativeCore(SlotLoader::Slot *s) : slot_(s), c_(s->core)
@@ -81,11 +86,38 @@ public:
     {
         return c_->boot_options ? c_->boot_options(fail, reason, stage) : 1;
     }
-    void init(int demo) override { c_->init(demo); }
+    void init(int demo) override
+    {
+        c_->init(demo);
+        // aout1: the channels it gives (4..10), when it has both functions
+        outCh_ = 2;
+        auto info = reinterpret_cast<AudioOutInfoFn>(slot_->symbol("fm1core_audio_out_info"));
+        outFn_ = reinterpret_cast<AudioOutFn>(slot_->symbol("fm1core_audio_out"));
+        if (info && outFn_) {
+            const uint32_t n = info();
+            if (n >= 4 && n <= 10 && n % 2 == 0)
+                outCh_ = n;
+        }
+    }
     void tick(uint32_t ms) override { c_->tick(ms); }
     void frame() override { c_->frame(); }
     void idle() override { c_->idle(); }
     void audio(int16_t *stereo, uint32_t frames) override { c_->audio(stereo, frames); }
+    uint32_t audio_out_channels() const override { return outCh_; }
+    // (aout1) fm1core_audio_out into a zeroed buffer (N - 2 a frame), audio(), then each frame at the kMaxAux stride
+    void audio_ex(int16_t *stereo, int16_t *aux, uint32_t frames) override
+    {
+        const uint32_t na = aux && outFn_ && outCh_ > 2 ? outCh_ - 2 : 0;
+        if (!na || frames > kAuxFrames) {
+            c_->audio(stereo, frames);
+            return;
+        }
+        std::memset(auxBuf_, 0, (size_t)frames * na * sizeof(int16_t));
+        outFn_(auxBuf_, frames);
+        c_->audio(stereo, frames);
+        for (uint32_t k = 0; k < frames; k++)
+            std::memcpy(aux + (size_t)k * kMaxAux, auxBuf_ + (size_t)k * na, na * sizeof(int16_t));
+    }
     int midi_in(uint32_t pkt) override { return c_->midi_in ? c_->midi_in(pkt) : 1; }
     int midi_out_take(uint32_t *pkt) override { return c_->midi_out_take ? c_->midi_out_take(pkt) : 0; }
     bool stats(uint32_t *shed, uint32_t *cpu) override
@@ -173,6 +205,10 @@ private:
     const fm1core_t *c_;
     CoreDesc d_;
     std::vector<CoreParam> params_;
+    static constexpr uint32_t kAuxFrames = 1024;    // (the device asks FM1P_BLOCK at a time)
+    uint32_t outCh_ = 2;
+    AudioOutFn outFn_ = nullptr;
+    int16_t auxBuf_[kAuxFrames * kMaxAux] = {};
 };
 
 // forwards everything; frame() spins `us` longer
@@ -203,6 +239,8 @@ public:
     }
     void idle() override { in_->idle(); }
     void audio(int16_t *s, uint32_t n) override { in_->audio(s, n); }
+    uint32_t audio_out_channels() const override { return in_->audio_out_channels(); }
+    void audio_ex(int16_t *s, int16_t *a, uint32_t n) override { in_->audio_ex(s, a, n); }
     int midi_in(uint32_t p) override { return in_->midi_in(p); }
     int midi_out_take(uint32_t *p) override { return in_->midi_out_take(p); }
     bool stats(uint32_t *s, uint32_t *c) override { return in_->stats(s, c); }
