@@ -669,13 +669,15 @@ public final class CorePlayer {
         node = n
         audioRunning = true
         // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup),
-        // asked a moment later and only of the engine still playing: asked during a device change it crashed in the HAL
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak eng] in
+        // asked a moment later and only of the engine still playing: asked during a device change it crashed in the HAL.
+        // Not on a Mac: there (an iPad app) the property doesn't return the +1 reference its header promises, so its
+        // release freed the HAL's own object (crashes on the next device change)
+        if !Self.onMac { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak eng] in
             MainActor.assumeIsolated {
                 guard let self, let eng, self.engine === eng, eng.isRunning, let au = eng.outputNode.audioUnit else { return }
                 rfme_use_output_workgroup(self.e, UnsafeMutableRawPointer(au))
             }
-        }
+        } }
         observeRoute()
         #if os(iOS)
         outputs = AudioRoute.current
@@ -740,6 +742,15 @@ public final class CorePlayer {
         node = nil
         audioRunning = false
         audioText = ""
+    }
+
+    /// an iPad app on a Mac (or the Mac tests)
+    nonisolated static var onMac: Bool {
+        #if os(macOS)
+        true
+        #else
+        ProcessInfo.processInfo.isiOSAppOnMac || ProcessInfo.processInfo.isMacCatalystApp
+        #endif
     }
 
     /// a burst of configuration changes (a device switch sends several): one restart once they settle
