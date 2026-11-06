@@ -61,6 +61,7 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
     public let backend: String                  // "none", "fake", "shared fake", "device"
     public let fakeLabel: String
     private let outBus: AUAudioUnitBus
+    private let auxBuses: [AUAudioUnitBus]          // (aout1) outputs 3-4 .. 9-10 (the instrument only)
     /// (ain1) the music effect variant ("aumf", "Rfm1"): an input bus, routed by the host, as a firmware's audio input
     public let isEffect: Bool
     private var inBus: AUAudioUnitBus?
@@ -152,7 +153,20 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         }
         outBus = try AUAudioUnitBus(format: fmt)
         outBus.maximumChannelCount = 2
+        outBus.name = "Main 1-2"
         isEffect = componentDescription.componentType == kAudioUnitType_MusicEffect
+        // (aout1, the instrument) four more stereo outputs: a firmware's own channels 3..10 (silent without them),
+        // for a host's multi-output instrument (Logic, AUM); the effect variant stays stereo
+        var more: [AUAudioUnitBus] = []
+        if !isEffect {
+            for n in 1...4 {
+                let b = try AUAudioUnitBus(format: fmt)
+                b.maximumChannelCount = 2
+                b.name = "Out \(2 * n + 1)-\(2 * n + 2)"
+                more.append(b)
+            }
+        }
+        auxBuses = more
         if isEffect {
             let b = try AUAudioUnitBus(format: fmt)
             b.maximumChannelCount = 2
@@ -167,7 +181,8 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         }
         try super.init(componentDescription: componentDescription, options: options)
         rfmSetRenderContextEngine(e)            // (the core thread joins the host's render workgroup: RFMKernel.h)
-        outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outBus])
+        outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outBus] + auxBuses)
+        rfmk_set_out_buses(kernel, UInt32(1 + auxBuses.count))
         inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: inBus.map { [$0] } ?? [])
         if isEffect { rfmk_set_input(kernel, 1) }
         maximumFramesToRender = 4096

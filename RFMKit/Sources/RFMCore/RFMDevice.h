@@ -12,12 +12,64 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <utility>
 
 #include "RFMCoreBackend.h"
 #include "resampler.h"
 
 namespace rfm {
+
+// (aout1) Lagrange4's interpolation (vendor/FM1VST/engine/resampler.h) over up to 10 channels in step: the master
+// and channels 3..N resampled alike, so the extra outputs stay sample-aligned with it
+class LagrangeN {
+public:
+    static constexpr int MAXCH = 10;
+    void reset(double in_rate, double out_rate, int ch)
+    {
+        step_ = in_rate / out_rate;
+        frac_ = 0.0;
+        primed_ = 0;
+        ch_ = ch < 1 ? 1 : ch > MAXCH ? MAXCH : ch;
+        for (auto &c : h_)
+            for (float &v : c)
+                v = 0.0f;
+    }
+    int channels() const { return ch_; }
+    int need() const { return primed_ < 3 ? 3 - primed_ : frac_ >= 1.0 ? 1 : 0; }
+    void push(const float *x)
+    {
+        for (int c = 0; c < ch_; c++) {
+            float *h = h_[c];
+            h[0] = h[1];
+            h[1] = h[2];
+            h[2] = h[3];
+            h[3] = x[c];
+        }
+        if (primed_ < 3)
+            primed_++;
+        else
+            frac_ -= 1.0;
+    }
+    void take(float *y)
+    {
+        const float t = (float)frac_;
+        const float c0 = -t * (t - 1.0f) * (t - 2.0f) * (1.0f / 6.0f);
+        const float c1 = (t + 1.0f) * (t - 1.0f) * (t - 2.0f) * 0.5f;
+        const float c2 = -(t + 1.0f) * t * (t - 2.0f) * 0.5f;
+        const float c3 = (t + 1.0f) * t * (t - 1.0f) * (1.0f / 6.0f);
+        for (int c = 0; c < ch_; c++) {
+            const float *h = h_[c];
+            y[c] = c0 * h[0] + c1 * h[1] + c2 * h[2] + c3 * h[3];
+        }
+        frac_ += step_;
+    }
+
+private:
+    float h_[MAXCH][4] = {};
+    double step_ = 1.0, frac_ = 0.0;
+    int primed_ = 0, ch_ = 2;
+};
 
 class CoreDevice {
 public:
@@ -65,8 +117,12 @@ public:
     uint32_t frames_deferred() const { return deferred_; }
     uint32_t take_s16(int16_t *stereo, uint32_t max_frames);
     void discard() { ring_r_ = ring_w_; }   // drop what nobody took (the timer clock)
-    // n host frames at host_rate (the device runs as far as needed; bypassed at exactly 44100)
-    void render(float *L, float *R, uint32_t n, double host_rate);
+    // n host frames at host_rate (the device runs as far as needed; bypassed at exactly 44100). aux (aout1):
+    // kMaxAux channel buffers (3..10, nullptr: not wanted), silent where the core gives none
+    void render(float *L, float *R, uint32_t n, double host_rate) { render(L, R, nullptr, n, host_rate); }
+    void render(float *L, float *R, float *const *aux, uint32_t n, double host_rate);
+    // (aout1) the core's channels beyond the master (0..8), known from boot
+    uint32_t aux_channels() const { return aux_n_; }
     // inside render (`between`): the host frame of this render the device clock is running for (its audio from then
     // on starts there), so what the core does in that millisecond can be placed at that frame
     uint32_t render_frame() const { return at_; }
@@ -80,7 +136,7 @@ public:
     static constexpr uint32_t RING = 8192;  // stereo frames
 
 private:
-    void pop(float &l, float &r);
+    void pop(float &l, float &r, float *aux);
 
     CoreBackend &b_;
     bool booted_ = false;
@@ -90,7 +146,9 @@ private:
     int32_t enc_total_[FM1P_NE - 1] = {};
     int16_t ring_[RING * 2];
     uint32_t ring_w_ = 0, ring_r_ = 0;
-    Lagrange4 rs_;
+    uint32_t aux_n_ = 0;                    // (aout1) the core's channels beyond the master
+    std::unique_ptr<int16_t[]> aux_ring_;   // RING x kMaxAux, from the boot of a core that has them
+    LagrangeN rs_;
     double rs_rate_ = 0;
     uint64_t frame_max_ = 0, frame_last_ = 0;
     uint32_t at_ = 0;

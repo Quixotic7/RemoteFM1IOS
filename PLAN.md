@@ -865,3 +865,18 @@ An image behind the faceplate, like Koala Sampler's backgrounds (Skin.swift, Ski
   when the app is a remote for an FM-1) and in the AU, with its colours in place of the theme. Firmware skins (on by
   default) turns them off. Built-in native cores have none.
 - Tests: SkinTests (sections read back, a skinned file still loads and plays, sizes, the store, which skin wins).
+
+## 24. More output channels, aout1 (2026-11-06)
+
+A firmware's own channels beside the master, up to 10 in all, as fm1-base's `usb_audio_channels` gives a computer over
+USB (fm1-base #39, `plat_usb_ch`; LOOM-8 the first user). Spec: docs/RFM1-FORMAT.md section 9 (`rfm1_audio_out_info`,
+`rfm1_audio_out` before `rfm1_audio`).
+- **Engine:** CoreBackend `audio_out_channels` / `audio_ex`; CoreDevice keeps channels 3..N beside the master at
+  44.1 kHz and resamples all of them together (LagrangeN); the engine's ring has 8 more channels;
+  `rfme_render_events_aux`, `rfme_audio_out_channels`. Without the exports nothing changes.
+- **AU:** the instrument has five stereo outputs, Main 1-2 and Out 3-4 .. 9-10, for a host's multi-output instrument;
+  each render cycle is made once (at its first bus call) and every bus takes its pair. The effect variant stays stereo.
+- **Still to do elsewhere:** FM1VST's glue fills the buffer (fm1-base's `plat_usb_ch`, Felucca's `FELUCCA_UAC_CH`)
+  for .rfm1 and native cores; the native core ABI (fm1core.h) needs the same. Until then real firmwares give stereo.
+- Tests: AudioOutTests (Fixtures/aout_cart.c: every channel its own level, at 44.1 and 48 kHz; a plain cart),
+  AUOutputBusTests (each bus its pair, one render a cycle).

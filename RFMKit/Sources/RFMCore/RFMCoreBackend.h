@@ -166,6 +166,12 @@ public:
     virtual void frame() = 0;
     virtual void idle() = 0;
     virtual void audio(int16_t *stereo, uint32_t frames) = 0;               // frames: a multiple of FM1P_BLOCK
+    // (aout1, RFM1-FORMAT.md section 9) the output's channels: 2 (the master) or 4..10, known after init()
+    static constexpr uint32_t kMaxAux = 8;                                   // channels 3..10
+    virtual uint32_t audio_out_channels() const { return 2; }
+    // audio() with channels 3..N: `aux` frames x kMaxAux int16 (a frame's channels 3..10, the next kMaxAux on),
+    // zeroed by the caller; the ones the core doesn't give stay 0
+    virtual void audio_ex(int16_t *stereo, int16_t * /*aux*/, uint32_t frames) { audio(stereo, frames); }
     // (ain1) 0: no audio input; 1 its manifest "wants" it; 2 "needs" it (a Wasm core with ain1)
     virtual int audio_in_mode() const { return 0; }
     // the engine's input ring, read before each audio() block while live (nullptr: none)

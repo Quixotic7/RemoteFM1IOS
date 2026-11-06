@@ -303,6 +303,7 @@ enum {
     F_IDLE, F_AUDIO, F_MIDI_IN, F_MIDI_OUT_TAKE, F_HALTED, F_SHUTDOWN, F_FLASH_STAGE, F_FLASH, F_FLASH_DIRTY,
     F_FLASH_SYNC, F_STATS, F_UI_INFO,
     F_AUDIO_IN, F_AUDIO_IN_INFO,                        // (optional: ain1, live audio input)
+    F_AUDIO_OUT, F_AUDIO_OUT_INFO,                      // (optional: aout1, more output channels)
     F_N
 };
 const struct {
@@ -316,8 +317,11 @@ const struct {
     {"rfm1_shutdown", 0, 0},   {"rfm1_flash_stage", 2, 1},   {"rfm1_flash", 0, 1},        {"rfm1_flash_dirty", 0, 1},
     {"rfm1_flash_sync", 0, 1}, {"rfm1_stats", 2, 0},         {"rfm1_ui_info", 2, 0},
     {"rfm1_audio_in", 2, 0},   {"rfm1_audio_in_info", 2, 0},
+    {"rfm1_audio_out", 2, 0},  {"rfm1_audio_out_info", 0, 1},
 };
-bool optionalExport(int f) { return f == F_INITIALIZE || f == F_AUDIO_IN || f == F_AUDIO_IN_INFO; }
+// (ain1's and aout1's: only a cart that has them; with another signature: as if absent)
+bool extraExport(int f) { return f == F_AUDIO_IN || f == F_AUDIO_IN_INFO || f == F_AUDIO_OUT || f == F_AUDIO_OUT_INFO; }
+bool optionalExport(int f) { return f == F_INITIALIZE || extraExport(f); }
 
 std::string base(const std::string &path)
 {
@@ -765,7 +769,7 @@ bool checkFile(WasmFile &f, std::string *err)
                 continue;
             return bad(std::string("it has no export ") + FN[i].name + " (section 2)");
         }
-        const bool ainExport = i == F_AUDIO_IN || i == F_AUDIO_IN_INFO;
+        const bool ainExport = extraExport(i);
         if (e->kind != 0 || e->index < importedFuncs || e->index - importedFuncs >= funcs.size())
             return bad(std::string("its export ") + FN[i].name + " is not a function of its own");
         const uint32_t ti = funcs[e->index - importedFuncs];
@@ -965,7 +969,7 @@ public:
                 return bad(std::string("no export ") + FN[i].name + " (" + fr + ")");
             }
             if (m3_GetArgCount(fn_[i]) != FN[i].nargs || m3_GetRetCount(fn_[i]) != FN[i].nret) {
-                if (i == F_AUDIO_IN || i == F_AUDIO_IN_INFO) {     // (not the spec's: as if absent)
+                if (extraExport(i)) {                            // (not the spec's: as if absent)
                     fn_[i] = nullptr;
                     continue;
                 }
@@ -1074,7 +1078,28 @@ public:
             return 1;
         return (int)call(F_BOOT_OPTIONS, (uint32_t)fail, putStr(reason), (uint32_t)stage);
     }
-    void init(int demo) override { call(F_INIT, (uint32_t)demo); }
+    void init(int demo) override
+    {
+        call(F_INIT, (uint32_t)demo);
+        // aout1: the channels it gives (4..10), and a buffer for 3..N (asked once; kept across reboots)
+        outCh_ = 2;
+        if (fn_[F_AUDIO_OUT] && fn_[F_AUDIO_OUT_INFO] && !dead_) {
+            const uint32_t n = call(F_AUDIO_OUT_INFO);
+            if (n >= 4 && n <= 10 && n % 2 == 0) {
+                const uint32_t bytes = AUDIO_FRAMES * (n - 2) * 2;
+                if (!sAux_ || auxCh_ < n) {
+                    const uint32_t p = call(F_ALLOC, bytes);
+                    if (!dead_ && inMem(p, bytes)) {
+                        sAux_ = p;
+                        auxCh_ = n;
+                    }
+                }
+                if (sAux_ && auxCh_ >= n)
+                    outCh_ = n;
+            }
+        }
+    }
+    uint32_t audio_out_channels() const override { return outCh_; }
     void tick(uint32_t ms) override { fsApply(); call(F_TICK, ms); }
     void frame() override { fsApply(); call(F_FRAME); }
     void idle() override { fsApply(); call(F_IDLE); }
@@ -1106,19 +1131,34 @@ public:
         }
     }
 
-    void audio(int16_t *stereo, uint32_t frames) override
+    void audio(int16_t *stereo, uint32_t frames) override { audio_ex(stereo, nullptr, frames); }
+
+    // (aout1) with aux: rfm1_audio_out (after ain1's input) into the zeroed buffer, rfm1_audio, then channels 3..N
+    void audio_ex(int16_t *stereo, int16_t *aux, uint32_t frames) override
     {
         fsApply();
+        const uint32_t na = aux && outCh_ > 2 ? outCh_ - 2 : 0;
         while (frames) {
             const uint32_t n = frames < AUDIO_FRAMES ? frames : AUDIO_FRAMES;
             if (dead_) {
                 std::memset(stereo, 0, (size_t)n * 4);
             } else {
                 audioIn(n);
+                if (na) {
+                    std::memset(mem_ + sAux_, 0, (size_t)n * na * 2);
+                    call(F_AUDIO_OUT, sAux_, n);
+                }
                 call(F_AUDIO, sAudio_, n);
                 std::memcpy(stereo, mem_ + sAudio_, (size_t)n * 4);
+                if (na && !dead_) {
+                    const int16_t *src = reinterpret_cast<const int16_t *>(mem_ + sAux_);
+                    for (uint32_t k = 0; k < n; k++)
+                        std::memcpy(aux + (size_t)k * CoreBackend::kMaxAux, src + (size_t)k * na, na * 2);
+                }
             }
             stereo += 2 * n;
+            if (aux)
+                aux += (size_t)n * CoreBackend::kMaxAux;
             frames -= n;
         }
     }
@@ -1459,6 +1499,7 @@ private:
     uint8_t *mem_ = nullptr;
     uint32_t memSize_ = 0;
     uint32_t desc_ = 0, scratch_ = 0, sStr_ = 0, sWords_ = 0, sAudio_ = 0, sAudioIn_ = 0;
+    uint32_t sAux_ = 0, auxCh_ = 0, outCh_ = 2;  // (aout1) channels 3..N's buffer, its channels; the channels in use
     AudioIn *ain_ = nullptr;                    // (ain1) the engine's input ring
     uint32_t ainEpoch_ = 0, ainLat_ = 0;
     int ainLive_ = 0;

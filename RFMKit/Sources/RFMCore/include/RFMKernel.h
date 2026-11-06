@@ -24,6 +24,8 @@ int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max
 void rfmk_deallocate(rfmk_t *k);
 // (ain1) the music effect variant: the host's input bus pulled each render and given to the engine's audio input
 void rfmk_set_input(rfmk_t *k, int on);
+// (aout1) the instrument's stereo output buses, 1 or 5 (1-2, 3-4 .. 9-10); before rfmk_allocate
+void rfmk_set_out_buses(rfmk_t *k, uint32_t n);
 
 typedef struct {
     uint64_t renders, frames, midi_events, ticks;

@@ -40,8 +40,18 @@ int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max
     k->bufs.resize(channels);
     for (uint32_t c = 0; c < channels; c++)
         k->bufs[c] = k->storage.data() + (size_t)c * max_frames;
+    if (k->outBuses > 1) {                      // (aout1)
+        k->mainL.assign(max_frames, 0.0f);
+        k->mainR.assign(max_frames, 0.0f);
+        k->aux.assign((size_t)rfmk::kAux * max_frames, 0.0f);
+        k->busBufs.assign(k->outBuses, std::vector<float>((size_t)2 * max_frames, 0.0f));
+    }
+    k->lastTime = -1;
+    k->lastFrames = 0;
     return 1;
 }
+
+void rfmk_set_out_buses(rfmk_t *k, uint32_t n) { k->outBuses = n < 1 ? 1 : n > 5 ? 5 : n; }
 
 void rfmk_set_input(rfmk_t *k, int on) { k->inputOn.store(on != 0, std::memory_order_relaxed); }
 
@@ -87,14 +97,19 @@ void rfmk_set_host_clock(rfmk_t *k, int on) { k->hostClockOn.store(on != 0, std:
 
 void rfmk_reset_level(rfmk_t *k) { k->levelReset.store(true, std::memory_order_relaxed); }
 
-int rfmk::process(float *L, float *R, uint32_t n)
+int rfmk::process(float *L, float *R, uint32_t n) { return process(L, R, nullptr, n); }
+
+int rfmk::process(float *L, float *R, float *const *auxOut, uint32_t n)
 {
     int played = 0;
     if (engine) {
-        played = rfme_render_events(engine, L, R, n, sampleRate, ev, nev, pev, npev);
+        played = rfme_render_events_aux(engine, L, R, auxOut, auxOut ? kAux : 0, n, sampleRate, ev, nev, pev, npev);
     } else {
         std::memset(L, 0, n * sizeof *L);
         std::memset(R, 0, n * sizeof *R);
+        if (auxOut)
+            for (uint32_t c = 0; c < kAux; c++)
+                std::memset(auxOut[c], 0, n * sizeof(float));
     }
     nev = npev = 0;
     if (played)

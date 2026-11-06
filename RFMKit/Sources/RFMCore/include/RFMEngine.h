@@ -371,6 +371,12 @@ typedef struct {
 // rfme_render_midi with parameter changes too, each applied at its frame (+ the latency) in order with the MIDI
 int rfme_render_events(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
                        const rfme_param_ev_t *pev, uint32_t npev);
+// (aout1, RFM1-FORMAT.md section 9) the loaded core's output channels: 2 (the master) or 4..10
+uint32_t rfme_audio_out_channels(rfme_t *e);
+// rfme_render_events with channels 3..: aux[c] (c < naux <= 8, nullptr entries skipped) gets channel 3 + c, n frames,
+// in step with L and R; silence where the core has no such channel
+int rfme_render_events_aux(rfme_t *e, float *L, float *R, float *const *aux, uint32_t naux, uint32_t n, double rate,
+                           const rfme_midi_t *ev, uint32_t nev, const rfme_param_ev_t *pev, uint32_t npev);
 
 // ---- the parameter map (RFME_CLOCK_CALLER or NONE: tests)
 int rfme_param_get(rfme_t *e, const char *name, int32_t *value);    // 1: found

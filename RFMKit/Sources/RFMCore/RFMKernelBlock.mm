@@ -104,46 +104,81 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
 {
     AUInternalRenderBlock block = ^AUAudioUnitStatus(AudioUnitRenderActionFlags *actionFlags,
                                                      const AudioTimeStamp *ts, AUAudioFrameCount frameCount,
-                                                     NSInteger, AudioBufferList *outputData,
+                                                     NSInteger bus, AudioBufferList *outputData,
                                                      const AURenderEvent *events, AURenderPullInputBlock pullInput) {
         if (frameCount > k->maxFrames)
             return kAudioUnitErr_TooManyFramesToProcess;
-        // (ain1, the music effect: the host's input, pulled into our buffers, into the engine's ring at 44.1 kHz)
-        if (pullInput && k->engine && k->inputOn.load(std::memory_order_relaxed) && !k->inL.empty()) {
-            struct { AudioBufferList l; AudioBuffer second; } abl;
-            abl.l.mNumberBuffers = 2;
-            abl.l.mBuffers[0] = {1, frameCount * (UInt32)sizeof(float), k->inL.data()};
-            abl.l.mBuffers[1] = {1, frameCount * (UInt32)sizeof(float), k->inR.data()};
-            AudioUnitRenderActionFlags f = 0;
-            if (pullInput(&f, ts, frameCount, 0, &abl.l) == noErr)
-                rfme_ain_push_f32(k->engine, (const float *)abl.l.mBuffers[0].mData,
-                                  (const float *)abl.l.mBuffers[1].mData, frameCount, k->sampleRate);
-        }
-        k->nev = k->npev = 0;
-        const bool clockOn = k->hostClockOn.load(std::memory_order_relaxed);
-        rfmhc_input_t host{};
-        if (clockOn)
-            hostInput(k, &host, frameCount);
-        k->dropClock = clockOn && host.has_context && host.has_transport;
-        for (const AURenderEvent *e = events; e; e = e->head.next) {
-            if (e->head.eventType == AURenderEventMIDI || e->head.eventType == AURenderEventMIDISysEx)
-                k->midi(e->MIDI.data, e->MIDI.length, offsetOf(e->head.eventSampleTime, ts, frameCount));
-            else if (e->head.eventType == AURenderEventMIDIEventList)
-                umpWords(k, &e->MIDIEventsList.eventList, offsetOf(e->head.eventSampleTime, ts, frameCount));
-            else if (e->head.eventType == AURenderEventParameter || e->head.eventType == AURenderEventParameterRamp)
-                k->param(e->parameter.parameterAddress, e->parameter.value,
-                         offsetOf(e->head.eventSampleTime, ts, frameCount));
-        }
-        k->hostClock(host, clockOn);                // (the host's clock and transport, merged by frame)
+        // (aout1) with five buses the host asks each in turn for one cycle: the first call of a cycle (a new host
+        // time; without one, bus 0's) makes all ten channels, the others take their pair of what it made
+        const bool multi = k->outBuses > 1 && !k->aux.empty();
+        const double t = ts && (ts->mFlags & kAudioTimeStampSampleTimeValid) ? ts->mSampleTime : -1;
+        const bool fresh = !multi || (t < 0 ? bus == 0 : (t != k->lastTime || frameCount != k->lastFrames));
+        if (multi && bus >= (NSInteger)k->outBuses)
+            return kAudioUnitErr_InvalidElement;
         for (UInt32 i = 0; i < outputData->mNumberBuffers; i++) {
             AudioBuffer &b = outputData->mBuffers[i];
             if (!b.mData)                           // the host wants our buffers
-                b.mData = k->bufs[i < k->channels ? i : k->channels - 1];
+                b.mData = multi ? k->busBufs[(size_t)bus].data() + (size_t)(i < 2 ? i : 1) * k->maxFrames
+                                : k->bufs[i < k->channels ? i : k->channels - 1];
             b.mDataByteSize = frameCount * sizeof(float);
         }
         float *L = outputData->mNumberBuffers > 0 ? (float *)outputData->mBuffers[0].mData : k->bufs[0];
         float *R = outputData->mNumberBuffers > 1 ? (float *)outputData->mBuffers[1].mData : k->scratch.data();
-        const int played = k->process(L, R, frameCount);
+        int played = k->lastPlayed;
+        if (fresh) {
+            // (ain1, the music effect: the host's input, pulled into our buffers, into the engine's ring at 44.1 kHz)
+            if (pullInput && k->engine && k->inputOn.load(std::memory_order_relaxed) && !k->inL.empty()) {
+                struct { AudioBufferList l; AudioBuffer second; } abl;
+                abl.l.mNumberBuffers = 2;
+                abl.l.mBuffers[0] = {1, frameCount * (UInt32)sizeof(float), k->inL.data()};
+                abl.l.mBuffers[1] = {1, frameCount * (UInt32)sizeof(float), k->inR.data()};
+                AudioUnitRenderActionFlags f = 0;
+                if (pullInput(&f, ts, frameCount, 0, &abl.l) == noErr)
+                    rfme_ain_push_f32(k->engine, (const float *)abl.l.mBuffers[0].mData,
+                                      (const float *)abl.l.mBuffers[1].mData, frameCount, k->sampleRate);
+            }
+            k->nev = k->npev = 0;
+            const bool clockOn = k->hostClockOn.load(std::memory_order_relaxed);
+            rfmhc_input_t host{};
+            if (clockOn)
+                hostInput(k, &host, frameCount);
+            k->dropClock = clockOn && host.has_context && host.has_transport;
+            for (const AURenderEvent *e = events; e; e = e->head.next) {
+                if (e->head.eventType == AURenderEventMIDI || e->head.eventType == AURenderEventMIDISysEx)
+                    k->midi(e->MIDI.data, e->MIDI.length, offsetOf(e->head.eventSampleTime, ts, frameCount));
+                else if (e->head.eventType == AURenderEventMIDIEventList)
+                    umpWords(k, &e->MIDIEventsList.eventList, offsetOf(e->head.eventSampleTime, ts, frameCount));
+                else if (e->head.eventType == AURenderEventParameter || e->head.eventType == AURenderEventParameterRamp)
+                    k->param(e->parameter.parameterAddress, e->parameter.value,
+                             offsetOf(e->head.eventSampleTime, ts, frameCount));
+            }
+            k->hostClock(host, clockOn);            // (the host's clock and transport, merged by frame)
+            if (multi) {
+                float *ax[rfmk::kAux];
+                for (uint32_t c = 0; c < rfmk::kAux; c++)
+                    ax[c] = k->aux.data() + (size_t)c * k->maxFrames;
+                played = k->process(k->mainL.data(), k->mainR.data(), ax, frameCount);
+            } else {
+                played = k->process(L, R, frameCount);
+            }
+            k->lastTime = t;
+            k->lastFrames = frameCount;
+            k->lastPlayed = played;
+            if (k->midiOut) {
+                OutCtx o{k, (AUEventSampleTime)(ts && (ts->mFlags & kAudioTimeStampSampleTimeValid) ? ts->mSampleTime : 0)};
+                k->drainMidiOut(emitOut, &o);
+            }
+            k->counted(frameCount);
+        }
+        if (multi) {                                // this bus's pair: 0 the master, n channels 2n+1, 2n+2
+            const float *sl = bus == 0 ? k->mainL.data() : k->aux.data() + (size_t)(2 * bus - 2) * k->maxFrames;
+            const float *sr = bus == 0 ? k->mainR.data() : k->aux.data() + (size_t)(2 * bus - 1) * k->maxFrames;
+            std::memcpy(L, sl, frameCount * sizeof(float));
+            if (R != L)
+                std::memcpy(R, sr, frameCount * sizeof(float));
+            if (bus > 0)                            // (a channel pair the firmware doesn't give: silent)
+                played = k->engine && rfme_audio_out_channels(k->engine) >= (uint32_t)(2 * bus + 2) && played;
+        }
         if (outputData->mNumberBuffers == 1)        // (mono: both channels)
             for (UInt32 i = 0; i < frameCount; i++)
                 L[i] = 0.5f * (L[i] + R[i]);
@@ -151,11 +186,6 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
             std::memset(outputData->mBuffers[i].mData, 0, frameCount * sizeof(float));
         if (!played)
             *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
-        if (k->midiOut) {
-            OutCtx o{k, (AUEventSampleTime)(ts && (ts->mFlags & kAudioTimeStampSampleTimeValid) ? ts->mSampleTime : 0)};
-            k->drainMidiOut(emitOut, &o);
-        }
-        k->counted(frameCount);
         return noErr;
     };
 #if __has_feature(objc_arc)

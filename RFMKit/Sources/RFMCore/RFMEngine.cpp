@@ -284,6 +284,10 @@ struct rfme final : rfm::HostParams::Panel {
     // always at or beyond the end of whatever chunk the core thread is rendering), so it sounds `latency` frames
     // after it was due, exactly, and the MIDI out keeps its position the same way.
     std::unique_ptr<float[]> bufL{new float[kRingFrames]()}, bufR{new float[kRingFrames]()};
+    // (aout1) channels 3..10 beside them: kMaxAux rings of kRingFrames (512 KB, made with the engine: the audio
+    // thread reads it without a lock); auxN: the booted core's channels beyond the master
+    std::unique_ptr<float[]> bufAux{new float[(size_t)kRingFrames * rfm::CoreBackend::kMaxAux]()};
+    std::atomic<uint32_t> auxN{0};
     std::atomic<uint64_t> posW{0}, posR{0};
     rfm::Spsc<HostEvent, 1024> hostQ;       // the audio callback -> the core thread
     // a stream starts with each epoch: the control thread bumps it when the core or the clock changes; the
@@ -1000,6 +1004,16 @@ struct rfme final : rfm::HostParams::Panel {
         return hostQ.peek(he);
     }
 
+    // (aout1) the aux rings at ring index i, or nullptr when the core has no channels beyond the master
+    float *const *auxPtrs(float **ax, uint32_t i)
+    {
+        if (!dev->aux_channels())
+            return nullptr;
+        for (uint32_t c = 0; c < rfm::CoreBackend::kMaxAux; c++)
+            ax[c] = bufAux.get() + (size_t)c * kRingFrames + i;
+        return ax;
+    }
+
     // n frames at ring position w (the device's render split at each host event due inside). An event whose
     // position is already past (stamped before the stream started) is applied at once, in order
     void renderChunk(uint64_t w, uint32_t n, double rate)
@@ -1021,10 +1035,12 @@ struct rfme final : rfm::HostParams::Panel {
             const uint32_t k = (uint32_t)(next - pos);
             const uint32_t i = (uint32_t)(pos & (kRingFrames - 1));
             const uint32_t first = k < kRingFrames - i ? k : kRingFrames - i;
-            dev->render(bufL.get() + i, bufR.get() + i, first, rate);
+            float *ax[rfm::CoreBackend::kMaxAux];
+            float *const *axp = auxPtrs(ax, i);
+            dev->render(bufL.get() + i, bufR.get() + i, axp, first, rate);
             if (k > first) {                            // (the ring wraps)
                 outAt = pos + first;
-                dev->render(bufL.get(), bufR.get(), k - first, rate);
+                dev->render(bufL.get(), bufR.get(), auxPtrs(ax, 0), k - first, rate);
             }
             pos = next;
         }
@@ -1068,8 +1084,15 @@ struct rfme final : rfm::HostParams::Panel {
     }
 
     int consume(float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
-                const rfme_param_ev_t *pev, uint32_t npev)
+                const rfme_param_ev_t *pev, uint32_t npev, float *const *aux = nullptr, uint32_t naux = 0)
     {
+        // (aout1) channels 3..: what the core makes (auxN of them, from its rings), silence for the rest
+        const uint32_t made = auxN.load(std::memory_order_acquire);
+        auto auxSilence = [&](uint32_t from, uint32_t count) {
+            for (uint32_t c = 0; c < naux; c++)
+                if (aux[c])
+                    std::memset(aux[c] + from, 0, count * sizeof(float));
+        };
         const bool off = offline.load(std::memory_order_relaxed);
         bool changed = false;
         const uint32_t ep = epoch.load(std::memory_order_acquire);
@@ -1151,6 +1174,7 @@ struct rfme final : rfm::HostParams::Panel {
             std::memset(L, 0, n * sizeof *L);
             if (R && R != L)
                 std::memset(R, 0, n * sizeof *R);
+            auxSilence(0, n);
             return 0;
         }
         if (off && live)
@@ -1167,10 +1191,22 @@ struct rfme final : rfm::HostParams::Panel {
             std::memcpy(R, bufR.get() + i, first * sizeof *R);
             std::memcpy(R + first, bufR.get(), (k - first) * sizeof *R);
         }
+        for (uint32_t c = 0; c < naux; c++) {
+            if (!aux[c])
+                continue;
+            if (c < made) {
+                const float *src = bufAux.get() + (size_t)c * kRingFrames;
+                std::memcpy(aux[c], src + i, first * sizeof(float));
+                std::memcpy(aux[c] + first, src, (k - first) * sizeof(float));
+            } else {
+                std::memset(aux[c], 0, k * sizeof(float));
+            }
+        }
         if (k < n) {                                    // an underrun: silence for what the core hasn't made yet
             std::memset(L + k, 0, (n - k) * sizeof *L);
             if (R)
                 std::memset(R + k, 0, (n - k) * sizeof *R);
+            auxSilence(k, n - k);
             if (live) {
                 underruns.fetch_add(1, std::memory_order_relaxed);
                 underrunFrames.fetch_add(n - k, std::memory_order_relaxed);
@@ -1204,6 +1240,7 @@ struct rfme final : rfm::HostParams::Panel {
     // ---- the control thread, the clock stopped
     void unloadStopped()
     {
+        auxN.store(0, std::memory_order_release);       // (aout1: no core, no channels beyond the master)
         hpReset(false);
         {
             std::lock_guard<std::mutex> g(hpViewLock);   // (no host thread formats a value with this core any more)
@@ -1240,6 +1277,7 @@ struct rfme final : rfm::HostParams::Panel {
     void bootStopped(const uint8_t *bytes, uint32_t n)
     {
         dev->boot_from(bytes && n ? bytes : nullptr, bytes ? n : 0);
+        auxN.store(dev->aux_channels(), std::memory_order_release);
         noteKeys = labels = matrixButtons = 0;
         resetMidi();
         for (CtlEvent c; ctlQ.pop(c);) {                // (the clock stopped: this thread is the consumer now)
@@ -1401,8 +1439,18 @@ int rfme_render_midi(rfme_t *e, float *L, float *R, uint32_t n, double rate, con
 int rfme_render_events(rfme_t *e, float *L, float *R, uint32_t n, double rate, const rfme_midi_t *ev, uint32_t nev,
                        const rfme_param_ev_t *pev, uint32_t npev)
 {
+    return rfme_render_events_aux(e, L, R, nullptr, 0, n, rate, ev, nev, pev, npev);
+}
+
+uint32_t rfme_audio_out_channels(rfme_t *e) { return 2 + e->auxN.load(std::memory_order_acquire); }
+
+int rfme_render_events_aux(rfme_t *e, float *L, float *R, float *const *aux, uint32_t naux, uint32_t n, double rate,
+                           const rfme_midi_t *ev, uint32_t nev, const rfme_param_ev_t *pev, uint32_t npev)
+{
+    if (naux > rfm::CoreBackend::kMaxAux)
+        naux = rfm::CoreBackend::kMaxAux;
     const uint64_t t0 = mach_absolute_time();
-    const int ok = e->consume(L, R, n, rate, ev, nev, pev, npev);
+    const int ok = e->consume(L, R, n, rate, ev, nev, pev, npev, aux, aux ? naux : 0);
     const uint64_t dt = mach_absolute_time() - t0;
     const uint32_t us = (uint32_t)((double)dt * e->usPerTick);
     e->renders.fetch_add(1, std::memory_order_relaxed);

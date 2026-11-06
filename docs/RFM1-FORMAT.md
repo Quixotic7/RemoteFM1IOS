@@ -142,3 +142,22 @@ A skin needs `rfm1.skin` and at least an image or a theme. The host scales image
 `scripts/rfm1_skin.py add firmware.rfm1 -o out.rfm1 --background bg.png [--landscape wide.png] [--theme t.json]
 [--dim 0.2]` adds one to a built file (the code is untouched; the file's SHA-256 changes). The user can turn firmware
 skins off; then their own background and theme show.
+
+## 9. More output channels (optional, aout1)
+
+A firmware may give more than the stereo master: up to 10 channels, as fm1-base's `usb_audio_channels` sends them to
+a computer over USB (fm1-base `plat_usb_ch`, felucca-bsp `FELUCCA_UAC_CH`). Channels 1 and 2 are always
+`rfm1_audio`'s master; the firmware's own channels are 3..N. Two optional exports:
+
+| Export | Signature | Meaning |
+|---|---|---|
+| `rfm1_audio_out_info` | `() -> (n)` | how many channels it gives: 4, 6, 8 or 10 (anything else: just the master) |
+| `rfm1_audio_out` | `(buf, frames) -> ()` | channels 3..N for the next `rfm1_audio(out, frames)`: `buf` holds `frames` frames of `n - 2` int16 samples, the next frame `n - 2` on, zeroed by the host |
+
+- The host asks `rfm1_audio_out_info` once, after `rfm1_init`. While it uses the channels it calls `rfm1_audio_out`
+  right before each `rfm1_audio` (after ain1's `rfm1_audio_in`), with the same `frames`. The firmware adds its
+  channels into `buf` during that `rfm1_audio` call, as fm1-base's app adds into `plat_usb_ch`'s frames, at the
+  master's scale (32767: full scale). Without a call (a host that doesn't take them) it skips that work, as
+  fm1-base's app does when `plat_usb_ch` returns NULL.
+- A host without the exports, or not using them, plays the master alone. RemoteFM1's AU has five stereo outputs:
+  1-2 (the master), 3-4, 5-6, 7-8, 9-10; channels the firmware doesn't give are silent.

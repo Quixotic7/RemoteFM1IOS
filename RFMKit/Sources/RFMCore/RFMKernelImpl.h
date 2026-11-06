@@ -23,6 +23,13 @@ struct rfmk {
     std::vector<float> storage;                 // channels x maxFrames
     std::vector<float *> bufs;
     std::vector<float> scratch;                 // the second channel of a mono output
+    // (aout1) the instrument's output buses: 1 (stereo) or 5 (1-2 the master, 3-4 .. 9-10 the firmware's own). With
+    // more than one, each render cycle is made once (at its first bus call: a new host time) into mainL/R and aux,
+    // and every bus call takes its pair from there
+    uint32_t outBuses = 1;
+    std::vector<float> mainL, mainR, aux;       // maxFrames; aux: kAux x maxFrames
+    std::vector<std::vector<float>> busBufs;    // (a host that wants our buffers) 2 x maxFrames per bus
+    static constexpr uint32_t kAux = 8;
     rfme_t *engine = nullptr;
     // (ain1: the music effect variant) the host's audio into the engine's input ring, pulled each render
     std::atomic<bool> inputOn{false};
@@ -31,6 +38,9 @@ struct rfmk {
     void *musical = nullptr, *transport = nullptr;  // its musicalContextBlock, transportStateBlock (retained)
 
     // the render thread's own
+    double lastTime = -1;                       // (aout1) the cycle made last: its host sample time, its frames
+    uint32_t lastFrames = 0;
+    int lastPlayed = 0;
     rfme_midi_t ev[kMaxEvents] = {};
     uint32_t nev = 0;
     uint8_t sysex[kSysExMax] = {};
@@ -134,6 +144,8 @@ struct rfmk {
 
     // the core into L and R (R non-NULL) with the queued MIDI; 1: the core played. The queue is emptied.
     int process(float *L, float *R, uint32_t n);
+    // (aout1) with channels 3..10 into aux (kAux pointers)
+    int process(float *L, float *R, float *const *auxOut, uint32_t n);
     // the core's MIDI out, decoded into whole messages for emit (FM1VST's decodePacket)
     // (offset: the message's frame in this render; the core's MIDI out has the same latency as its audio)
     using Emit = void (*)(void *ctx, const uint8_t *msg, uint32_t len, uint32_t offset);
