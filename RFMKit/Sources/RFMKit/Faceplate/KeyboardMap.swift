@@ -3,7 +3,7 @@
 // A hardware keyboard (a Mac, an iPad's Magic Keyboard): FM1VST's keymap (plugin/PanelComponent.cpp, keymap.c), the
 // same as the web player's (web/site/js/panel.js KEYMAP), by physical key:
 //   notes      Ableton Live's layout: A S D F G H J K L ; ' ] white from C4 (key 7) up, W E T Y U O P black; the chord
-//              block below: 2 3 4 5 Tab F1 F2 F3 F4
+//              block below: 1 2 3 4 5 = F3 G3 A3 B3 C4 (Tab B3 too), F1 F2 F3 F4 = F#3 G#3 A#3 C#4
 //   buttons    F5..F10 = FX SEL ENV LFO EDIT GLO (C V B N M , too: a host or macOS often takes the F keys),
 //              7 8 9 0 - = = HOME SAVE ARP SEQ PLAY REC
 //   octave     Z / X (Esc / Return too; End = both, the panic); Escape lets latches go first
@@ -24,7 +24,8 @@ public enum KeyboardMap {
         typealias K = UIKeyboardHIDUsage
         var m: [K: Action] = [
             .keyboardF1: .key(1), .keyboardF2: .key(3), .keyboardF3: .key(5), .keyboardF4: .key(8),
-            .keyboard2: .key(0), .keyboard3: .key(2), .keyboard4: .key(4), .keyboard5: .key(7),
+            // (the owner's order: 1 2 3 4 5 = F G A B C, the lowest five whites; FM1VST has 2 3 4 5 = F G A C)
+            .keyboard1: .key(0), .keyboard2: .key(2), .keyboard3: .key(4), .keyboard4: .key(6), .keyboard5: .key(7),
             .keyboardTab: .key(6),
             .keyboardA: .key(7), .keyboardS: .key(9), .keyboardD: .key(11), .keyboardF: .key(12),
             .keyboardG: .key(14), .keyboardH: .key(16), .keyboardJ: .key(18), .keyboardK: .key(19),
