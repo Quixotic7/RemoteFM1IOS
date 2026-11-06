@@ -107,8 +107,9 @@ public final class PanelFeed {
         public static let kn: [Knob] = [.k1, .k2, .k3, .k4]
     }
 
-    /// who holds a key or a button: this screen's touches, or the OMX-27 (M8)
-    public enum Source: Sendable { case screen, omx }
+    /// who holds a key or a button: this screen's touches, the OMX-27 (M8), a hardware keyboard (KeyboardMap), or a
+    /// latch (Shift-click or Ctrl-click with a pointer: held until clicked again, Escape, or Shift-click on the panel)
+    public enum Source: Int, Sendable { case screen, omx, keyboard, latch }
 
     public let screen = ScreenFeed()
     public let lights = PanelLights()
@@ -130,9 +131,12 @@ public final class PanelFeed {
     private var previewSeq: UInt32 = 0
     private var rgba = [UInt8](repeating: 0, count: Int(RFMC_W * RFMC_H * 4))
     private var keyTouches = [Int](repeating: 0, count: 27)   // this screen's fingers per key
-    private var omxKeys: UInt32 = 0                            // the OMX-27's
-    private var screenLabels: UInt32 = 0
-    private var omxLabels: UInt32 = 0
+    private var keyBits = [UInt32](repeating: 0, count: 4)     // the other sources' keys (by Source; screen unused)
+    private var labelBits = [UInt32](repeating: 0, count: 4)   // each source's buttons (by Source)
+    /// Shift or Ctrl held on a hardware keyboard (KeyboardCatcher): a click then latches
+    public var latchModifier = false
+    /// the knob the arrow keys turn (Page Up / Down pick it: SELECT, KN1..KN4)
+    public var selectedKnob: Knob = .presets
     private var lastPanelPoll: TimeInterval = -1
     private var masterPot: Int16 = -1                         // (rfme_panel's, as last seen)
     private var pickupSeq: UInt16?
@@ -164,10 +168,7 @@ public final class PanelFeed {
     public func keyDown(_ k: Int, source: Source = .screen) {
         guard (0..<27).contains(k) else { return }
         let was = keyHeld(k)
-        switch source {
-        case .screen: keyTouches[k] += 1
-        case .omx: omxKeys |= 1 << UInt32(k)
-        }
+        if source == .screen { keyTouches[k] += 1 } else { keyBits[source.rawValue] |= 1 << UInt32(k) }
         guard !was else { return }
         lights.touchedKeys |= 1 << UInt32(k)
         event(Int32(RFMC_EV_KEY), Int32(k), 1)
@@ -175,40 +176,61 @@ public final class PanelFeed {
 
     public func keyUp(_ k: Int, source: Source = .screen) {
         guard (0..<27).contains(k) else { return }
-        switch source {
-        case .screen:
+        if source == .screen {
             guard keyTouches[k] > 0 else { return }
             keyTouches[k] -= 1
-        case .omx:
-            guard omxKeys & (1 << UInt32(k)) != 0 else { return }
-            omxKeys &= ~(1 << UInt32(k))
+        } else {
+            guard keyBits[source.rawValue] & (1 << UInt32(k)) != 0 else { return }
+            keyBits[source.rawValue] &= ~(1 << UInt32(k))
         }
         guard !keyHeld(k) else { return }
         lights.touchedKeys &= ~(1 << UInt32(k))
         event(Int32(RFMC_EV_KEY), Int32(k), 0)
     }
 
-    private func keyHeld(_ k: Int) -> Bool { keyTouches[k] > 0 || omxKeys & (1 << UInt32(k)) != 0 }
+    private func keyHeld(_ k: Int) -> Bool { keyTouches[k] > 0 || keyBits.reduce(0, |) & (1 << UInt32(k)) != 0 }
 
     /// held by this source (tests, the views)
     public func holds(key k: Int, _ source: Source = .screen) -> Bool {
         guard (0..<27).contains(k) else { return false }
-        return source == .screen ? keyTouches[k] > 0 : omxKeys & (1 << UInt32(k)) != 0
+        return source == .screen ? keyTouches[k] > 0 : keyBits[source.rawValue] & (1 << UInt32(k)) != 0
     }
 
     public func holds(_ l: Label, _ source: Source = .screen) -> Bool {
-        (source == .screen ? screenLabels : omxLabels) & (1 << UInt32(l.rawValue)) != 0
+        labelBits[source.rawValue] & (1 << UInt32(l.rawValue)) != 0
     }
+
+    // MARK: latches (a pointer with Shift or Ctrl: the web player's and FM1VST's)
+
+    public var anyLatched: Bool { keyBits[Source.latch.rawValue] | labelBits[Source.latch.rawValue] != 0 }
+
+    /// a pointer pressed key k: a latched one lets go, with `modifier` (Shift / Ctrl) it latches; true when it did
+    /// either (the caller then doesn't hold it as a touch)
+    public func latchPress(key k: Int, modifier: Bool) -> Bool {
+        if holds(key: k, .latch) { keyUp(k, source: .latch); return true }
+        guard modifier else { return false }
+        keyDown(k, source: .latch)
+        return true
+    }
+
+    public func latchPress(_ l: Label, modifier: Bool) -> Bool {
+        if holds(l, .latch) { button(l, down: false, source: .latch); return true }
+        guard modifier else { return false }
+        button(l, down: true, source: .latch)
+        return true
+    }
+
+    /// every latch let go (Escape, Shift-click on the panel)
+    public func releaseLatches() { releaseAll(.latch) }
 
     /// a button by its label, through the panel's btn_id (the firmware's own map); down while any source holds it
     public func button(_ l: Label, down: Bool, source: Source = .screen) {
         let bit = UInt32(1) << UInt32(l.rawValue)
-        let mine = source == .screen ? screenLabels : omxLabels
+        let mine = labelBits[source.rawValue]
         guard (mine & bit != 0) != down else { return }
-        let was = (screenLabels | omxLabels) & bit != 0
-        let now = down ? mine | bit : mine & ~bit
-        if source == .screen { screenLabels = now } else { omxLabels = now }
-        let held = (screenLabels | omxLabels) & bit != 0
+        let was = labelBits.reduce(0, |) & bit != 0
+        labelBits[source.rawValue] = down ? mine | bit : mine & ~bit
+        let held = labelBits.reduce(0, |) & bit != 0
         guard held != was else { return }
         lights.touchedLabels = held ? lights.touchedLabels | bit : lights.touchedLabels & ~bit
         let id = host?.withPanelEngine { rfme_matrix_button($0, Int32(l.rawValue)) } ?? -1

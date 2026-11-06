@@ -275,6 +275,8 @@ struct PanelButton: View {
     var radius: CGFloat
     var font: CGFloat
     var drop: CGFloat = 4
+    @State private var pressing = false
+    @State private var latchTap = false                 // (this press latched or let go of a latch)
 
     var body: some View {
         let level = lights.buttons[label.rawValue]
@@ -313,9 +315,16 @@ struct PanelButton: View {
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { _ in
                 if feed.learn.active { return feed.learn.pick(MidiTarget.button(label)) }   // (MIDI learn: a tap picks it)
-                if !feed.holds(label) { feed.button(label, down: true) }
+                if !pressing {                          // (the press: Shift / Ctrl latches, a latched one lets go)
+                    pressing = true
+                    latchTap = feed.latchPress(label, modifier: feed.latchModifier)
+                }
+                if !latchTap, !feed.holds(label) { feed.button(label, down: true) }
             }
-            .onEnded { _ in feed.button(label, down: false) })
+            .onEnded { _ in
+                pressing = false
+                if latchTap { latchTap = false } else { feed.button(label, down: false) }
+            })
         .accessibilityElement()
         .accessibilityLabel(feed.names.value.isRenamed(label)
                             ? "\(feed.names.value.label(label).capitalized) (\(label.spoken))" : label.spoken)

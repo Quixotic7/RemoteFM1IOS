@@ -126,9 +126,13 @@ public struct FaceplateView: View, @MainActor Equatable {
                 ZStack {
                     theme.body.color
                     if let skin { SkinBackground(skin: skin, size: size, tint: theme.body.color) }
+                    KeyboardCatcher(feed: feed, ui: ui, refocus: ui.sheetOpen || ui.editorOpen).frame(width: 1, height: 1)
                 }
                     .contentShape(Rectangle())
                     .gesture(swipe { ui.move($0) })
+                    .simultaneousGesture(TapGesture().onEnded {     // (Shift-click on the panel: the latches go)
+                        if feed.latchModifier, feed.anyLatched { feed.releaseLatches() }
+                    })
                     .accessibilityHidden(true)
                 Group {
                     switch ui.page {

@@ -204,8 +204,12 @@ final class KeyTouchView: UIView {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard feed?.learn.active != true else { return }             // (MIDI learn: the keys play nothing)
+        // (Shift- or Ctrl-click latches a key; a click on a latched one lets it go)
+        let mod = (event?.modifierFlags.contains(.shift) ?? false) || (event?.modifierFlags.contains(.control) ?? false)
+            || (feed?.latchModifier ?? false)
         for t in touches {
             guard let k = key(for: t, sliding: false) else { continue }
+            if feed?.latchPress(key: k, modifier: mod) == true { continue }
             held[ObjectIdentifier(t)] = k
             feed?.keyDown(k)
         }
