@@ -5,7 +5,13 @@
 # /Applications/RemoteFM1.app (the Wrapper layout an iPad app needs on a Mac), registers its AU and makes the AU
 # registry rescan, without launching anything. So the AU can be tried in a Mac host (Ableton, Logic) without TestFlight.
 #
-#   ASC_KEY_ID=... ASC_ISSUER_ID=... scripts/install_mac_build.sh
+#   ASC_KEY_ID=... ASC_ISSUER_ID=... scripts/install_mac_build.sh            (the store build's cores)
+#   RFM_STORE=NO ASC_KEY_ID=... ASC_ISSUER_ID=... scripts/install_mac_build.sh (every core: LOOM-8, ChoralRoot ...)
+#
+# The AU gets the cores in its own bundle (PlugIns/RemoteFM1AU.appex/Frameworks, the appex and the app signed again
+# with the build's identity): on a Mac its sandbox may not read the app's Frameworks, and the copies the app makes for
+# it in the App Group (CoreSlotMirror) are quarantined (written by a sandboxed app), which Gatekeeper refuses for
+# development-signed code ("Apple could not verify FM1Core_..._1.framework"). TestFlight builds are Apple-signed.
 #
 # Once per Mac (and when the development profile is renewed): run the app from Xcode on "My Mac (Designed for iPad)",
 # which installs the profiles macOS checks before it starts the AU ("No matching profile found" otherwise). A
@@ -24,9 +30,23 @@ xcodebuild -project "$ROOT/RemoteFM1.xcodeproj" -scheme RemoteFM1 -configuration
     -destination 'platform=macOS,arch=arm64,variant=Designed for iPad' -derivedDataPath "$DD" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
     -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-    RFM_STORE_BUILD=YES build
+    RFM_STORE_BUILD="${RFM_STORE:-YES}" build
 
 APP=$DD/Build/Products/Release-iphoneos/RemoteFM1.app
+APPEX=$APP/PlugIns/RemoteFM1AU.appex
+# the cores inside the AU's own bundle (exactly the app's: rsync --delete), then the appex and the app signed again
+# with the certificate the build used, their entitlements kept
+WORK=$(mktemp -d)
+mkdir -p "$APPEX/Frameworks"
+rsync -a --delete --include='/FM1Core_*.framework/***' --exclude='*' "$APP/Frameworks/" "$APPEX/Frameworks/"
+codesign -d --extract-certificates="$WORK/cert" "$APP" 2>/dev/null
+IDENT=$(shasum "$WORK/cert0" | cut -d' ' -f1 | tr 'a-f' 'A-F')
+codesign -d --entitlements - --xml "$APPEX" > "$WORK/appex.plist" 2>/dev/null
+codesign --force --sign "$IDENT" --entitlements "$WORK/appex.plist" --timestamp=none "$APPEX"
+codesign -d --entitlements - --xml "$APP" > "$WORK/app.plist" 2>/dev/null
+codesign --force --sign "$IDENT" --entitlements "$WORK/app.plist" --timestamp=none "$APP"
+codesign --verify --deep --strict "$APP"
+echo "the AU's own cores: $(ls -d "$APPEX"/Frameworks/FM1Core_*.framework | wc -l | tr -d ' ') slots"
 if [ -e "$DEST" ] && [ ! -w "$DEST/Wrapper" ]; then
     echo "error: $DEST is another install (TestFlight?): move it to the Trash first"; exit 1
 fi
