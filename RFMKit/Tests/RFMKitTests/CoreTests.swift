@@ -155,7 +155,7 @@ final class CoreTests: XCTestCase {
         var i = rfms_info_t()
         XCTAssertEqual(rfms_find("fizz", &i), 1)
         XCTAssertEqual(RemoteController.string(i.name), "FIZZ")
-        XCTAssertEqual(RemoteController.string(i.version), "0.12.0-beta.12")
+        XCTAssertEqual(RemoteController.string(i.version), "0.12.0-beta.13")
         let url = RemoteController.string(i.source_url)
         XCTAssertTrue(url.hasPrefix("https://github.com/Quixotic7/FIZZ@") && url.count == 34 + 40, url)
         let credits = CorePlayer.credits("fizz")

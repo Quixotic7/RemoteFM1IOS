@@ -46,7 +46,7 @@ fm1_add_core(fizz ${_qd_glue} SOURCE ${_qd}
              CREDITS "FIZZ, an FM TONE step sequencer for the FM-1, by Michael P Jones (Quixotic7). MPL-2.0, the source: https://github.com/Quixotic7/FIZZ (LICENSING.md says what is under which licence).\nFM TONE, the effects and the output chain: from ChoralRoot FM-1 v0.25.1, the owner's, relicensed MPL-2.0, and the parts that came from Felucca were rewritten (L1).\nDrawn with plutovg v1.3.3 (Samuel Ugochukwu, MIT), which carries stb_truetype, stb_image and stb_image_write (Sean Barrett, MIT or Unlicense). Portions of this software are copyright (c) 2006 The FreeType Project (www.freetype.org). All rights reserved.\nType: Inter Tight (The Inter Project Authors, SIL Open Font License 1.1)."
              CREDITS_FILES ./LICENSE third_party/plutovg/LICENSE third_party/plutovg/source/FTL.TXT assets/fonts/OFL.txt
              NO_GEN
-             VERSION 0.12.0-beta.12)
+             VERSION 0.12.0-beta.13)
 # plutovg is vendored and patched by FIZZ (third_party/README.md): its warnings are not FIZZ's
 set(_qd_pvg_abs ${_qd_pvg_sources})
 list(TRANSFORM _qd_pvg_abs PREPEND ${_qd_glue}/)
