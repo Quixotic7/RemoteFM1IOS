@@ -890,3 +890,6 @@ FM1VST fad3c29 (branch `aout1-multichannel`, not pushed yet: push it before this
 cores/loom retired): ten output channels (aout1, section 24), the 909 samples included. It is GPL-3.0-only as a whole,
 so it left the store build (cores/store-cores.txt; the owner's call). The cores export the aout1 pair beside
 _fm1core_get. Tests: CoreTests (versions, licences, testLoomTrackOneOnChannelThree).
+
+LOOM-8 is no longer built in (the owner's call, 2026-11-06): its .rfm1 (0.14, in RemoteFM1FW's catalog) gives the same
+ten channels through aout1, and Get firmware has it. vendor/loom removed; the native aout1 pair stays in NativeCore.

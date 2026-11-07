@@ -18,11 +18,11 @@ if(NOT EXISTS ${RFM_FM1VST}/cmake/FM1Cores.cmake)
 endif()
 set(CR_PYTHON "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" CACHE FILEPATH
     "python3 with Pillow and fontTools, for the cores' generate steps")
-set(RFM_CORES "choralroot;felucca;fizz;saadet;boardwalk;loom" CACHE STRING "the cores to build")
+set(RFM_CORES "choralroot;felucca;fizz;saadet;boardwalk" CACHE STRING "the cores to build")
 # iOS: ChoralRoot's host build includes <libproc.h> (its profiler's instruction counter), which the iOS SDKs lack:
 # cores/ios/libproc.h stands in for it. FIZZ's build file is cores/fizz/core.cmake, Saadet's
 # cores/saadet/core.cmake (two cores: saadet and its store variant saadet_store, the same core id), Boardwalk's
-# cores/boardwalk/core.cmake; LOOM-8's is FM1VST's (core-glue/fm1base/core_loom.cmake, 0.14). (RFM_OWN: this repo's cores/ folder)
+# cores/boardwalk/core.cmake. (LOOM-8 is no longer built in: its .rfm1 since 0.14, from Get firmware.) (RFM_OWN: this repo's cores/ folder)
 set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers; cores/fizz)")
 
 include(${RFM_FM1VST}/cmake/FM1Cores.cmake)
@@ -56,9 +56,6 @@ if(saadet IN_LIST RFM_CORES)
 endif()
 if(boardwalk IN_LIST RFM_CORES)
     include(${RFM_OWN}/boardwalk/core.cmake)
-endif()
-if(loom IN_LIST RFM_CORES)
-    include(${_glue}/fm1base/core_loom.cmake)    # (LOOM-8 0.14, FM1VST's glue: 10 output channels, aout1)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET core_choralroot_obj)
     target_include_directories(core_choralroot_obj BEFORE PRIVATE ${RFM_OWN}/ios)

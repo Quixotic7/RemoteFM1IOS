@@ -61,13 +61,13 @@ final class TestCore {
 }
 
 final class CoreTests: XCTestCase {
-    static let ids = ["choralroot", "felucca", "fizz", "saadet", "boardwalk", "loom"]   // (Melodee: an .rfm1 since 2026-10-31)
+    static let ids = ["choralroot", "felucca", "fizz", "saadet", "boardwalk"]   // (Melodee: an .rfm1 since 2026-10-31)
     static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0"]    // (the others, LOOM-8 0.14 too: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
-    static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC), "loom": Int32(RFME_B_PLAY)]
+    static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC)]
     /// keys tapped before that (conformance.txt's): LOOM-8 opens T1, a drum kit, on its Steps page, so four kicks are
     /// written (G3, C4, G4, D5: steps 2, 5, 9, 13) and PLAY starts them; D4 then toggles a step as it plays
-    static let stepPrelude: [String: [Int]] = ["loom": [2, 7, 14, 21]]
+    static let stepPrelude: [String: [Int]] = [:]
     static let keyD4 = 9                // (conformance: the note key D4; key 0 is F3)
 
     static var coresDir: String {
@@ -357,73 +357,6 @@ final class CoreTests: XCTestCase {
         XCTAssertNotEqual(c.lcd, cabinet, "HOME did not step out")
         print(String(format: "core boardwalk: attract tune peak %d rms %.5f", tune.peak, tune.rms))
         XCTAssertEqual(c.status.halted, 0)
-    }
-
-    /// LOOM-8 0.14 (FM1VST's glue): its descriptor (GPL-3.0-only as a whole: never in a store build), the source at its
-    /// commit, the credits; ten output channels (aout1: the tracks on 3..10); the written kicks play
-    func testLoom() throws {
-        var i = rfms_info_t()
-        XCTAssertEqual(rfms_find("loom", &i), 1)
-        XCTAssertEqual(RemoteController.string(i.name), "LOOM-8")
-        XCTAssertEqual(RemoteController.string(i.version), "0.14")
-        let url = RemoteController.string(i.source_url)
-        XCTAssertTrue(url.hasPrefix("https://github.com/charlesvestal/fm1-loom@") && url.count == 42 + 40, url)
-        let credits = CorePlayer.credits("loom")
-        for s in ["Charles Vestal", "Leo Kuroshita", "u/FCTRYBEATS", "9W9", "SIL OPEN FONT LICENSE"] {
-            XCTAssertTrue(credits.contains(s), "loom credits lack \(s)")
-        }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../..").standardized
-        XCTAssertFalse(try String(contentsOf: root.appendingPathComponent("cores/store-cores.txt"), encoding: .utf8)
-                        .split(separator: "\n").contains("loom"), "LOOM-8 0.14 (GPL-3.0) in the store build")
-        let bin = try Data(contentsOf: URL(fileURLWithPath: Self.coresDir + "/FM1Core_loom_1.framework/FM1Core_loom_1"))
-
-        let c = try TestCore("loom")
-        c.boot()
-        c.run(500)
-        XCTAssertEqual(rfme_audio_out_channels(c.e), 10, "aout1: the master and the eight tracks")
-        XCTAssertGreaterThan(Self.colours(c), 8)
-        for k in Self.stepPrelude["loom"]! {
-            c.key(k, true)
-            c.run(60)
-            c.key(k, false)
-            c.run(100)
-        }
-        c.button(Int32(RFME_B_PLAY), true)
-        c.run(60)
-        c.button(Int32(RFME_B_PLAY), false)
-        let a = c.run(2000)
-        print(String(format: "core loom: kicks after PLAY: peak %d rms %.5f, binary %d B", a.peak, a.rms, bin.count))
-        XCTAssertGreaterThan(a.peak, 64, "LOOM-8's written kicks are silent")
-        XCTAssertEqual(c.status.halted, 0)
-    }
-
-    /// LOOM-8's tracks on their own outputs (aout1): the written kicks of T1 play on channel 3 through the engine's audio
-    /// path, as the AU's Out 3-4 gets them, while channels 5..10 (the tracks without notes) stay silent
-    func testLoomTrackOneOnChannelThree() throws {
-        let c = try TestCore("loom")
-        c.boot()
-        c.run(500)
-        for k in Self.stepPrelude["loom"]! {
-            c.key(k, true); c.run(60); c.key(k, false); c.run(100)
-        }
-        c.button(Int32(RFME_B_PLAY), true); c.run(60); c.button(Int32(RFME_B_PLAY), false)
-        rfme_set_clock(c.e, Int32(RFME_CLOCK_AUDIO))
-        rfme_set_offline(c.e, 1)
-        let n = 512
-        var peak = [Float](repeating: 0, count: 10)
-        var l = [Float](repeating: 0, count: n), r = l
-        let aux = (0..<8).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: n) }
-        defer { aux.forEach { $0.deallocate() } }
-        var ptrs: [UnsafeMutablePointer<Float>?] = aux
-        for _ in 0..<(48000 * 2 / n) {
-            _ = ptrs.withUnsafeMutableBufferPointer { b in rfme_render_events_aux(c.e, &l, &r, b.baseAddress, 8, UInt32(n), 48000, nil, 0, nil, 0) }
-            peak[0] = max(peak[0], l.map(abs).max()!)
-            for ch in 0..<8 { peak[2 + ch] = max(peak[2 + ch], UnsafeBufferPointer(start: aux[ch], count: n).map(abs).max()!) }
-        }
-        print("core loom: channel peaks", peak.map { String(format: "%.3f", $0) })
-        XCTAssertGreaterThan(peak[0], 0.002, "the master is silent")
-        XCTAssertGreaterThan(peak[2], 0.002, "T1's kicks are not on channel 3")
-        for ch in 4..<10 { XCTAssertLessThan(peak[ch], 0.002, "channel \(ch + 1) (a track without notes) sounds") }
     }
 
     /// the colours on a core's screen

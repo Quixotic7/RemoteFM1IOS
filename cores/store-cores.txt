@@ -5,7 +5,7 @@
 # factory banks, which Saadet's own builds carry with no licence granted). Every core is still built; a store build
 # embeds only these. Boardwalk is MPL-2.0 throughout (Charles Vestal) with no vendor data. LOOM-8 is MPL-2.0 (Charles
 # Vestal) up to 0.9.3; 0.14 is GPL-3.0-only as a whole (its acid engine and 909 models), so it left the store build
-# (the owner's call, 2026-11-06); testers get it from Get firmware.
+# (the owner's call, 2026-11-06) and then every build: its .rfm1, from Get firmware.
 fizz
 saadet
 boardwalk

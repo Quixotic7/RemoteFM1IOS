@@ -5,7 +5,7 @@ panel. See [PLAN.md](PLAN.md) for the design and the milestones.
 
 Status: M1, and M2, M3 and M4 on the simulator. The app finds the FM-1 over CoreMIDI (Bluetooth MIDI or USB,
 SysEx only) and runs a session. In Pattern mode it sends M1's test pattern. In Core mode it runs a real firmware
-(ChoralRoot 0.29.2, Felucca 1.8.1, FIZZ 0.12.0-beta.13, Saadet 0.1.1, Boardwalk 0.9.2 or LOOM-8 0.14) with the FM-1 as its panel and the sound on the iOS device; the
+(ChoralRoot 0.29.2, Felucca 1.8.1, FIZZ 0.12.0-beta.13, Saadet 0.1.1 or Boardwalk 0.9.2) with the FM-1 as its panel and the sound on the iOS device; the
 firmware's flash is kept in `Library/Application Support/cores/<id>.bin`. Flash writes are checked and keep the previous file (`.prev`, used when the main one is damaged); safety copies (before an update, a delete, a reset or a restore, plus rolling and daily ones) are in the App Group's `FlashHistory/<id>/` (one `<uuid>.bin` + `<uuid>.json` per copy; the app and the AU share one history per firmware; Firmware › Safety copies, Reset firmware…). Named states (Firmware › States: Save as, Load, Rename, Delete; the AU's sheet: Firmware › States & safety copies) are in the App Group's `States/<id>/` (`<uuid>.flash` LZFSE + `<uuid>.json`), shared by the app and every AU instance (PLAN.md section 18). A state is shared as a `.rfm1state` file (docs/RFM1STATE-FORMAT.md; a state's … › Share…; opening one imports it), the library is mirrored in Files › RemoteFM1 › States (a file put there is imported), and Settings › Your data has Back up everything (Documents/Backups) and Restore from backup. M2 adds the AUv3 instrument as a skeleton (renders silence)
 and probes for PLAN.md section 5. M4: the AUv3 instrument plays a core (host MIDI in, the core's MIDI out, the flash
 in `fullState`), and its instances and the app share one FM-1 through the lease of PLAN.md section 4 ("Use this
@@ -49,7 +49,7 @@ screen, the test pattern and the AU test).
   `cores/fizz/` (FIZZ's build file and descriptor), `cores/saadet/` (Saadet's: its unit on FM1VST's fm1-base glue,
   the instrument unit, descriptors, the conformance script, and `store/`: the empty factory banks of its store
   variant), `cores/boardwalk/` (Boardwalk's unit on the same glue, its sound engine's unit, descriptor and
-  conformance script; LOOM-8 0.14 builds with FM1VST's own glue), `cores/store-cores.txt` (the cores of an App Store / TestFlight
+  conformance script), `cores/store-cores.txt` (the cores of an App Store / TestFlight
   build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
   profiler).
 - `RFMKit/`: a Swift package.
@@ -81,14 +81,11 @@ screen, the test pattern and the AU test).
   Saadet's pin (6c0b47e, which Saadet's build fetches; its `bsp/` is not needed). Read-only.
 - `vendor/boardwalk`: Boardwalk v0.9.2 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at 3ae2a65; `base/bsp` is
   not needed). Read-only.
-- `vendor/loom`: LOOM-8 v0.14 (Charles Vestal; GPL-3.0-only as a whole, so not in a store build) with its `base/`
-  (fm1-base at 317cb86) and `base/bsp`. Read-only.
 
 ## Build
 
     git submodule update --init vendor/RemoteFM1 vendor/FM1VST vendor/FIZZ vendor/saadet vendor/fm1-base vendor/boardwalk
     git -C vendor/boardwalk submodule update --init base
-    git submodule update --init vendor/loom && git -C vendor/loom submodule update --init --recursive
     git -C vendor/FM1VST submodule update --init cores/ChoralRootFM1 cores/melodee
     git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
 
@@ -132,7 +129,7 @@ FM1VST's own conformance test against the macOS builds of our libraries:
 The cores on a simulator, headless, through the app's real path (fake unit, demo input, audio tapped for 3 s, the
 flash saved, a power cycle):
 
-    scripts/sim_coretest.sh [UDID] [choralroot felucca fizz saadet boardwalk loom]   # default: RFM iPhone 17 (CEB2B846-...)
+    scripts/sim_coretest.sh [UDID] [choralroot felucca fizz saadet boardwalk]   # default: RFM iPhone 17 (CEB2B846-...)
 
 It prints each core's summary and saves `coretest-<id>.json`, a screenshot and the log under `$OUT` (default
 `$TMPDIR/remotefm1-coretest`).
