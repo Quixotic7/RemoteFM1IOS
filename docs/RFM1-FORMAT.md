@@ -159,5 +159,6 @@ a computer over USB (fm1-base `plat_usb_ch`, felucca-bsp `FELUCCA_UAC_CH`). Chan
   channels into `buf` during that `rfm1_audio` call, as fm1-base's app adds into `plat_usb_ch`'s frames, at the
   master's scale (32767: full scale). Without a call (a host that doesn't take them) it skips that work, as
   fm1-base's app does when `plat_usb_ch` returns NULL.
-- A host without the exports, or not using them, plays the master alone. RemoteFM1's AU has five stereo outputs:
-  1-2 (the master), 3-4, 5-6, 7-8, 9-10; channels the firmware doesn't give are silent.
+- A host without the exports, or not using them, plays the master alone. RemoteFM1's AU has Main 1-2 (the master), the
+  stereo pairs Out 3-4 .. 9-10 and the mono Out 3 .. Out 10 (the same channels one by one); channels the firmware
+  doesn't give are silent.

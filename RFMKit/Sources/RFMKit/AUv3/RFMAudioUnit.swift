@@ -155,14 +155,21 @@ public final class RFMAudioUnit: RFMAudioUnitBase, @unchecked Sendable {
         outBus.maximumChannelCount = 2
         outBus.name = "Main 1-2"
         isEffect = componentDescription.componentType == kAudioUnitType_MusicEffect
-        // (aout1, the instrument) four more stereo outputs: a firmware's own channels 3..10 (silent without them),
-        // for a host's multi-output instrument (Logic, AUM); the effect variant stays stereo
+        // (aout1, the instrument) a firmware's own channels 3..10 (silent without them) twice over: four stereo outputs
+        // (Out 3-4 .. 9-10) and eight mono ones (Out 3 .. Out 10), for a host's multi-output instrument (Logic, AUM,
+        // Live); the host takes the ones it wants. The effect variant stays stereo
         var more: [AUAudioUnitBus] = []
-        if !isEffect {
+        if !isEffect, let mono = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) {
             for n in 1...4 {
                 let b = try AUAudioUnitBus(format: fmt)
                 b.maximumChannelCount = 2
                 b.name = "Out \(2 * n + 1)-\(2 * n + 2)"
+                more.append(b)
+            }
+            for c in 3...10 {                           // (the same channels one by one: a firmware's mono tracks)
+                let b = try AUAudioUnitBus(format: mono)
+                b.maximumChannelCount = 2
+                b.name = "Out \(c)"
                 more.append(b)
             }
         }

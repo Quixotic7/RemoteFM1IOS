@@ -77,7 +77,8 @@ final class AudioOutTests: XCTestCase {
     }
 }
 
-/// the AU's five stereo outputs: one cycle made once, each bus its pair (Main 1-2 the master, Out 3-4 .. 9-10)
+/// the AU's outputs: Main 1-2, the pairs Out 3-4 .. 9-10 and the mono Out 3 .. Out 10; one cycle made once, each bus
+/// its channels
 final class AUOutputBusTests: XCTestCase {
     private var cart: String { URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/aout_cart.rfm1").path }
 
@@ -87,8 +88,10 @@ final class AUOutputBusTests: XCTestCase {
         c.link = .none
         c.defaultCore = nil
         let au = try RFMAudioUnit(componentDescription: RFMShared.component, options: [], config: c)
-        XCTAssertEqual(au.outputBusses.count, 5)
-        XCTAssertEqual((0..<5).map { au.outputBusses[$0].name }, ["Main 1-2", "Out 3-4", "Out 5-6", "Out 7-8", "Out 9-10"])
+        XCTAssertEqual(au.outputBusses.count, 13)
+        XCTAssertEqual((0..<13).map { au.outputBusses[$0].name },
+                       ["Main 1-2", "Out 3-4", "Out 5-6", "Out 7-8", "Out 9-10"] + (3...10).map { "Out \($0)" })
+        XCTAssertEqual((5..<13).map { au.outputBusses[$0].format.channelCount }, [AVAudioChannelCount](repeating: 1, count: 8))
         var err = [CChar](repeating: 0, count: 512)
         XCTAssertEqual(rfme_load_wasm(au.e, cart, &err, 512), 1, String(cString: err))
         XCTAssertEqual(rfme_boot(au.e, nil, 0), 1)
@@ -106,14 +109,19 @@ final class AUOutputBusTests: XCTestCase {
         for cycle in 0..<40 {                                   // (the ring primed; the last cycle read)
             ts.mSampleTime = Double(cycle * 256)
             levels = []
-            for bus in (0..<5).reversed() {                     // (any order: the first call of a cycle makes it)
-                for i in 0..<2 { abl[i] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil) }
+            for bus in (0..<13).reversed() {                    // (any order: the first call of a cycle makes it)
+                let mono = bus >= 5                             // (a mono output: one buffer)
+                abl.unsafeMutablePointer.pointee.mNumberBuffers = mono ? 1 : 2
+                for i in 0..<(mono ? 1 : 2) { abl[i] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil) }
                 XCTAssertEqual(block(&flags, &ts, 256, bus, abl.unsafeMutablePointer, nil, nil), noErr)
-                let l = abl[0].mData!.assumingMemoryBound(to: Float.self), r = abl[1].mData!.assumingMemoryBound(to: Float.self)
-                levels.insert([Int((l[128] * 32768).rounded()), Int((r[128] * 32768).rounded())], at: 0)
+                let l = abl[0].mData!.assumingMemoryBound(to: Float.self)
+                var v = [Int((l[128] * 32768).rounded())]
+                if !mono { v.append(Int((abl[1].mData!.assumingMemoryBound(to: Float.self)[128] * 32768).rounded())) }
+                levels.insert(v, at: 0)
             }
         }
-        XCTAssertEqual(levels, [[1000, 2000], [3000, 4000], [5000, 6000], [7000, 8000], [9000, 10000]])
+        XCTAssertEqual(Array(levels[0..<5]), [[1000, 2000], [3000, 4000], [5000, 6000], [7000, 8000], [9000, 10000]])
+        XCTAssertEqual(Array(levels[5...]), (3...10).map { [$0 * 1000] }, "each mono output its own channel")
         XCTAssertEqual(au.probe.report(write: false).render?.renders, 40, "one render a cycle, not one a bus")
     }
 }

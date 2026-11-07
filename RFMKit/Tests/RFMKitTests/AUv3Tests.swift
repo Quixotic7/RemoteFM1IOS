@@ -101,7 +101,7 @@ final class AUv3Tests: XCTestCase {
 
     func testBussesAndMIDI() throws {
         let au = try makeAU()
-        XCTAssertEqual(au.outputBusses.count, 5, "(aout1) Main 1-2 and four more stereo outputs")
+        XCTAssertEqual(au.outputBusses.count, 13, "(aout1) Main 1-2, four stereo pairs, eight mono outputs")
         XCTAssertEqual(au.inputBusses.count, 0)
         XCTAssertEqual(au.outputBusses[0].format.channelCount, 2)
         XCTAssertTrue(au.isMusicDeviceOrEffect)

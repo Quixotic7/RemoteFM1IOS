@@ -874,7 +874,8 @@ USB (fm1-base #39, `plat_usb_ch`; LOOM-8 the first user). Spec: docs/RFM1-FORMAT
 - **Engine:** CoreBackend `audio_out_channels` / `audio_ex`; CoreDevice keeps channels 3..N beside the master at
   44.1 kHz and resamples all of them together (LagrangeN); the engine's ring has 8 more channels;
   `rfme_render_events_aux`, `rfme_audio_out_channels`. Without the exports nothing changes.
-- **AU:** the instrument has five stereo outputs, Main 1-2 and Out 3-4 .. 9-10, for a host's multi-output instrument;
+- **AU:** the instrument has Main 1-2, the stereo pairs Out 3-4 .. 9-10 and eight mono outputs Out 3 .. Out 10 (a
+  firmware's mono tracks, LOOM-8's, one by one), for a host's multi-output instrument;
   each render cycle is made once (at its first bus call) and every bus takes its pair. The effect variant stays stereo.
 - **Still to do elsewhere:** FM1VST's glue fills the buffer (fm1-base's `plat_usb_ch`, Felucca's `FELUCCA_UAC_CH`)
   for .rfm1 and native cores; the native core ABI (fm1core.h) needs the same. Until then real firmwares give stereo.

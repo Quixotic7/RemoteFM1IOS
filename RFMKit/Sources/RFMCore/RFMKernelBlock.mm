@@ -170,16 +170,28 @@ AUInternalRenderBlock rfmk_render_block(rfmk_t *k)
             }
             k->counted(frameCount);
         }
-        if (multi) {                                // this bus's pair: 0 the master, n channels 2n+1, 2n+2
-            const float *sl = bus == 0 ? k->mainL.data() : k->aux.data() + (size_t)(2 * bus - 2) * k->maxFrames;
-            const float *sr = bus == 0 ? k->mainR.data() : k->aux.data() + (size_t)(2 * bus - 1) * k->maxFrames;
-            std::memcpy(L, sl, frameCount * sizeof(float));
-            if (R != L)
-                std::memcpy(R, sr, frameCount * sizeof(float));
-            if (bus > 0)                            // (a channel pair the firmware doesn't give: silent)
-                played = k->engine && rfme_audio_out_channels(k->engine) >= (uint32_t)(2 * bus + 2) && played;
+        bool monoBus = false;
+        if (multi) {
+            const uint32_t have = k->engine ? rfme_audio_out_channels(k->engine) : 2;
+            if (bus >= (NSInteger)rfmk::kPairBuses) {   // a mono output: channel 3 + (bus - 5), one buffer or both alike
+                const uint32_t c = (uint32_t)bus - rfmk::kPairBuses;
+                const float *src = k->aux.data() + (size_t)c * k->maxFrames;
+                std::memcpy(L, src, frameCount * sizeof(float));
+                if (R != L && outputData->mNumberBuffers > 1)
+                    std::memcpy(R, src, frameCount * sizeof(float));
+                monoBus = true;
+                played = have >= 3 + c && played;
+            } else {                                // a pair: 0 the master, n channels 2n+1, 2n+2
+                const float *sl = bus == 0 ? k->mainL.data() : k->aux.data() + (size_t)(2 * bus - 2) * k->maxFrames;
+                const float *sr = bus == 0 ? k->mainR.data() : k->aux.data() + (size_t)(2 * bus - 1) * k->maxFrames;
+                std::memcpy(L, sl, frameCount * sizeof(float));
+                if (R != L)
+                    std::memcpy(R, sr, frameCount * sizeof(float));
+                if (bus > 0)                        // (a channel pair the firmware doesn't give: silent)
+                    played = have >= (uint32_t)(2 * bus + 2) && played;
+            }
         }
-        if (outputData->mNumberBuffers == 1)        // (mono: both channels)
+        if (outputData->mNumberBuffers == 1 && !monoBus)   // (a stereo signal on a mono output: both channels)
             for (UInt32 i = 0; i < frameCount; i++)
                 L[i] = 0.5f * (L[i] + R[i]);
         for (UInt32 i = 2; i < outputData->mNumberBuffers; i++)

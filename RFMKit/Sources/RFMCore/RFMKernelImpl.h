@@ -23,13 +23,15 @@ struct rfmk {
     std::vector<float> storage;                 // channels x maxFrames
     std::vector<float *> bufs;
     std::vector<float> scratch;                 // the second channel of a mono output
-    // (aout1) the instrument's output buses: 1 (stereo) or 5 (1-2 the master, 3-4 .. 9-10 the firmware's own). With
+    // (aout1) the instrument's output buses: 1 (stereo) or 13 (1-2 the master, 3-4 .. 9-10 and 3 .. 10 mono). With
     // more than one, each render cycle is made once (at its first bus call: a new host time) into mainL/R and aux,
     // and every bus call takes its pair from there
     uint32_t outBuses = 1;
     std::vector<float> mainL, mainR, aux;       // maxFrames; aux: kAux x maxFrames
     std::vector<std::vector<float>> busBufs;    // (a host that wants our buffers) 2 x maxFrames per bus
     static constexpr uint32_t kAux = 8;
+    // the buses: 0 Main 1-2, 1..4 the pairs Out 3-4 .. 9-10, then 5..12 the mono Out 3 .. Out 10 (the same channels)
+    static constexpr uint32_t kPairBuses = 5, kBuses = kPairBuses + kAux;
     rfme_t *engine = nullptr;
     // (ain1: the music effect variant) the host's audio into the engine's input ring, pulled each render
     std::atomic<bool> inputOn{false};

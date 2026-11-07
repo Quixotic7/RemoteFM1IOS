@@ -51,7 +51,7 @@ int rfmk_allocate(rfmk_t *k, double sample_rate, uint32_t channels, uint32_t max
     return 1;
 }
 
-void rfmk_set_out_buses(rfmk_t *k, uint32_t n) { k->outBuses = n < 1 ? 1 : n > 5 ? 5 : n; }
+void rfmk_set_out_buses(rfmk_t *k, uint32_t n) { k->outBuses = n < 1 ? 1 : n > rfmk::kBuses ? rfmk::kBuses : n; }
 
 void rfmk_set_input(rfmk_t *k, int on) { k->inputOn.store(on != 0, std::memory_order_relaxed); }
 
