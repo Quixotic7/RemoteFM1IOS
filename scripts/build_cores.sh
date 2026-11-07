@@ -23,8 +23,7 @@
 # without core/tests/, third_party/, the font licence; nothing GPL of it). Saadet comes from vendor/saadet (cores/saadet
 # in the copy, without tests/ and docs/; its generators are in tools/) with vendor/fm1-base as its base/ (without bsp/).
 # Boardwalk comes from vendor/boardwalk (cores/boardwalk, without mockups/, tests/ and its base's bsp/), LOOM-8 from
-# vendor/loom (cores/loom, without docs/, tests/, its base's bsp/ and bt/, and app/samples/909_hat.wav: GPL-3.0, never
-# in this build).
+# vendor/loom (cores/fm1-loom, whole but docs/ and tests/: FM1VST's LOOM-8 glue; GPL-3.0, never in a store build).
 # A core with a store variant (<id>_store in cores.txt: saadet_store) gets its slots in <platform>/frameworks-store,
 # named as the core's (FM1Core_saadet_<n>); scripts/embed_cores.sh takes them from there for a store build. CR_PYTHON=... picks the python with Pillow
 # and fontTools; RFM_CORES="a;b" the cores to build (default: all four; the store build embeds a subset of them,
@@ -82,10 +81,12 @@ sync_sources() {
     rsync -a --delete --exclude=.git --exclude=/app/build/ --exclude=/base/bsp/ --exclude=/base/build/ --exclude=/mockups/ \
         --exclude=/tests/ "$BOARDWALK/" "$SRC/cores/boardwalk/"
     git_pointer "$BOARDWALK" "$SRC/cores/boardwalk"
-    [ -f "$LOOM/base/host/plat_host.c" ] || { echo "$LOOM is empty: git submodule update --init vendor/loom && git -C vendor/loom submodule update --init base"; exit 1; }
-    rsync -a --delete --exclude=.git --exclude=/app/build/ --exclude=/base/bsp/ --exclude=/base/bt/ --exclude=/base/build/ \
-        --exclude=/docs/ --exclude=/tests/ --exclude=/app/samples/909_hat.wav "$LOOM/" "$SRC/cores/loom/"
-    git_pointer "$LOOM" "$SRC/cores/loom"
+    # (LOOM-8 0.14: FM1VST's glue, core-glue/fm1base/core_loom.cmake, over the whole tree as cores/fm1-loom, its base
+    # and base/bsp included; GPL-3.0 as a whole, so never in a store build: cores/store-cores.txt)
+    [ -f "$LOOM/base/bsp/README.md" ] || [ -n "$(ls -A "$LOOM/base/bsp" 2>/dev/null)" ] || { echo "$LOOM is empty: git submodule update --init vendor/loom && git -C vendor/loom submodule update --init --recursive"; exit 1; }
+    rsync -a --delete --exclude=.git --exclude=/app/build/ --exclude=/base/build/ --exclude=/docs/ --exclude=/tests/ \
+        "$LOOM/" "$SRC/cores/fm1-loom/"
+    git_pointer "$LOOM" "$SRC/cores/fm1-loom"
     cmp -s "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt" || cp "$ROOT/cores/CMakeLists.txt" "$SRC/CMakeLists.txt"
 }
 

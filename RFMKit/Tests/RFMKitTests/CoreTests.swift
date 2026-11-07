@@ -62,7 +62,7 @@ final class TestCore {
 
 final class CoreTests: XCTestCase {
     static let ids = ["choralroot", "felucca", "fizz", "saadet", "boardwalk", "loom"]   // (Melodee: an .rfm1 since 2026-10-31)
-    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0", "loom": "MPL-2.0"]    // (the others: GPL-3.0-only)
+    static let licences = ["fizz": "MPL-2.0", "saadet": "MPL-2.0", "boardwalk": "MPL-2.0"]    // (the others, LOOM-8 0.14 too: GPL-3.0-only)
     /// a button tapped before a key sounds (conformance.txt's "sound" prelude): FIZZ's keys are its steps until REC
     static let keyPrelude: [String: Int32] = ["fizz": Int32(RFME_B_REC), "loom": Int32(RFME_B_PLAY)]
     /// keys tapped before that (conformance.txt's): LOOM-8 opens T1, a drum kit, on its Steps page, so four kicks are
@@ -330,7 +330,7 @@ final class CoreTests: XCTestCase {
         var i = rfms_info_t()
         XCTAssertEqual(rfms_find("boardwalk", &i), 1)
         XCTAssertEqual(RemoteController.string(i.name), "Boardwalk")
-        XCTAssertEqual(RemoteController.string(i.version), "0.9")
+        XCTAssertEqual(RemoteController.string(i.version), "0.9.2")
         let url = RemoteController.string(i.source_url)
         XCTAssertTrue(url.hasPrefix("https://github.com/charlesvestal/fm1-boardwalk@") && url.count == 47 + 40, url)
         let credits = CorePlayer.credits("boardwalk")
@@ -359,37 +359,28 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(c.status.halted, 0)
     }
 
-    /// LOOM-8: its descriptor (MPL-2.0, the source at its commit, the credits: athousanddetails as his permission
-    /// asks); the 909 closed hat (GPL-3.0) is not in the binary (none of its ADPCM, as LOOM-8's gen_samples.py
-    /// encodes it into the synced tree's reference header, while the kick it encodes before it is there); the
-    /// written kicks play
+    /// LOOM-8 0.14 (FM1VST's glue): its descriptor (GPL-3.0-only as a whole: never in a store build), the source at its
+    /// commit, the credits; ten output channels (aout1: the tracks on 3..10); the written kicks play
     func testLoom() throws {
         var i = rfms_info_t()
         XCTAssertEqual(rfms_find("loom", &i), 1)
         XCTAssertEqual(RemoteController.string(i.name), "LOOM-8")
-        XCTAssertEqual(RemoteController.string(i.version), "0.9.3")
+        XCTAssertEqual(RemoteController.string(i.version), "0.14")
         let url = RemoteController.string(i.source_url)
         XCTAssertTrue(url.hasPrefix("https://github.com/charlesvestal/fm1-loom@") && url.count == 42 + 40, url)
         let credits = CorePlayer.credits("loom")
-        for s in ["Charles Vestal", "Leo Kuroshita", "athousanddetails", "u/FCTRYBEATS", "VSCO 2 CE", "Braids",
-                  "Mozilla Public License Version 2.0", "SIL OPEN FONT LICENSE", "no 909 closed hat"] {
+        for s in ["Charles Vestal", "Leo Kuroshita", "u/FCTRYBEATS", "9W9", "SIL OPEN FONT LICENSE"] {
             XCTAssertTrue(credits.contains(s), "loom credits lack \(s)")
         }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../..").standardized
+        XCTAssertFalse(try String(contentsOf: root.appendingPathComponent("cores/store-cores.txt"), encoding: .utf8)
+                        .split(separator: "\n").contains("loom"), "LOOM-8 0.14 (GPL-3.0) in the store build")
         let bin = try Data(contentsOf: URL(fileURLWithPath: Self.coresDir + "/FM1Core_loom_1.framework/FM1Core_loom_1"))
-        let gen = (Self.coresDir as NSString).deletingLastPathComponent + "/../src/cores/loom/app/build/gen/samples.h"
-        let rows = try String(contentsOfFile: gen, encoding: .utf8)
-        XCTAssertTrue(rows.contains("{\"hat\", 11831u, 186u, 0u,"), "the hat's row is not empty in \(gen)")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: (gen as NSString).deletingLastPathComponent
-                                                       + "/../../samples/909_hat.wav"), "909_hat.wav was synced")
-        let adp = try Self.cArray(gen, "SMP_FACT_ADP", 64)
-        XCTAssertNotNil(bin.range(of: Data(adp)), "the kick's ADPCM is not in the binary: the check finds nothing")
-        // the hat's bytes as LOOM-8 encodes them (its first 32 of 644 B of ADPCM: tools/gen_samples.py, v0.9.3)
-        let hat: [UInt8] = Self.loomHat
-        XCTAssertNil(bin.range(of: Data(hat)), "the 909 hat's ADPCM is in the LOOM-8 core")
 
         let c = try TestCore("loom")
         c.boot()
         c.run(500)
+        XCTAssertEqual(rfme_audio_out_channels(c.e), 10, "aout1: the master and the eight tracks")
         XCTAssertGreaterThan(Self.colours(c), 8)
         for k in Self.stepPrelude["loom"]! {
             c.key(k, true)
@@ -406,10 +397,34 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(c.status.halted, 0)
     }
 
-    /// the first 32 bytes of the 909 closed hat's IMA ADPCM as LOOM-8 v0.9.3's tools/gen_samples.py encodes
-    /// app/samples/909_hat.wav (SMP_FACT_ADP[11831...]): what testLoom looks for in the binary
-    static let loomHat: [UInt8] = [127, 247, 103, 249, 179, 97, 78, 139, 131, 178, 212, 56, 163, 77, 77, 176, 161, 196,
-                                   81, 155, 195, 89, 140, 150, 41, 153, 130, 208, 50, 79, 192, 32]
+    /// LOOM-8's tracks on their own outputs (aout1): the written kicks of T1 play on channel 3 through the engine's audio
+    /// path, as the AU's Out 3-4 gets them, while channels 5..10 (the tracks without notes) stay silent
+    func testLoomTrackOneOnChannelThree() throws {
+        let c = try TestCore("loom")
+        c.boot()
+        c.run(500)
+        for k in Self.stepPrelude["loom"]! {
+            c.key(k, true); c.run(60); c.key(k, false); c.run(100)
+        }
+        c.button(Int32(RFME_B_PLAY), true); c.run(60); c.button(Int32(RFME_B_PLAY), false)
+        rfme_set_clock(c.e, Int32(RFME_CLOCK_AUDIO))
+        rfme_set_offline(c.e, 1)
+        let n = 512
+        var peak = [Float](repeating: 0, count: 10)
+        var l = [Float](repeating: 0, count: n), r = l
+        let aux = (0..<8).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: n) }
+        defer { aux.forEach { $0.deallocate() } }
+        var ptrs: [UnsafeMutablePointer<Float>?] = aux
+        for _ in 0..<(48000 * 2 / n) {
+            _ = ptrs.withUnsafeMutableBufferPointer { b in rfme_render_events_aux(c.e, &l, &r, b.baseAddress, 8, UInt32(n), 48000, nil, 0, nil, 0) }
+            peak[0] = max(peak[0], l.map(abs).max()!)
+            for ch in 0..<8 { peak[2 + ch] = max(peak[2 + ch], UnsafeBufferPointer(start: aux[ch], count: n).map(abs).max()!) }
+        }
+        print("core loom: channel peaks", peak.map { String(format: "%.3f", $0) })
+        XCTAssertGreaterThan(peak[0], 0.002, "the master is silent")
+        XCTAssertGreaterThan(peak[2], 0.002, "T1's kicks are not on channel 3")
+        for ch in 4..<10 { XCTAssertLessThan(peak[ch], 0.002, "channel \(ch + 1) (a track without notes) sounds") }
+    }
 
     /// the colours on a core's screen
     static func colours(_ c: TestCore) -> Int {

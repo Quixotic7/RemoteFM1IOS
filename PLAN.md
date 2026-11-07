@@ -880,3 +880,12 @@ USB (fm1-base #39, `plat_usb_ch`; LOOM-8 the first user). Spec: docs/RFM1-FORMAT
   for .rfm1 and native cores; the native core ABI (fm1core.h) needs the same. Until then real firmwares give stereo.
 - Tests: AudioOutTests (Fixtures/aout_cart.c: every channel its own level, at 44.1 and 48 kHz; a plain cart),
   AUOutputBusTests (each bus its pair, one render a cycle).
+
+## 25. The built-in firmwares at their latest (2026-11-06)
+
+FIZZ v0.12.0-beta.13, Boardwalk v0.9.2 (its glue: core_amb.c's additions for this fm1-base), LOOM-8 v0.14, and through
+FM1VST fad3c29 (branch `aout1-multichannel`, not pushed yet: push it before this repo) ChoralRoot 0.29.2, Felucca
+1.8.1, Melodee 1.6.1; Saadet v0.1.1 already was. LOOM-8 0.14 builds with FM1VST's glue (core-glue/fm1base/core_loom.*,
+cores/loom retired): ten output channels (aout1, section 24), the 909 samples included. It is GPL-3.0-only as a whole,
+so it left the store build (cores/store-cores.txt; the owner's call). The cores export the aout1 pair beside
+_fm1core_get. Tests: CoreTests (versions, licences, testLoomTrackOneOnChannelThree).

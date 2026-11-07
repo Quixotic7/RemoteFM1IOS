@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The Boardwalk core: Boardwalk (https://github.com/charlesvestal/fm1-boardwalk, the vendor/boardwalk submodule at
- * v0.9, by Charles Vestal; MPL-2.0, with its base/ = fm1-base at 4587fda), built with FM1VST's fm1-base glue
+ * v0.9.2, by Charles Vestal; MPL-2.0, with its base/ = fm1-base at 3ae2a65), built with FM1VST's fm1-base glue
  * (core-glue/fm1base, core-glue/plat/plat_glue.h) as core_amb.c is.
  *
  * The sources are those of Boardwalk's host simulator (./build.sh --host: base/tools/build.py build_host): base's
@@ -26,6 +26,7 @@
 #include "env.h"                          /* getenv -> NULL: no environment in a core (common/env.h) */
 
 #define APP_VERSION FM1CORE_VERSION
+#define FM1CORE_FB_MIRROR_DIM 1           /* (fm1-base since 0.9.1's base: mirror_leds with the glow; mirror_mid) */
 #include "fm1base_hal.h"
 
 /* ---------------------------------------------------------------- the firmware --- */
@@ -36,6 +37,10 @@
 #include "fm1b_config.h"
 #include "sys_text.c"                     /* (unity.c: the platform's own screens' faces; panel.c uses them) */
 #include "storage.c"
+/* felucca-bsp's usb.c and guard, as this fm1-base's plat_fm1.c reads them (core_amb.c): the USB link never lost, the
+ * guard's code window meaningless here */
+static volatile uint8_t midi_usb_lost;
+static void fm1_guard_pc_extend(uint32_t end) { (void)end; }
 #define ANN_NAME APP_NAME " " APP_VERSION
 #include "ann_words.h"
 #include "announce.c"

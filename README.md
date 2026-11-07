@@ -49,8 +49,7 @@ screen, the test pattern and the AU test).
   `cores/fizz/` (FIZZ's build file and descriptor), `cores/saadet/` (Saadet's: its unit on FM1VST's fm1-base glue,
   the instrument unit, descriptors, the conformance script, and `store/`: the empty factory banks of its store
   variant), `cores/boardwalk/` (Boardwalk's unit on the same glue, its sound engine's unit, descriptor and
-  conformance script), `cores/loom/` (LOOM-8's: its unit, the o2 units, `loom_plat.c` for `app/plat_loom.c`, and
-  `gen_samples_rfm.py`, the factory samples without the GPL 909 hat), `cores/store-cores.txt` (the cores of an App Store / TestFlight
+  conformance script; LOOM-8 0.14 builds with FM1VST's own glue), `cores/store-cores.txt` (the cores of an App Store / TestFlight
   build: `RFM_STORE_BUILD=YES`), and `cores/ios/libproc.h`, a stand-in for a header the iOS SDK lacks (ChoralRoot's
   profiler).
 - `RFMKit/`: a Swift package.
@@ -73,22 +72,23 @@ screen, the test pattern and the AU test).
     `FirmwareInstaller`, its page; tested by `FirmwareInstallTests` on FM1Kit's SimulatedFM1).
 - `vendor/RemoteFM1`: RemoteFM1 (host library MPL-2.0) at 0.3.1 (tag v0.3.1, e6fa19d) as a git submodule, for
   libremotefm1 and fm1remote's patterns. Read-only.
-- `vendor/FM1VST`: FM1VST v0.6.2 as a git submodule (`plugin/RemoteMidi.c` and `cores/ChoralRootFM1`, `cores/Felucca`
-  with its `firmware/engines`, `cores/melodee`). Read-only.
-- `vendor/FIZZ`: FIZZ v0.12.0-beta.12 (MPL-2.0) as a git submodule (its own submodule, fm1-base, is not needed).
+- `vendor/FM1VST`: FM1VST at fad3c29 (branch `aout1-multichannel`: aout1, LOOM-8 0.14) as a git submodule
+  (`plugin/RemoteMidi.c` and `cores/ChoralRootFM1` 0.29.2, `cores/Felucca` 1.8.1 with its `firmware/engines`,
+  `cores/melodee` 1.6.1). Read-only.
+- `vendor/FIZZ`: FIZZ v0.12.0-beta.13 (MPL-2.0) as a git submodule (its own submodule, fm1-base, is not needed).
   Read-only.
 - `vendor/saadet`: Saadet v0.1.1 (Kerem Kilic; MPL-2.0 in its fm1-base build) and `vendor/fm1-base`: fm1-base at
   Saadet's pin (6c0b47e, which Saadet's build fetches; its `bsp/` is not needed). Read-only.
-- `vendor/boardwalk`: Boardwalk v0.9 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at 4587fda; `base/bsp` is
+- `vendor/boardwalk`: Boardwalk v0.9.2 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at 3ae2a65; `base/bsp` is
   not needed). Read-only.
-- `vendor/loom`: LOOM-8 v0.9.3 (Charles Vestal, MPL-2.0) with its `base/` (fm1-base at d0133c2; `base/bsp` is not
-  needed). Read-only.
+- `vendor/loom`: LOOM-8 v0.14 (Charles Vestal; GPL-3.0-only as a whole, so not in a store build) with its `base/`
+  (fm1-base at 317cb86) and `base/bsp`. Read-only.
 
 ## Build
 
     git submodule update --init vendor/RemoteFM1 vendor/FM1VST vendor/FIZZ vendor/saadet vendor/fm1-base vendor/boardwalk
     git -C vendor/boardwalk submodule update --init base
-    git submodule update --init vendor/loom && git -C vendor/loom submodule update --init base
+    git submodule update --init vendor/loom && git -C vendor/loom submodule update --init --recursive
     git -C vendor/FM1VST submodule update --init cores/ChoralRootFM1 cores/melodee
     git -C vendor/FM1VST submodule update --init --recursive cores/Felucca
 

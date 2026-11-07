@@ -14,8 +14,8 @@ How the owner writes the notes testers see with each build (from the owner's own
 - **"Please try"**: a short numbered list of the things worth testing, each asking for the detail that helps
   ("Let me know which firmware you tried").
 - **End** with one line asking for reports of anything that doesn't work as expected.
-- Only what testers can see in the TestFlight (store) build: its four built-in firmwares are FIZZ, Saadet, Boardwalk
-  and LOOM-8; others come from Get firmware.
+- Only what testers can see in the TestFlight (store) build: its three built-in firmwares are FIZZ, Saadet and Boardwalk
+  (LOOM-8 left with 0.14, GPL-3.0); others come from Get firmware.
 
 ## Example (build 15, as the owner sent it)
 

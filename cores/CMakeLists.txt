@@ -2,7 +2,7 @@
 # Copyright (C) 2026 RemoteFM1 contributors
 # The FM-1 cores for RemoteFM1 iOS: ChoralRoot, Felucca, Melodee, FIZZ and Saadet through FM1VST's fm1_add_core() (cmake/FM1Cores.cmake)
 # and their glue (core-glue/), without FM1VST's top CMakeLists (it fetches JUCE). One SHARED library per core,
-# FM1Core_<id>, from the core's objects, exporting only _fm1core_get; scripts/build_cores.sh turns it into the four slot
+# FM1Core_<id>, from the core's objects, exporting only _fm1core_get (and aout1's pair); scripts/build_cores.sh turns it into the four slot
 # frameworks (PLAN.md section 3).
 #
 # Not configured from here directly: scripts/build_cores.sh copies this file, the parts of vendor/FM1VST it needs and
@@ -22,10 +22,14 @@ set(RFM_CORES "choralroot;felucca;fizz;saadet;boardwalk;loom" CACHE STRING "the 
 # iOS: ChoralRoot's host build includes <libproc.h> (its profiler's instruction counter), which the iOS SDKs lack:
 # cores/ios/libproc.h stands in for it. FIZZ's build file is cores/fizz/core.cmake, Saadet's
 # cores/saadet/core.cmake (two cores: saadet and its store variant saadet_store, the same core id), Boardwalk's
-# cores/boardwalk/core.cmake, LOOM-8's cores/loom/core.cmake (0.9.3; FM1VST's own loom core, 0.6.1, is not built). (RFM_OWN: this repo's cores/ folder)
+# cores/boardwalk/core.cmake; LOOM-8's is FM1VST's (core-glue/fm1base/core_loom.cmake, 0.14). (RFM_OWN: this repo's cores/ folder)
 set(RFM_OWN "" CACHE PATH "the repo's cores/ folder (cores/ios: the iOS stand-in headers; cores/fizz)")
 
 include(${RFM_FM1VST}/cmake/FM1Cores.cmake)
+# (FM1VST 0.6.2+: the glue also declares each core's .rfm1 with fm1_add_rfm1; FM1_RFM1 off here: those do nothing)
+if(EXISTS ${RFM_FM1VST}/cmake/FM1Rfm1.cmake)
+    include(${RFM_FM1VST}/cmake/FM1Rfm1.cmake)
+endif()
 # iOS: FM1VST's coroutine (core-glue/common/coro.c) switches stacks with ucontext, which an iPhone doesn't run (Melodee
 # stayed on its splash there); cores/ios/coro_arm64.c is the same API with an arm64 switch of its own
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -54,7 +58,7 @@ if(boardwalk IN_LIST RFM_CORES)
     include(${RFM_OWN}/boardwalk/core.cmake)
 endif()
 if(loom IN_LIST RFM_CORES)
-    include(${RFM_OWN}/loom/core.cmake)
+    include(${_glue}/fm1base/core_loom.cmake)    # (LOOM-8 0.14, FM1VST's glue: 10 output channels, aout1)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET core_choralroot_obj)
     target_include_directories(core_choralroot_obj BEFORE PRIVATE ${RFM_OWN}/ios)
@@ -68,8 +72,10 @@ foreach(_id IN LISTS FM1_CORE_IDS)
     set_target_properties(FM1Core_${_id} PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         INSTALL_NAME_DIR "@rpath")
-    target_link_options(FM1Core_${_id} PRIVATE -Wl,-exported_symbol,_fm1core_get -Wl,-headerpad_max_install_names
-                        -Wl,-dead_strip)
+    # (and fm1core.h's optional aout1 pair where a core has it, LOOM-8: more output channels; a pattern that matches
+    # nothing is fine)
+    target_link_options(FM1Core_${_id} PRIVATE -Wl,-exported_symbol,_fm1core_get "-Wl,-exported_symbol,_fm1core_audio_out*"
+                        -Wl,-headerpad_max_install_names -Wl,-dead_strip)
     get_property(_ver GLOBAL PROPERTY FM1_CORE_VERSION_${_id})
     get_property(_commit GLOBAL PROPERTY FM1_CORE_COMMIT_${_id})
     string(APPEND _manifest "${_id} ${_ver} ${_commit}\n")
