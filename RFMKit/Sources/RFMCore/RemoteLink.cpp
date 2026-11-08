@@ -76,6 +76,8 @@ RemoteLink::RemoteLink(const Options &o) : opt_(o), t0_(std::chrono::steady_cloc
         }
         if (opt_.fakeNoTouch)
             fc.touch = 0;
+        if (opt_.fakeNoAudio)
+            fc.audio = 0;
         fake_ = rfm_fake_new(&fc);
         loopBuf_.resize(1u << 18);
     }
@@ -270,6 +272,8 @@ void RemoteLink::runOnce()
     sc.host_name = opt_.hostName.c_str();
     sc.transport = RFM_T_AUTO;
     sc.key_touch = touchApplied_ = touchWant_.load();
+    sc.ble_audio = audioApplied_ = audioWant_.load() ? 1 : 0;
+    audioR_.store(audioW_.load(std::memory_order_acquire), std::memory_order_release);   // (nothing old played)
     const rfm_session_cb_t cb{this, cbEvent, cbState, cbRescan, cbLog, cbMidiIn};
     lastState_ = -1;
     wasConnected_ = false;
@@ -375,7 +379,9 @@ void RemoteLink::runOnce()
             rfm_session_set_key_touch(s_, tw);   // (in a session with a TOUCH unit: sent at once)
             touchApplied_ = tw;
         }
+        pumpAudio();
         rfm_session_poll(s_, t);
+        audioOn_.store(rfm_session_audio_on(s_) != 0, std::memory_order_release);
         if (fakePath)
             pumpFake(t);
         if (!stopping)
@@ -391,6 +397,7 @@ void RemoteLink::runOnce()
     // ---- 4. the end: everything the unit held let go, the back ends closed, the lock released. A dropped run sends
     // nothing more (no SESSION 0), stays off, and then says so (onDrop: the lease's ack)
     engaged_.store(false, std::memory_order_release);
+    audioOn_.store(false, std::memory_order_release);
     {
         std::lock_guard<std::mutex> g(fakeMu_);
         if (s_)
@@ -455,6 +462,17 @@ void RemoteLink::updateStatus(uint32_t t)
     st_.touchWanted = touchApplied_;
     st_.touch = ss.touch;
     st_.touchSent = ss.touch_sent;
+    st_.audioWanted = audioApplied_ != 0;
+    st_.audio = ss.audio != 0;
+    st_.audioRate = ss.audio_rate;
+    st_.audioBlocks = ss.audio_blocks;
+    st_.audioWire = ss.audio_wire;
+    st_.audioBufferMs = ss.audio_buffer_ms;
+    st_.audioFillMs = ss.audio_fill_ms;
+    st_.audioLost = ss.audio_lost;
+    st_.audioUnderruns = ss.audio_underruns;
+    st_.audioSkipped = ss.audio_skipped;
+    st_.audioOverflow = audioOverflow_.load();
     if (const rfm_hello_t *h = rfm_session_hello(s_); h && h->name[0]) {
         st_.hello = *h;
         st_.haveHello = true;
@@ -529,6 +547,47 @@ int RemoteLink::loopWrite(void *ctx, const uint8_t *p, uint32_t n)
     else
         rfm_fake_rx_bk(l->self->fake_, p, n, l->self->now());
     return 0;
+}
+
+// ------------------------------------------------------------------ Bluetooth audio ---
+// the audio thread's: mono into the ring, only while it can go anywhere (the option on, this link holding the unit)
+void RemoteLink::pushAudio(const float *L, const float *R, uint32_t n, double rate)
+{
+    if (!audioWant_.load(std::memory_order_relaxed) || !engaged_.load(std::memory_order_relaxed) || !L || !n)
+        return;
+    if (rate >= 8000 && rate <= 192000)
+        audioRate_.store((uint32_t)(rate + 0.5), std::memory_order_relaxed);
+    const uint32_t w = audioW_.load(std::memory_order_relaxed);
+    const uint32_t room = kAudioRing - (w - audioR_.load(std::memory_order_acquire));
+    if (n > room) {
+        audioOverflow_.fetch_add(n - room, std::memory_order_relaxed);
+        n = room;
+    }
+    for (uint32_t i = 0; i < n; i++)
+        audioRing_[(w + i) % kAudioRing] = R ? 0.5f * (L[i] + R[i]) : L[i];
+    audioW_.store(w + n, std::memory_order_release);
+}
+
+// the session thread's: the option given to the session when it changed, and the ring into rfm_session_audio (which
+// drops it while the unit is not in the mode). Off, or not yet on: emptied, so the mode starts with the sound of now
+void RemoteLink::pumpAudio()
+{
+    if (const int want = audioWant_.load(std::memory_order_acquire) ? 1 : 0; want != audioApplied_) {
+        rfm_session_set_ble_audio(s_, want);
+        audioApplied_ = want;
+    }
+    const uint32_t w = audioW_.load(std::memory_order_acquire), r = audioR_.load(std::memory_order_relaxed);
+    const uint32_t n = w - r;
+    if (!n)
+        return;
+    if (rfm_session_audio_on(s_)) {
+        for (uint32_t i = 0; i < n; i++)
+            audioOut_[i] = audioRing_[(r + i) % kAudioRing];
+        audioR_.store(w, std::memory_order_release);
+        rfm_session_audio(s_, audioOut_.data(), n, audioRate_.load(std::memory_order_relaxed));
+    } else {
+        audioR_.store(w, std::memory_order_release);
+    }
 }
 
 // the unit's held keys and buttons are up for the core; the panel decoder forgets them too, so the next session's

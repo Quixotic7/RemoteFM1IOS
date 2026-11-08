@@ -929,3 +929,16 @@ App/Recorder.swift, App/RecordingViews.swift, App/RecordingOverlay.swift), the a
   offsets, mono and another rate, one that began before the picture), AudioRestartTests (an interruption, the tap across a restart),
   TapLevelTests (a note heard in the tap). The screen and camera need a device: the simulator has no camera and
   ReplayKit gives it no frames.
+
+## 27. Sound on the FM-1 over Bluetooth (2026-11-08)
+
+RemoteFM1 0.3.6's audio mode (its docs/PROTOCOL.md section 9, docs/BLE-AUDIO.md): over Bluetooth MIDI the FM-1 plays
+the app's sound (mono, 22,050 Hz, 4-bit ADPCM, ~13.7 KB/s) and shows "RemoteFM1" instead of the screen.
+- MIDI & audio › Audio › "Sound on the FM-1 over Bluetooth", off by default, standalone only (not the AU's settings).
+  Shown on a Bluetooth link whose FM-1 has caps bit 11, or while on. The line under it says what the FM-1 reports.
+- The engine's render hands its output to the link (RemoteLink::pushAudio: mono into a lock-free ring); the session
+  thread drains the ring into rfm_session_audio. While the FM-1 plays, the render's output here is silent (so a
+  recording of the app's sound is silent too). The page draws the screen as usual.
+- Off, the session over or the link lost: libremotefm1 ends the mode and the screen is sent again.
+- The submodule needs host/src/audio.c in Package.swift.
+- Tests: BleAudioTests (the echo core's CC 23 test tone: decoded on the fake, silent here; off; USB; a unit before 0.3.6).

@@ -8,7 +8,8 @@
 // hidden read-outs: Turns (K2's detents taken), Buttons and Keys (the panel's masks), Master, Presses (buttons gone
 // down, counted by ticks). Knob 1 turns Alpha, Knob 3 Gamma, the others are relative. From MIDI (CC on any channel):
 // CC 20 v: Knob 1's target (0 none, 1 Alpha, 2 Beta), CC 21 v: Alpha = v (the firmware's own change), CC 22 v: Meta
-// stands for Beta (v > 0) or Alpha; each moves the epoch.
+// stands for Beta (v > 0) or Alpha; each moves the epoch. CC 23 v: a 441 Hz tone at v / 254 of full scale (0 off; for
+// the Bluetooth audio tests), else silence.
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -68,7 +69,17 @@ public:
     }
     void frame() override {}
     void idle() override {}
-    void audio(int16_t *s, uint32_t n) override { std::memset(s, 0, n * 2 * sizeof *s); }
+    void audio(int16_t *s, uint32_t n) override
+    {
+        if (!tone_) {
+            std::memset(s, 0, n * 2 * sizeof *s);
+            return;
+        }
+        for (uint32_t i = 0; i < n; i++, phase_ = (phase_ + 1) % 100) {   // (441 Hz at the core's 44,100)
+            const int16_t v = (int16_t)(tone_ * 32767.0 / 254.0 * __builtin_sin(phase_ * 0.0628318530718));
+            s[2 * i] = s[2 * i + 1] = v;
+        }
+    }
     int midi_in(uint32_t pkt) override
     {
         if (w_ - r_ > kRing - 4)
@@ -84,6 +95,8 @@ public:
             } else if (cc == 22) {
                 metaBeta_ = v > 0;
                 epoch_++;
+            } else if (cc == 23) {
+                tone_ = (int)v;
             }
         }
         if ((pkt & 0xF) == 0x9 && ((pkt >> 16) & 0x7F) == 0 && (pkt >> 24) != 0) {
@@ -194,6 +207,8 @@ private:
     int32_t alpha_ = 50, beta_ = 0, gamma_ = 0, turns_ = 0, presses_ = 0;
     int32_t k1_ = kAlpha;
     bool metaBeta_ = false;
+    int tone_ = 0;                                      // (CC 23) the test tone's level, 0 off
+    uint32_t phase_ = 0;
     uint32_t epoch_ = 1, lastButtons_ = 0;
     static constexpr uint32_t kRing = 1024;
     void put(uint32_t p) { q_[w_++ % kRing] = p; }

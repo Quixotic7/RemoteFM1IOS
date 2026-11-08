@@ -38,7 +38,7 @@
 
 static_assert(RFME_B_OCTUP == FM1P_B_OCTUP && RFME_B_SAVE == FM1P_B_SAVE && RFME_E_K4 == FM1P_E_K4, "labels");
 static_assert(RFMC_EV_KEY == RFM_EV_KEY && RFMC_EV_BUTTON == RFM_EV_BUTTON && RFMC_EV_ENC == RFM_EV_ENC &&
-                  RFMC_EV_MASTER == RFM_EV_MASTER && RFMC_EV_PRESS == RFM_EV_PRESS && RFMC_CAP_TOUCH == RFM_CAP_TOUCH && RFMC_EV_RELEASE == RemoteLink::kEvRelease,
+                  RFMC_EV_MASTER == RFM_EV_MASTER && RFMC_EV_PRESS == RFM_EV_PRESS && RFMC_CAP_TOUCH == RFM_CAP_TOUCH && RFMC_CAP_BLE_AUDIO == RFM_CAP_BLE_AUDIO && RFMC_EV_RELEASE == RemoteLink::kEvRelease,
               "event types");
 static_assert(sizeof(RemoteSnapshot::lcd) == sizeof(fm1panel_t::lcd), "the LCD layouts differ");
 
@@ -1482,6 +1482,19 @@ int rfme_render_events_aux(rfme_t *e, float *L, float *R, float *const *aux, uin
     const uint64_t t0 = mach_absolute_time();
     const int ok = e->consume(L, R, n, rate, ev, nev, pev, npev, aux, aux ? naux : 0);
     const uint64_t dt = mach_absolute_time() - t0;
+    // Bluetooth audio (RemoteFM1 0.3.6): the sound to the FM-1 (when the link's option is on), and silent here while
+    // the FM-1 plays it
+    if (RemoteLink *link = e->link; link && e->attached.load(std::memory_order_relaxed) && link->bleAudio()) {
+        link->pushAudio(L, R, n, rate);
+        if (link->bleAudioOn()) {
+            std::memset(L, 0, n * sizeof(float));
+            if (R && R != L)
+                std::memset(R, 0, n * sizeof(float));
+            for (uint32_t k = 0; aux && k < naux; k++)
+                if (aux[k])
+                    std::memset(aux[k], 0, n * sizeof(float));
+        }
+    }
     const uint32_t us = (uint32_t)((double)dt * e->usPerTick);
     e->renders.fetch_add(1, std::memory_order_relaxed);
     e->renderFrames.fetch_add(n, std::memory_order_relaxed);

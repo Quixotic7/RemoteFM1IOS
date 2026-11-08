@@ -60,8 +60,10 @@ public struct UnitHello: Sendable, Equatable {
     }
     public var capNames: String {
         Self.bits(Int(caps), ["shadow", "COPY", "RLE", "PAL", "battery", "PLAY green", "5 LED levels", "HOLD",
-                              "BLE fast", "MIDI in", "TOUCH"])
+                              "BLE fast", "MIDI in", "TOUCH", "BLE audio"])
     }
+    /// RemoteFM1 0.3.6: the FM-1 can play the host's sound over Bluetooth (RFM_CAP_BLE_AUDIO)
+    public var hasBleAudio: Bool { caps & 0x800 != 0 }
     static func bits(_ v: Int, _ names: [String]) -> String {
         let on = names.indices.filter { v & (1 << $0) != 0 }.map { names[$0] }
         return on.isEmpty ? "none" : on.joined(separator: " ")
@@ -82,7 +84,20 @@ public struct LinkStats: Sendable, Equatable {
     public var trsMidiIn: UInt32 = 0, trsMidiDropped: UInt32 = 0   // the unit's TRS MIDI in (RFM_CAP_MIDI_IN) to the core
     // TOUCH (RemoteFM1 0.3.1): asked (RFMC_TOUCH_*), in force as the unit's PANEL_R confirms, TOUCH messages sent
     public var touchWanted: UInt32 = 0, touch: UInt32 = 0, touchSent: UInt32 = 0
+    // Bluetooth audio (RemoteFM1 0.3.6): asked; the FM-1 plays the sound (no screen sent); the stream's rate; AUDIO
+    // blocks sent, their bytes; the unit's last AUDIO_R; samples the link's ring had no room for
+    public var audioWanted = false, audio = false
+    public var audioRate: UInt32 = 0, audioBlocks: UInt32 = 0, audioWire: UInt32 = 0
+    public var audioBufferMs: UInt32 = 0, audioFillMs: UInt32 = 0, audioLost: UInt32 = 0, audioUnderruns: UInt32 = 0
+    public var audioSkipped: UInt32 = 0, audioOverflow: UInt32 = 0
     public init() {}
+
+    /// the settings line while the FM-1 plays the sound
+    public var audioText: String {
+        guard audio else { return audioWanted ? "Asking the FM-1 to play the sound…" : "Off" }
+        return String(format: "Your FM-1 plays the sound: %.3f kHz, %u ms buffer (%u ms now), %u underruns, %u lost",
+                      Double(audioRate) / 1000, audioBufferMs, audioFillMs, audioUnderruns, audioLost)
+    }
 
     /// the Diagnostics line: whether the firmware has TOUCH (HELLO_R caps), what was asked, what PANEL_R confirms
     public func touchText(hello: UnitHello?) -> String {

@@ -6,7 +6,9 @@
 #include "RFMCore.h"
 #include "RFMInternal.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -268,6 +270,7 @@ rfmc_t *rfmc_new(const rfmc_cfg_t *cfg)
     o.sharedFake = cfg->shared_fake != 0;
     o.fakeLabel = cfg->label ? cfg->label : "";
     o.fakeNoTouch = cfg->fake_no_touch != 0;
+    o.fakeNoAudio = cfg->fake_no_audio != 0;
     rfmc_t *c = new rfmc(o);
     c->period = 1000u / (o.fps < 1 || o.fps > 60 ? 20u : o.fps);
     c->th = std::thread([c] { c->threadMain(); });
@@ -410,6 +413,17 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
     st->touch_wanted = s.touchWanted;
     st->touch = s.touch;
     st->touch_sent = s.touchSent;
+    st->audio_wanted = s.audioWanted;
+    st->audio = s.audio;
+    st->audio_rate = s.audioRate;
+    st->audio_blocks = s.audioBlocks;
+    st->audio_wire = s.audioWire;
+    st->audio_buffer_ms = s.audioBufferMs;
+    st->audio_fill_ms = s.audioFillMs;
+    st->audio_lost = s.audioLost;
+    st->audio_underruns = s.audioUnderruns;
+    st->audio_skipped = s.audioSkipped;
+    st->audio_overflow = s.audioOverflow;
     st->events_dropped = s.eventsDropped;
     st->snapshots = s.snapshotsTaken;
     st->colors = s.colors;
@@ -516,6 +530,10 @@ void rfmc_set_key_touch(rfmc_t *c, uint32_t flags)
     c->link.setKeyTouch(flags);
 }
 
+void rfmc_set_ble_audio(rfmc_t *c, int on) { c->link.setBleAudio(on != 0); }
+
+int rfmc_ble_audio_on(rfmc_t *c) { return c->link.bleAudioOn() ? 1 : 0; }
+
 void rfmc_fake_button(rfmc_t *c, uint32_t b, int down)
 {
     c->link.withFake([&](rfm_fake *f) { if (f) rfm_fake_button(f, b, down); });
@@ -553,6 +571,15 @@ int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out)
         const uint32_t t = rfm_fake_touch(f);
         out->touch = t & 0xFFu;
         out->touch_msgs = t >> 8;
+        out->audio_modes = fs.audio_modes;
+        out->audio_blocks = fs.audio_blocks;
+        out->audio_bad = fs.audio_bad;
+        out->audio_gaps = fs.audio_gaps;
+        const int16_t *pcm = nullptr;
+        uint32_t np = 0;
+        out->audio_on = rfm_fake_audio(f, &pcm, &np);
+        for (uint32_t i = 0; pcm && i < np; i++)
+            out->audio_peak = std::max<uint32_t>(out->audio_peak, (uint32_t)std::abs((int)pcm[i]));
         std::memcpy(out->lit, rfm_fake_leds(f)->lit, sizeof out->lit);
         ok = 1;
     });

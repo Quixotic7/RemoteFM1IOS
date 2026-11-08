@@ -1198,6 +1198,20 @@ struct MainScreen: View {
             .padding(.top, 14)
             SheetNote("Play alongside other apps: a camera or music app no longer stops the sound, so the firmware keeps "
                       + "playing and your FM-1 stays linked. The lock screen's play controls don't show while it's on.")
+            if player.soundOnFM1 || fm1CanPlaySound {
+                SheetList {
+                    SheetToggle("Sound on the FM-1 over Bluetooth",
+                                on: Binding(get: { player.soundOnFM1 }, set: { player.soundOnFM1 = $0 }), divider: false)
+                }
+                .padding(.top, 14)
+                SheetNote("Your FM-1 plays the firmware's sound and shows \"RemoteFM1\" instead of the screen; this "
+                          + "device is silent and still shows the screen. Bluetooth only, RemoteFM1 0.3.6 or later. The "
+                          + "sound is mono and a little behind the keys (about 0.2 s).")
+                if player.soundOnFM1 {
+                    Live { SheetNote(fm1CanPlaySound || controller.stats.audio ? controller.stats.audioText
+                                     : "Waiting for an FM-1 with RemoteFM1 0.3.6 over Bluetooth.") }
+                }
+            }
             Live {
                 SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
                                                                           player.status.latencyMs, player.status.underruns)
@@ -1266,6 +1280,12 @@ struct MainScreen: View {
                       + "first and plays again when you come back."
                       + (battery.lastStop.isEmpty ? "" : " Last stopped: \(battery.lastStop)."))
         }
+    }
+
+    /// a Bluetooth link to an FM-1 whose RemoteFM1 can play the sound (0.3.6: HELLO_R caps bit 11)
+    private var fm1CanPlaySound: Bool {
+        guard case .connected(let ble) = controller.state, ble else { return false }
+        return controller.hello?.hasBleAudio == true
     }
 
     private var settingsPage: some View {

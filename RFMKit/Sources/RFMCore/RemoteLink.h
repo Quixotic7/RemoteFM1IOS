@@ -3,6 +3,8 @@
 // the session state and more of rfm_session_stats_t (budget, bytes, ACK times); requestRescan() (CoreMIDI's setup
 // changed). M4: the unit lock is optional (an empty lockPath: none; the lease of PLAN.md section 4 decides instead,
 // through a gate: below); drop(); a process-wide fake unit shared by several links (tests); the unit's TRS MIDI in (MIDI_IN, popMidi).
+// Bluetooth audio (RemoteFM1 0.3.6, docs/PROTOCOL.md section 9): setBleAudio(); the audio thread's pushAudio() into a
+// ring the session thread drains into rfm_session_audio; bleAudioOn() while the FM-1 plays it (the host mutes).
 // Everything else as there.
 // Remote FM-1 (RemoteFM1 M3): a real M-VAVE FM-1 running the RemoteFM1 firmware as the panel of the core inside the
 // plugin. The protocol and the host library are RemoteFM1's (remote/RemoteFM1: docs/PROTOCOL.md, host/include/rfm);
@@ -88,6 +90,8 @@ public:
         std::string fakeLabel;
         // (tests) the fake unit as one before RemoteFM1 0.3.1: no RFM_CAP_TOUCH
         bool fakeNoTouch = false;
+        // (tests) the fake unit as one before RemoteFM1 0.3.6: no RFM_CAP_BLE_AUDIO
+        bool fakeNoAudio = false;
     };
     explicit RemoteLink(const Options &o);
     ~RemoteLink();                                  // stop(), then the thread joined (<= kStopMs + a poll)
@@ -136,6 +140,12 @@ public:
         // (RemoteFM1 0.3.1, RFM_CAP_TOUCH) TOUCH: what this link asks (RFM_TOUCH_F_*), what the unit's PANEL_R says
         // is in force, TOUCH messages sent
         uint32_t touchWanted = 0, touch = 0, touchSent = 0;
+        // (RemoteFM1 0.3.6, RFM_CAP_BLE_AUDIO) Bluetooth audio: asked; the unit plays it (no screen sent); the stream's
+        // rate; AUDIO blocks sent, their framed bytes; the unit's last AUDIO_R (buffer target and fill in ms, lost,
+        // underruns, skipped); samples the ring had no room for
+        bool audioWanted = false, audio = false;
+        uint32_t audioRate = 0, audioBlocks = 0, audioWire = 0, audioBufferMs = 0, audioFillMs = 0, audioLost = 0;
+        uint32_t audioUnderruns = 0, audioSkipped = 0, audioOverflow = 0;
     };
     Status status() const;
     static const char *stateName(State s);
@@ -166,6 +176,17 @@ public:
     // (the keys at velocity 100, no pressure, as before)
     void setKeyTouch(uint32_t flags) { touchWant_.store(flags & (RFM_TOUCH_F_VEL | RFM_TOUCH_F_PRESS)); }
     uint32_t keyTouch() const { return touchWant_.load(); }
+
+    // ---- any thread: Bluetooth audio (off by default). On, a Bluetooth session with a unit that has
+    // RFM_CAP_BLE_AUDIO asks for the audio mode; off (or the session over) the screen is sent again
+    void setBleAudio(bool on) { audioWant_.store(on, std::memory_order_release); }
+    bool bleAudio() const { return audioWant_.load(std::memory_order_acquire); }
+    // the FM-1 plays the host's sound now: the host's own output should be silent
+    bool bleAudioOn() const { return audioOn_.load(std::memory_order_acquire); }
+    // the audio thread: the host's output (L, R: R may be null), mixed to mono for the FM-1. Lock-free; does nothing
+    // unless the option is on and this link holds the unit
+    void pushAudio(const float *L, const float *R, uint32_t n, double rate);
+    static constexpr uint32_t kAudioRing = 16384;   // mono samples: ~340 ms at 48 kHz (the session drains every 1-2 ms)
 
     // ---- any thread: CoreMIDI's setup changed (a Bluetooth device came or went): the session thread rescans
     void requestRescan() { rescan_.store(true, std::memory_order_release); }
@@ -253,6 +274,7 @@ private:
     void updateStatus(uint32_t now);
     void pumpFake(uint32_t now);
     void releasePanel();                            // kEvRelease, and the decoder forgets what it held
+    void pumpAudio();                               // (the session thread) the option applied, the ring drained
     bool gateOpen();                                // the gate says this link may send (no gate: yes)
     static void withSharedFake(const std::function<void(rfm_fake *)> &fn);
 
@@ -284,6 +306,12 @@ private:
     std::atomic<bool> dropReq_{false};
     std::atomic<uint32_t> touchWant_{RFM_TOUCH_F_VEL | RFM_TOUCH_F_PRESS};
     uint32_t touchApplied_ = 0;                     // (the session thread's) what the session was last given
+    // Bluetooth audio: the ring (one writer: the audio thread; one reader: the session thread), its rate
+    std::atomic<bool> audioWant_{false}, audioOn_{false};
+    int audioApplied_ = 0;                          // (the session thread's) what the session was last given
+    std::unique_ptr<float[]> audioRing_{new float[kAudioRing]()};
+    std::vector<float> audioOut_ = std::vector<float>(kAudioRing);
+    std::atomic<uint32_t> audioW_{0}, audioR_{0}, audioRate_{48000}, audioOverflow_{0};
     std::atomic<uint32_t> drops_{0}, gateBlocked_{0};
     std::vector<uint8_t> loopBuf_;
     int lastState_ = -1;

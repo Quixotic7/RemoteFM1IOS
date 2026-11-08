@@ -340,6 +340,7 @@ public final class CorePlayer {
         self.library = library ?? flashDir.map { StateLibrary(root: $0.appendingPathComponent(".states")) } ?? .shared
         self.midiDefaults = midiDefaults
         mixWithOthers = midiDefaults.bool(forKey: Self.mixKey)
+        soundOnFM1 = midiDefaults.bool(forKey: Self.soundOnFM1Key)
         midiSettings = AUSettings(midiDefaults.dictionary(forKey: Self.midiSettingsKey))
         self.selected = selected ?? ""
         // the flash files live in Application Support, out of the Files app's view (Documents shows the firmware folder)
@@ -347,6 +348,7 @@ public final class CorePlayer {
         try? FileManager.default.createDirectory(at: self.flashDir, withIntermediateDirectories: true)
         if flashDir == nil { Self.migrateFlashFiles(to: self.flashDir) }
         e = rfme_new(link?.core)
+        if let core = link?.core { rfmc_set_ble_audio(core, midiDefaults.bool(forKey: Self.soundOnFM1Key) ? 1 : 0) }
         mapFollower = MidiMapFollower(engine: e)
         applyMidiSettings()
         rfms_scan(slotsDir)
@@ -634,6 +636,17 @@ public final class CorePlayer {
     /// the setting: play alongside other apps. Another app that plays or records (a camera app, a music app) then
     /// doesn't stop the sound, so the firmware keeps playing and an FM-1 stays linked; the lock screen's Now Playing
     /// controls don't show while it's on (iOS shows them only for apps that don't mix)
+    /// Bluetooth audio (RemoteFM1 0.3.6; off by default): over Bluetooth MIDI the FM-1 plays the firmware's sound
+    /// instead of showing its screen, and this device is silent while it does (the link's rfmc_set_ble_audio)
+    public static let soundOnFM1Key = "rfm1.soundOnFM1"
+    public var soundOnFM1 = false {
+        didSet {
+            guard soundOnFM1 != oldValue else { return }
+            midiDefaults.set(soundOnFM1, forKey: Self.soundOnFM1Key)
+            if let core = link?.core { rfmc_set_ble_audio(core, soundOnFM1 ? 1 : 0) }
+        }
+    }
+
     public static let mixKey = "rfm1.mixWithOthers"
     public var mixWithOthers = false {
         didSet {

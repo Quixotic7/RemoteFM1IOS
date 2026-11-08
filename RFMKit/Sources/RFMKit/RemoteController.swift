@@ -324,6 +324,17 @@ public final class RemoteController {
         s.touchWanted = st.touch_wanted
         s.touch = st.touch
         s.touchSent = st.touch_sent
+        s.audioWanted = st.audio_wanted != 0
+        s.audio = st.audio != 0
+        s.audioRate = st.audio_rate
+        s.audioBlocks = st.audio_blocks
+        s.audioWire = st.audio_wire
+        s.audioBufferMs = st.audio_buffer_ms
+        s.audioFillMs = st.audio_fill_ms
+        s.audioLost = st.audio_lost
+        s.audioUnderruns = st.audio_underruns
+        s.audioSkipped = st.audio_skipped
+        s.audioOverflow = st.audio_overflow
         s.snapshots = st.snapshots
         return s
     }

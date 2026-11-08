@@ -6,7 +6,7 @@
 // API the app and the extension use. FM1Kit (MIT, github.com/ocean/FM1Kit): installing RemoteFM1 on the FM-1 (Install/).
 import PackageDescription
 
-let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 0.3.1 (v0.3.1, e6fa19d: TOUCH, SA_INFO), its own submodule
+let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 0.3.6 (Bluetooth audio, host/src/audio.c), its own submodule
 let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
 let package = Package(
@@ -27,6 +27,7 @@ let package = Package(
             name: "CRemoteFM1",
             path: "vendor",
             sources: [
+                "\(rfm)/host/src/audio.c",
                 "\(rfm)/host/src/codec.c",
                 "\(rfm)/host/src/fake.c",
                 "\(rfm)/host/src/panel.c",

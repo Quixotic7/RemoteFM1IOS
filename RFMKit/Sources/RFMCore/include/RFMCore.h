@@ -23,7 +23,7 @@ enum { RFMC_S_DISCOVER = 0, RFMC_S_STARTING, RFMC_S_ACTIVE, RFMC_S_STOPPING, RFM
 // rfm_event_t types, and RemoteLink::kEvRelease (everything the unit held is up)
 enum { RFMC_EV_KEY = 1, RFMC_EV_BUTTON = 2, RFMC_EV_ENC = 3, RFMC_EV_MASTER = 4, RFMC_EV_PRESS = 5, RFMC_EV_RELEASE = 0x80 };
 // TOUCH (RemoteFM1 0.3.1): HELLO_R caps bit, rfmc_set_key_touch flags, PANEL_R in force (rfmc_status_t.touch)
-enum { RFMC_CAP_TOUCH = 1u << 10, RFMC_TOUCH_VEL = 1u << 0, RFMC_TOUCH_PRESS = 1u << 1 };
+enum { RFMC_CAP_TOUCH = 1u << 10, RFMC_CAP_BLE_AUDIO = 1u << 11, RFMC_TOUCH_VEL = 1u << 0, RFMC_TOUCH_PRESS = 1u << 1 };
 #define RFMC_W 240
 #define RFMC_H 240
 
@@ -37,6 +37,7 @@ typedef struct {
     int shared_fake;            // (M4, RFMC_FAKE) the process-wide shared fake unit instead of this link's own
     const char *label;          // (M4) this link's name in the shared fake's record
     int fake_no_touch;          // (tests, RFMC_FAKE) the fake as a unit before 0.3.1 (no RFMC_CAP_TOUCH)
+    int fake_no_audio;          // (tests, RFMC_FAKE) the fake as a unit before 0.3.6 (no RFMC_CAP_BLE_AUDIO)
 } rfmc_cfg_t;
 
 typedef struct rfmc rfmc_t;
@@ -50,6 +51,11 @@ void rfmc_rescan(rfmc_t *c);    // CoreMIDI's setup changed
 // TOUCH: velocity and pressure from the FM-1's keys (RFMC_TOUCH_*; default both). Asked after each SESSION start's
 // ACK from a unit with RFMC_CAP_TOUCH, and at once when changed; 0: not asked (velocity 100, no pressure, as before)
 void rfmc_set_key_touch(rfmc_t *c, uint32_t flags);
+// Bluetooth audio (RemoteFM1 0.3.6, caps RFMC_CAP_BLE_AUDIO; off by default): on, a Bluetooth session asks the unit
+// to play the host's sound (mono ADPCM, 22,050 Hz) instead of showing the screen; the attached engine's output goes to
+// it and is silent here while it plays (rfmc_ble_audio_on). Off, or the session over: the screen again
+void rfmc_set_ble_audio(rfmc_t *c, int on);
+int rfmc_ble_audio_on(rfmc_t *c);
 
 // ---- the lease (M4, PLAN.md section 4; RFMLease.h). With a lease the link runs only while the lease's epoch is this
 // client's: the session thread checks it before it sends (RemoteLink's gate) and heartbeats about once a second; on a
@@ -82,6 +88,11 @@ typedef struct {
     uint32_t trs_midi_in, trs_midi_dropped;
     // TOUCH: asked (RFMC_TOUCH_*), in force as the unit's PANEL_R says, TOUCH messages sent
     uint32_t touch_wanted, touch, touch_sent;
+    // Bluetooth audio: asked; the unit plays it; the stream's rate; AUDIO blocks sent, their framed bytes; the unit's
+    // last AUDIO_R (buffer target and fill in ms, blocks lost, underruns, skipped); samples the ring had no room for
+    int audio_wanted, audio;
+    uint32_t audio_rate, audio_blocks, audio_wire, audio_buffer_ms, audio_fill_ms, audio_lost, audio_underruns;
+    uint32_t audio_skipped, audio_overflow;
 } rfmc_status_t;
 void rfmc_status(rfmc_t *c, rfmc_status_t *st);
 
@@ -114,6 +125,10 @@ typedef struct {
     int session;                // 0 none, 1 SysEx, 2 bulk
     uint32_t frames, acks, held_frames, hellos;
     uint32_t touch, touch_msgs; // TOUCH in force on the fake (RFMC_TOUCH_*), TOUCH messages it took
+    // Bluetooth audio: the fake in the mode; AUDIO_MODE taken, AUDIO blocks, malformed ones, gaps in seq; the largest
+    // of its last decoded samples (0..32767)
+    int audio_on;
+    uint32_t audio_modes, audio_blocks, audio_bad, audio_gaps, audio_peak;
     uint8_t lit[11];            // the LEDs it shows lit (LEDS' lit plane, packed row bits per column)
 } rfmc_fake_t;
 int rfmc_fake_state(rfmc_t *c, rfmc_fake_t *out);   // 0: not the fake backend
