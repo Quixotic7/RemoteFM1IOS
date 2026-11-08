@@ -1191,6 +1191,13 @@ struct MainScreen: View {
     private var midiInputPage: some View {
         SheetPage("MIDI input", backTitle: "MIDI & audio", back: { page = .midi }) {
             MidiInputList(input: midi.input).padding(.top, 12)
+            SheetList {
+                SheetToggle("Clock and start/stop", on: Binding(get: { midi.input.clockIn }, set: { midi.input.clockIn = $0 }),
+                            divider: false)
+            }
+            .padding(.top, 14)
+            SheetNote("A controller's or drum machine's MIDI clock, start, stop and song position go to the firmware, "
+                      + "so it follows that tempo and transport.")
         }
     }
 

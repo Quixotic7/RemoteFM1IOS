@@ -159,6 +159,12 @@ final class MidiMapTests: XCTestCase {
                                0x4090_3C00, 0xC000_0000, // MIDI 2.0 note-on (two words): not passed
                                0x20B0_1540]              // CC 21 64
         XCTAssertEqual(ControllerInput.messages(words), [[0x90, 0x3C, 0x64], [0xC1, 0x05], [0xB0, 0x15, 0x40]])
+        // with the clock on (the app's default): the clock and the transport too, in order
+        let transport: [UInt32] = [0x10FA_0000, 0x10F8_0000, 0x10F2_1002, 0x10FE_0000, 0x10FC_0000, 0x10FB_0000]
+        XCTAssertEqual(ControllerInput.messages(transport, clock: true),
+                       [[0xFA], [0xF8], [0xF2, 0x10, 0x02], [0xFC], [0xFB]], "active sensing (FE) not passed")
+        XCTAssertEqual(ControllerInput.messages(words, clock: true),
+                       [[0x90, 0x3C, 0x64], [0xF8], [0xC1, 0x05], [0xB0, 0x15, 0x40]])
         // the FM-1 is never a controller: RemoteMidi.c's rule, and the website's name test where it can't look
         XCTAssertEqual(rfme_fm1_candidate(1, Int32(bitPattern: 0x1209_0001), "", "Port 1"), 1)
         XCTAssertEqual(rfme_fm1_candidate(1, 0x1234_5678, "FM-1", "FM-1"), 0, "a USB device: its IDs decide")
@@ -179,5 +185,27 @@ final class MidiMapTests: XCTestCase {
 
     static func tempFile() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("rfm-midimap-\(UUID().uuidString).json")
+    }
+}
+
+/// a controller's clock and transport reach the firmware (the echo core sends back what it gets), as the app's
+/// ControllerInput passes them (rfme_midi_in straight to the firmware)
+final class ControllerClockTests: XCTestCase {
+    func testClockAndTransportReachTheFirmware() {
+        let e = rfme_new(nil)!
+        defer { rfme_free(e) }
+        XCTAssertEqual(rfme_test_load_echo(e), 1)
+        XCTAssertEqual(rfme_boot(e, nil, 0), 1)
+        rfme_set_clock(e, Int32(RFME_CLOCK_CALLER))
+        rfme_midi_out_enable(e, 2)
+        for m: [UInt8] in [[0xFA], [0xF8], [0xF8], [0xFC]] {
+            XCTAssertEqual(m.withUnsafeBufferPointer { rfme_midi_in(e, $0.baseAddress, UInt32($0.count), 1) }, 1)
+        }
+        var a = rfme_audio_t()
+        rfme_run_ms(e, 50, &a)
+        var got: [UInt8] = []
+        var p: UInt32 = 0
+        while rfme_midi_out_take(e, &p) != 0 { got.append(UInt8(truncatingIfNeeded: p >> 8)) }
+        XCTAssertEqual(got, [0xFA, 0xF8, 0xF8, 0xFC], "the firmware saw the transport and the clock, in order")
     }
 }

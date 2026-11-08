@@ -4,8 +4,9 @@
 // sources the user picked: all (the default), none, or one (by its unique ID; remembered, also while it is away).
 // Never the FM-1 (RemoteMidi.c's rule, rfme_fm1_candidate; a source with no device: the website's name test) and never
 // a source `exclude` claims (the OMX-27 while it is in REMOTE mode). Channel messages go to the engine as host MIDI
-// (rfme_midi_in: learn, the learned map, notes play keys, the rest to the firmware); SysEx, clock and the other system
-// messages don't. Reconnects when the MIDI setup changes (notifications on the main thread, as MIDISetupWatcher).
+// (rfme_midi_in: learn, the learned map, notes play keys, the rest to the firmware); with clockIn (on unless turned
+// off) the clock, start, continue, stop and song position go straight to the firmware too (an external clock: a
+// Launchkey's, a drum machine's), as the AU's host clock does; SysEx and the other system messages don't. Reconnects when the MIDI setup changes (notifications on the main thread, as MIDISetupWatcher).
 
 import Foundation
 import Observation
@@ -41,6 +42,16 @@ public final class ControllerInput {
     }
 
     static let selectionKey = "rfm1.midiInput"
+    static let clockKey = "rfm1.midiClockIn"
+
+    /// the controllers' clock and transport (F8 FA FB FC, F2) passed to the firmware
+    public var clockIn: Bool {
+        didSet {
+            guard clockIn != oldValue else { return }
+            defaults.set(clockIn, forKey: Self.clockKey)
+            sink.clock = clockIn
+        }
+    }
 
     /// the sources that can be picked (not the FM-1, not excluded), as CoreMIDI lists them
     public private(set) var sources: [Source] = []
@@ -65,7 +76,9 @@ public final class ControllerInput {
     public init(host: (any PanelEngineHost)?, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         selection = Selection(stored: defaults.string(forKey: Self.selectionKey))
+        clockIn = defaults.object(forKey: Self.clockKey) as? Bool ?? true
         sink.set(host)
+        sink.clock = clockIn
         #if canImport(CoreMIDI)
         // (both blocks are @Sendable: CoreMIDI calls them on its own threads, and a block made here without it would be
         // main-actor isolated, which Swift 6 checks at run time: the app stopped at the first message)
@@ -78,7 +91,8 @@ public final class ControllerInput {
         if client != 0 {
             let s = sink
             let ps = MIDIInputPortCreateWithProtocol(client, "RemoteFM1 controllers in" as CFString, ._1_0, &port) { @Sendable list, _ in
-                for p in list.unsafeSequence() { Self.decode(p.words()) { s.send($0, $1) } }
+                let clock = s.clock
+                for p in list.unsafeSequence() { Self.decode(p.words(), clock: clock) { s.send($0, $1) } }
             }
             if ps != noErr { port = 0 }
         }
@@ -126,8 +140,10 @@ public final class ControllerInput {
 
     // MARK: the messages
 
-    /// MIDI 1.0 UMP words -> channel messages (status, then 1 or 2 data bytes); every other message type is left out
-    public nonisolated static func decode<S: Sequence>(_ words: S, _ emit: (UnsafePointer<UInt8>, Int) -> Void)
+    /// MIDI 1.0 UMP words -> channel messages (status, then 1 or 2 data bytes); with clock, also the clock and the
+    /// transport (F8 clock, FA start, FB continue, FC stop, F2 song position); every other message type is left out
+    public nonisolated static func decode<S: Sequence>(_ words: S, clock: Bool = false,
+                                                      _ emit: (UnsafePointer<UInt8>, Int) -> Void)
     where S.Element == UInt32 {
         var skip = 0
         for w in words {
@@ -137,7 +153,13 @@ public final class ControllerInput {
             }
             let mt = Int(w >> 28)
             skip = umpWords[mt] - 1
-            if mt == 2 {                                // (MIDI 1.0 channel voice)
+            if mt == 1, clock {                         // (system common and real time)
+                let st = UInt8(truncatingIfNeeded: w >> 16)
+                if st == 0xF8 || st == 0xFA || st == 0xFB || st == 0xFC || st == 0xF2 {
+                    var b = (st, UInt8(truncatingIfNeeded: w >> 8) & 0x7F, UInt8(truncatingIfNeeded: w) & 0x7F)
+                    withUnsafeBytes(of: &b) { emit($0.baseAddress!.assumingMemoryBound(to: UInt8.self), st == 0xF2 ? 3 : 1) }
+                }
+            } else if mt == 2 {                         // (MIDI 1.0 channel voice)
                 let st = UInt8(truncatingIfNeeded: w >> 16)
                 if st >= 0x80 && st < 0xF0 {
                     var b = (st, UInt8(truncatingIfNeeded: w >> 8) & 0x7F, UInt8(truncatingIfNeeded: w) & 0x7F)
@@ -150,9 +172,9 @@ public final class ControllerInput {
     private nonisolated static let umpWords = [1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4]   // by message type
 
     /// decode, as arrays (tests)
-    public nonisolated static func messages(_ words: [UInt32]) -> [[UInt8]] {
+    public nonisolated static func messages(_ words: [UInt32], clock: Bool = false) -> [[UInt8]] {
         var out: [[UInt8]] = []
-        decode(words) { out.append(Array(UnsafeBufferPointer(start: $0, count: $1))) }
+        decode(words, clock: clock) { out.append(Array(UnsafeBufferPointer(start: $0, count: $1))) }
         return out
     }
 
@@ -166,10 +188,17 @@ public final class ControllerInput {
     private final class Sink: @unchecked Sendable {
         private let lock = NSLock()
         private weak var host: (any PanelEngineHost)?
+        private var clock_ = true
+        var clock: Bool {
+            get { lock.withLock { clock_ } }
+            set { lock.withLock { clock_ = newValue } }
+        }
         func set(_ h: (any PanelEngineHost)?) { lock.withLock { host = h } }
+        /// (clock and transport: straight to the firmware, not through learn and the map)
         func send(_ b: UnsafePointer<UInt8>, _ n: Int) {
             guard let h = lock.withLock({ host }) else { return }
-            h.withPanelEngine { _ = rfme_midi_in($0, b, UInt32(n), 0) }
+            let direct: Int32 = b[0] >= 0xF0 ? 1 : 0
+            h.withPanelEngine { _ = rfme_midi_in($0, b, UInt32(n), direct) }
         }
     }
 
