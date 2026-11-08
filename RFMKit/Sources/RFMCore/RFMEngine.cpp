@@ -304,6 +304,12 @@ struct rfme final : rfm::HostParams::Panel {
     // (the consumer's)
     uint32_t cEpoch = ~0u, cMaxN = 0;
     uint64_t cLastAt = 0;                   // the last host event's ring position this epoch (stamps never go back)
+    // a host rendering faster than real time without saying so (no offline flag: Koala Sampler's resample): the
+    // renders come in much less wall time than they play. Two in a row (the ring holds about two) and the engine waits as
+    // offline for the core thread (no gaps; it waits only for frames that would be silence); eight at real time: not
+    uint64_t cLastT = 0;                    // the last render's start (mach ticks), its frames
+    uint32_t cLastN = 0, fastRun = 0, slowRun = 0;
+    std::atomic<uint32_t> fastRenders{0};   // (stats) renders made as offline for that
     double cRate = 0;
     bool primed = false;
     uint64_t outBase = 0, outEnd = 0;       // the ring span the last render played (for rfme_midi_out_take_at)
@@ -1093,7 +1099,25 @@ struct rfme final : rfm::HostParams::Panel {
                 if (aux[c])
                     std::memset(aux[c] + from, 0, count * sizeof(float));
         };
-        const bool off = offline.load(std::memory_order_relaxed);
+        {
+            const uint64_t now = mach_absolute_time();
+            if (cLastT && cLastN && rate > 0) {
+                const double wallUs = (double)(now - cLastT) * usPerTick, playUs = (double)cLastN * 1e6 / rate;
+                if (wallUs < 0.5 * playUs) {
+                    if (fastRun < 1000)
+                        fastRun++;
+                    slowRun = 0;
+                } else if (wallUs > 0.8 * playUs && ++slowRun >= 8) {
+                    fastRun = 0;
+                }
+            }
+            cLastT = now;
+            cLastN = n;
+        }
+        const bool fastHost = fastRun >= 2;
+        if (fastHost)
+            fastRenders.fetch_add(1, std::memory_order_relaxed);
+        const bool off = offline.load(std::memory_order_relaxed) || fastHost;
         bool changed = false;
         const uint32_t ep = epoch.load(std::memory_order_acquire);
         if (ep != cEpoch) {                             // (a new stream: primed again, its buffer size learnt again)
