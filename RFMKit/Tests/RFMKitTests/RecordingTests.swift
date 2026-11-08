@@ -53,12 +53,31 @@ final class RecordingTests: XCTestCase {
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("rfm-rec-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        XCTAssertEqual(RecordingFiles.audio(in: root).path, root.path + "/audio/Recordings")
-        XCTAssertEqual(RecordingFiles.videos(in: root).path, root.path + "/Recordings")
+        XCTAssertEqual(RecordingFiles.audio(in: root).path, root.path + "/audio/recordings")
+        XCTAssertEqual(RecordingFiles.videos(in: root).path, root.path + "/recordings")
+        XCTAssertEqual(RecordingFiles.screenshots(in: root).path, root.path + "/screenshots")
         let dir = RecordingFiles.videos(in: root)
         let a = RecordingFiles.newFile(dir, "take", "mp4")
         XCTAssertEqual(a.lastPathComponent, "take.mp4")
         try Data().write(to: a)
         XCTAssertEqual(RecordingFiles.newFile(dir, "take", "mp4").lastPathComponent, "take 2.mp4")
+    }
+
+    /// the first test build's Recordings and audio/Recordings: renamed lowercase, the files kept
+    func testOldFoldersLowercased() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("rfm-rec-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        for d in ["Recordings", "audio/Recordings"] {
+            try fm.createDirectory(at: root.appendingPathComponent(d), withIntermediateDirectories: true)
+            try Data([1]).write(to: root.appendingPathComponent("\(d)/take.wav"))
+        }
+        RecordingFiles.lowercaseOldFolders(in: root)
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: root.path).filter { !$0.hasPrefix(".") }.sorted(), ["audio", "recordings"])
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: root.appendingPathComponent("audio").path), ["recordings"])
+        XCTAssertTrue(fm.fileExists(atPath: RecordingFiles.videos(in: root).appendingPathComponent("take.wav").path))
+        XCTAssertTrue(fm.fileExists(atPath: RecordingFiles.audio(in: root).appendingPathComponent("take.wav").path))
+        RecordingFiles.lowercaseOldFolders(in: root)            // (again: nothing to do)
+        XCTAssertTrue(fm.fileExists(atPath: RecordingFiles.videos(in: root).appendingPathComponent("take.wav").path))
     }
 }

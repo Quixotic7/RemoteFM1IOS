@@ -37,6 +37,7 @@ final class Recorder {
         self.feed = feed
         self.defaults = defaults
         settings = RecordingSettings(defaults: defaults)
+        DispatchQueue.global(qos: .utility).async { RecordingFiles.lowercaseOldFolders() }
     }
 
     var screenAvailable: Bool { RPScreenRecorder.shared().isAvailable }
@@ -88,13 +89,7 @@ final class Recorder {
             cameraSession = cam.session
         }
         if t.screen != nil {
-            let r = RPScreenRecorder.shared()
-            r.isMicrophoneEnabled = false
-            r.isCameraEnabled = false
-            let err: Error? = await withCheckedContinuation { c in
-                r.startCapture(handler: t.screenFrame(), completionHandler: { e in c.resume(returning: e) })
-            }
-            if let err {
+            if let err = await SystemCalls.startScreenCapture(t.screenFrame()) {
                 await stopStreams(t)
                 t.discard()
                 return show("Screen recording didn't start: \(err.localizedDescription)", .bad)
@@ -119,26 +114,22 @@ final class Recorder {
         guard !files.isEmpty else { return show("Nothing was recorded.", .bad) }
         let videos = files.filter { $0.pathExtension == "mp4" }
         if videos.isEmpty, settings.screen || settings.camera {
-            return show("The video didn't record; the sound is saved in RemoteFM1 › audio › Recordings.", .bad)
+            return show("The video didn't record; the sound is saved in RemoteFM1 › audio › recordings.", .bad)
         }
         if settings.copyToPhotos, !videos.isEmpty {
             let moved = await Self.toPhotos(videos, video: true)
             let kept = files.count - moved
             show(moved == videos.count && kept == 0 ? "Saved to Photos." :
-                 moved > 0 ? "Video saved to Photos; the sound is in RemoteFM1 › audio › Recordings." :
-                 "Photos didn't take it: saved in RemoteFM1 › Recordings.", moved > 0 ? .ok : .bad)
+                 moved > 0 ? "Video saved to Photos; the sound is in RemoteFM1 › audio › recordings." :
+                 "Photos didn't take it: saved in RemoteFM1 › recordings.", moved > 0 ? .ok : .bad)
         } else {
-            show(videos.isEmpty ? "Saved in RemoteFM1 › audio › Recordings." : "Saved in RemoteFM1 › Recordings.", .ok)
+            show(videos.isEmpty ? "Saved in RemoteFM1 › audio › recordings." : "Saved in RemoteFM1 › recordings.", .ok)
         }
     }
 
     private func stopStreams(_ t: Take) async {
         player.setOutputTap(nil)
-        if t.screen != nil, RPScreenRecorder.shared().isRecording {
-            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                RPScreenRecorder.shared().stopCapture { _ in c.resume() }
-            }
-        }
+        if t.screen != nil, RPScreenRecorder.shared().isRecording { await SystemCalls.stopScreenCapture() }
         if let cam = t.cameraSource { await cam.stop(on: t.q) }
         cameraSession = nil
     }
@@ -163,13 +154,13 @@ final class Recorder {
         guard let png else { return show("No screen to take.", .bad) }
         let name = RecordingFiles.name(firmware: player.current?.name ?? "RemoteFM1",
                                        tag: settings.screenshot == .raw ? "240" : "")
-        let url = RecordingFiles.newFile(RecordingFiles.videos(), name, "png")
+        let url = RecordingFiles.newFile(RecordingFiles.screenshots(), name, "png")
         do { try png.write(to: url) } catch { return show("Couldn't save the screenshot: \(error.localizedDescription)", .bad) }
         if settings.copyToPhotos {
             show(await Self.toPhotos([url], video: false) == 1 ? "Screenshot saved to Photos." :
-                 "Photos didn't take it: saved in RemoteFM1 › Recordings.", .ok)
+                 "Photos didn't take it: saved in RemoteFM1 › screenshots.", .ok)
         } else {
-            show("Screenshot saved in RemoteFM1 › Recordings.", .ok)
+            show("Screenshot saved in RemoteFM1 › screenshots.", .ok)
         }
     }
 
@@ -190,9 +181,7 @@ final class Recorder {
         var n = 0
         for u in files {
             do {
-                try await PHPhotoLibrary.shared().performChanges {
-                    PHAssetCreationRequest.forAsset().addResource(with: video ? .video : .photo, fileURL: u, options: nil)
-                }
+                try await SystemCalls.addToPhotos(u, video: video)
                 try? FileManager.default.removeItem(at: u)
                 n += 1
             } catch {
@@ -206,6 +195,33 @@ final class Recorder {
         note = text
         feed.toast.show(text, tone)
         log.info("recording: \(text, privacy: .public)")
+    }
+}
+
+// MARK: - system calls
+
+/// calls whose callbacks come on the system's own queues, made outside the main actor: a callback written inside it
+/// asserts it runs there and stops the app (2026-11-07 on a phone: Photos' changes queue, ReplayKit's reply on stop)
+enum SystemCalls {
+    static func startScreenCapture(_ frames: @escaping (CMSampleBuffer, RPSampleBufferType, Error?) -> Void) async -> Error? {
+        let r = RPScreenRecorder.shared()
+        r.isMicrophoneEnabled = false
+        r.isCameraEnabled = false
+        return await withCheckedContinuation { c in
+            r.startCapture(handler: frames) { e in c.resume(returning: e) }
+        }
+    }
+
+    static func stopScreenCapture() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            RPScreenRecorder.shared().stopCapture { _ in c.resume() }
+        }
+    }
+
+    static func addToPhotos(_ u: URL, video: Bool) async throws {
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetCreationRequest.forAsset().addResource(with: video ? .video : .photo, fileURL: u, options: nil)
+        }
     }
 }
 

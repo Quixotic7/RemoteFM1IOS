@@ -516,13 +516,7 @@ struct MainScreen: View {
         case .midi: midiPage
         case .midiInput: midiInputPage
         case .recording:
-            RecordingPage(recorder: recorder, back: { page = .midi }) { work in
-                withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(450))     // (the sheet gone: not in the picture)
-                    await work()
-                }
-            }
+            RecordingPage(recorder: recorder, back: { page = nil }) { work in closeSheet(then: work) }
         case .keyChannel:
             SheetPage("Keys from MIDI", backTitle: "MIDI & audio", back: { page = .midi }) {
                 KeyChannelList(channel: Binding(get: { player.midiSettings.keyChannel },
@@ -740,6 +734,22 @@ struct MainScreen: View {
                     SheetRow("Use this FM-1", chevron: false) { controller.start(); done() }
                 }
                 SheetRow("Bluetooth…", divider: false) { done(); showBluetooth = true }
+                Text("RECORDING").font(RFMFonts.ui(11, 700)).tracking(1.2).foregroundStyle(Palette.sheetMuted)
+                    .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
+                if recorder.isRecording {
+                    SheetRow("Stop recording", chevron: false) { done(); Task { await recorder.stop() } }
+                } else {
+                    SheetRow("Record", value: recorder.settings.canRecord ? recorder.settings.shortSummary : "nothing on",
+                             chevron: false) { done(); Task { await recorder.start() } }
+                        .disabled(!recorder.settings.canRecord || recorder.busy)
+                }
+                SheetRow("Take screenshot", value: recorder.settings.screenshot == .raw ? "FM-1 screen" : "whole screen",
+                         chevron: false) { done(); closeSheet { await recorder.screenshot() } }
+                SheetRow("Recording settings…", divider: false) {
+                    done()
+                    page = .recording
+                    withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = true }
+                }
             }
             .frame(width: 290)
             .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Palette.sheetSurface)
@@ -748,6 +758,16 @@ struct MainScreen: View {
             .padding(.leading, 14)
             .padding(.top, 54)
             .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topLeading)))
+        }
+    }
+
+    /// the sheet (and the quick menu) closed, then `work` (a screenshot without them in it, a recording started)
+    private func closeSheet(then work: @escaping @MainActor () async -> Void) {
+        let open = ui.sheetOpen
+        withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false }
+        Task {
+            try? await Task.sleep(for: .milliseconds(open ? 450 : 200))
+            await work()
         }
     }
 
@@ -1166,8 +1186,8 @@ struct MainScreen: View {
             }
             if let h = AudioRoute.hint(player.outputs) { SheetNote(h) }
             SheetList {
-                SheetToggle("Play alongside other apps", on: Binding(get: { player.mixWithOthers }, set: { player.mixWithOthers = $0 }))
-                SheetRow("Recording", value: recorder.isRecording ? "Recording" : "", divider: false) { page = .recording }
+                SheetToggle("Play alongside other apps", on: Binding(get: { player.mixWithOthers }, set: { player.mixWithOthers = $0 }),
+                            divider: false)
             }
             .padding(.top, 14)
             SheetNote("Play alongside other apps: a camera or music app no longer stops the sound, so the firmware keeps "

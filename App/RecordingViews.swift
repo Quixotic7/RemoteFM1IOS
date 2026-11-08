@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// Recording's page (Settings › MIDI & audio › Recording), the badge on the faceplate while it records (the time, Stop)
+// Recording's page (the quick menu's Recording settings…: the top-left chip), the badge on the faceplate while it records (the time, Stop)
 // and the camera's preview in the corner.
 
 import AVFoundation
@@ -15,7 +15,7 @@ struct RecordingPage: View {
 
     var body: some View {
         let s = $recorder.settings
-        SheetPage("Recording", backTitle: "MIDI & audio", back: back) {
+        SheetPage("Recording", back: back) {
             SheetList {
                 SheetToggle("Audio", on: s.audio)
                 SheetToggle("Screen", on: s.screen)
@@ -59,9 +59,9 @@ struct RecordingPage: View {
             }
             SheetNote(recorder.settings.copyToPhotos
                       ? "Videos and screenshots go to Photos (it asks the first time). Sound alone stays in RemoteFM1 › "
-                        + "audio › Recordings, where firmwares can load it as a sample."
-                      : "Videos and screenshots are saved in the Files app: RemoteFM1 › Recordings. Sound alone goes to "
-                        + "RemoteFM1 › audio › Recordings, where firmwares can load it as a sample.")
+                        + "audio › recordings, where firmwares can load it as a sample."
+                      : "In the Files app: videos in RemoteFM1 › recordings, screenshots in RemoteFM1 › screenshots, and "
+                        + "sound alone in RemoteFM1 › audio › recordings, where firmwares can load it as a sample.")
             if !recorder.note.isEmpty { SheetNote(recorder.note) }
         }
     }
@@ -137,13 +137,20 @@ struct CameraPreview: UIViewRepresentable {
             let c = AVCaptureDevice.RotationCoordinator(device: d, previewLayer: v.preview)
             v.coordinator = c
             v.preview.connection?.videoRotationAngle = c.videoRotationAngleForHorizonLevelPreview
-            v.observation = c.observe(\.videoRotationAngleForHorizonLevelPreview) { [weak v] c, _ in
-                let a = c.videoRotationAngleForHorizonLevelPreview
-                DispatchQueue.main.async { v?.preview.connection?.videoRotationAngle = a }
-            }
+            let layer = v.preview
+            v.observation = Self.follow(c) { a in layer.connection?.videoRotationAngle = a }
         }
         return v
     }
 
     func updateUIView(_ v: PreviewView, context: Context) {}
+
+    /// the preview turned with the phone (made outside the main actor: the change may come on another thread)
+    nonisolated static func follow(_ c: AVCaptureDevice.RotationCoordinator,
+                                   _ apply: @escaping @MainActor (CGFloat) -> Void) -> NSKeyValueObservation {
+        c.observe(\.videoRotationAngleForHorizonLevelPreview) { c, _ in
+            let a = c.videoRotationAngleForHorizonLevelPreview
+            DispatchQueue.main.async { MainActor.assumeIsolated { apply(a) } }
+        }
+    }
 }

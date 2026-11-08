@@ -904,15 +904,20 @@ so the FM-1's heartbeat stopped. Now (CorePlayer):
 - **Play alongside other apps** (MIDI & audio, off by default, `rfm1.mixWithOthers`): the session mixes, so a camera
   or music app doesn't stop it. The lock screen's Now Playing controls don't show while it's on.
 
-Recording (MIDI & audio › Recording; RFMKit Recording.swift, App/Recorder.swift, App/RecordingViews.swift), the app only:
+Recording (the quick menu, the top-left chip: Record, Take screenshot, Recording settings…; RFMKit Recording.swift,
+App/Recorder.swift, App/RecordingViews.swift), the app only:
 - Audio (on), Screen (ReplayKit), Camera (front or rear, 0.5x-3x). The sound is the player's output tap, never the
   microphone. With a picture it goes into the video (MP4, H.264 and AAC, timed by the host clock); Screen and Camera
-  both on make two videos of one take. Sound alone is a 24-bit WAV in RemoteFM1/audio/Recordings, where firmwares
-  read samples; videos and screenshots go to RemoteFM1/Recordings, or to Photos with Copy to Photos.
+  both on make two videos of one take. Sound alone is a 24-bit WAV in RemoteFM1/audio/recordings, where firmwares
+  read samples; videos go to RemoteFM1/recordings and screenshots to RemoteFM1/screenshots (lowercase; the first test
+  build's Recordings folders are renamed), or to Photos with Copy to Photos.
 - The camera session has no audio input and leaves the app's audio session alone, so recording never stops the sound.
 - Screenshots: the whole screen, or the firmware's raw 240x240 screen.
 - The camera and Photos ask for permission only when they're first used. Recording stops when the app leaves the front.
 - A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview under it.
-- Tests: RecordingTests (settings, outputs, names), AudioRestartTests (an interruption, the tap across a restart),
+- Callbacks from the system (Photos' changes, ReplayKit's stop, the camera preview's rotation) are written outside
+  the main actor (Recorder.swift's SystemCalls): written inside it, Swift 6 checks they run on the main thread and
+  stopped the app on the phone (the first test build's crashes on stop and with Copy to Photos).
+- Tests: RecordingTests (settings, outputs, names, the old folders renamed), AudioRestartTests (an interruption, the tap across a restart),
   TapLevelTests (a note heard in the tap). The screen and camera need a device: the simulator has no camera and
   ReplayKit gives it no frames.
