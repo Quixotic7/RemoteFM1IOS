@@ -251,7 +251,11 @@ struct AUSheet: View {
     }
 
     private var firmwarePage: some View {
-        let builtIn = model.cores.filter { !$0.imported }, imported = model.cores.filter(\.imported)
+        // (as the app's: only each firmware's newest version, the one playing kept; of two of the same version, the one
+        // added last: FirmwareListing)
+        let added = Dictionary(FirmwareCatalog.shared.entries.map { ($0.sha256, $0.added) }, uniquingKeysWith: max)
+        let shown = FirmwareListing.visible(model.cores, selected: model.status.coreKey, added: added)
+        let builtIn = shown.filter { !$0.imported }, imported = shown.filter(\.imported)
         return SheetPage(model.status.coreName.isEmpty ? "Firmware" : model.status.coreName, back: { model.page = nil }) {
             if let c = model.current {
                 FirmwareInfoCard(info: FirmwareInfo.lookup(c, details: model.details), running: model.status.core.booted) { u, done in
