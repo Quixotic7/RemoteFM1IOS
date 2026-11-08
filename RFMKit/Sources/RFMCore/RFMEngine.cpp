@@ -306,8 +306,11 @@ struct rfme final : rfm::HostParams::Panel {
     uint64_t cLastAt = 0;                   // the last host event's ring position this epoch (stamps never go back)
     // a host rendering faster than real time without saying so (no offline flag: Koala Sampler's resample): the
     // renders come in much less wall time than they play. Two in a row (the ring holds about two) and the engine waits as
-    // offline for the core thread (no gaps; it waits only for frames that would be silence); eight at real time: not
-    uint64_t cLastT = 0;                    // the last render's start (mach ticks), its frames
+    // offline for the core thread (no gaps; it waits only for frames that would be silence); eight at real time: not.
+    // The host's pace is the time between the end of one render and the start of the next: the engine's own waits
+    // left out (2026-11-07: with a heavy firmware they made the renders look real time, the engine stopped waiting and
+    // Koala's resample broke up a few seconds in)
+    uint64_t cLastT = 0;                    // the last render's end (mach ticks), its frames
     uint32_t cLastN = 0, fastRun = 0, slowRun = 0;
     std::atomic<uint32_t> fastRenders{0};   // (stats) renders made as offline for that
     double cRate = 0;
@@ -1099,6 +1102,10 @@ struct rfme final : rfm::HostParams::Panel {
                 if (aux[c])
                     std::memset(aux[c] + from, 0, count * sizeof(float));
         };
+        struct EndStamp {                               // (the render's end, on every way out)
+            uint64_t &t;
+            ~EndStamp() { t = mach_absolute_time(); }
+        } endStamp{cLastT};
         {
             const uint64_t now = mach_absolute_time();
             if (cLastT && cLastN && rate > 0) {
@@ -1111,7 +1118,6 @@ struct rfme final : rfm::HostParams::Panel {
                     fastRun = 0;
                 }
             }
-            cLastT = now;
             cLastN = n;
         }
         const bool fastHost = fastRun >= 2;
@@ -2019,5 +2025,6 @@ int rfme_param_persist(rfme_t *e, char *name, uint32_t n, int32_t *min, int32_t 
 }
 
 void rfme_test_frame_stall(rfme_t *e, uint32_t us) { e->stallUs = us; }
+uint32_t rfme_test_fast_renders(rfme_t *e) { return e->fastRenders.load(std::memory_order_relaxed); }
 
 } // extern "C"

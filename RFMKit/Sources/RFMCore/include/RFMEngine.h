@@ -390,6 +390,8 @@ int rfme_param_read(rfme_t *e, const char *name, int32_t *value);
 // from the next rfme_load / rfme_power_cycle on, every frame() of the core takes `us` microseconds longer (a busy
 // wait on the clock's thread: a stand-in for an interpreted firmware's screen redraw); 0: off
 void rfme_test_frame_stall(rfme_t *e, uint32_t us);
+// renders made as offline because the host pulled faster than real time (the fast-host check), since rfme_new
+uint32_t rfme_test_fast_renders(rfme_t *e);
 // core threads alive in this process (each engine with a clock run has one until rfme_free)
 int rfme_test_core_threads(void);
 // the calling thread as a real-time thread with this period (a test's stand-in for an audio callback); 1: done
