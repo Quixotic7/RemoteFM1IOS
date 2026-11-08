@@ -5,9 +5,10 @@
 //   Audio        the app's sound (no microphone)                                      on by default
 //   Screen       the app's screen, as a video (ReplayKit)                             off
 //   Camera       the front or rear camera at a zoom, as a video                       off
-// With a picture (screen or camera) the sound goes into each video; Screen and Camera both on make two videos of the
-// same take. Audio alone is a WAV in RemoteFM1/audio/recordings (where firmwares read samples, so a sampler can load
-// it); videos go to RemoteFM1/recordings and screenshots to RemoteFM1/screenshots (the folders lowercase, the owner's
+//   Microphone   with Audio: the default input too (the built-in mic, or an interface's)  on
+// Each sound is its own WAV in RemoteFM1/audio/recordings (where firmwares read samples, so a sampler can load it):
+// "<take> app.wav" and "<take> mic.wav". With a picture (screen or camera) they're also mixed into each video (RecordingMux,
+// at the end of the take); Screen and Camera both on make two videos of the same take; videos go to RemoteFM1/recordings and screenshots to RemoteFM1/screenshots (the folders lowercase, the owner's
 // call), or to Photos with Copy to Photos (the file kept only if Photos won't take it). Screenshots: the whole screen,
 // or the firmware's raw 240x240 screen (for development).
 // Permissions are asked only when they're needed: the camera at the first camera recording, Photos at the first copy.
@@ -27,6 +28,10 @@ public struct RecordingSettings: Equatable, Sendable {
     public var zoom = 1.0
     public var copyToPhotos = false
     public var screenshot: Screenshot = .screen
+    /// with Audio: the microphone (the default input) too
+    public var microphone = true
+    /// the camera's picture in a corner while it records (never in a screen video)
+    public var cameraPreview = false
 
     public static let key = "rfm1.recording"
     public static let zooms: [Double] = [0.5, 1, 2, 3]
@@ -42,11 +47,14 @@ public struct RecordingSettings: Equatable, Sendable {
         zoom = d["zoom"] as? Double ?? 1
         copyToPhotos = d["copyToPhotos"] as? Bool ?? false
         screenshot = (d["screenshot"] as? String).flatMap(Screenshot.init) ?? .screen
+        microphone = d["microphone"] as? Bool ?? true
+        cameraPreview = d["cameraPreview"] as? Bool ?? false
     }
 
     public func save(_ defaults: UserDefaults) {
         defaults.set(["audio": audio, "screen": screen, "camera": camera, "cameraSide": cameraSide.rawValue,
-                      "zoom": zoom, "copyToPhotos": copyToPhotos, "screenshot": screenshot.rawValue], forKey: Self.key)
+                      "zoom": zoom, "copyToPhotos": copyToPhotos, "screenshot": screenshot.rawValue,
+                      "microphone": microphone, "cameraPreview": cameraPreview], forKey: Self.key)
     }
 
     /// what a recording makes
@@ -64,20 +72,25 @@ public struct RecordingSettings: Equatable, Sendable {
         return o
     }
 
+    /// the microphone is recorded (asked for at the first recording)
+    public var recordsMic: Bool { audio && microphone }
+
     /// nothing chosen: no recording to start
     public var canRecord: Bool { !outputs.isEmpty }
 
     /// for the quick menu: "sound", "screen + sound", "camera + screen"
     public var shortSummary: String {
-        let parts = [screen ? "screen" : nil, camera ? "camera" : nil, audio ? "sound" : nil].compactMap { $0 }
+        let parts = [screen ? "screen" : nil, camera ? "camera" : nil, audio ? "sound" : nil,
+                     recordsMic ? "mic" : nil].compactMap { $0 }
         return parts.isEmpty ? "nothing on" : parts.joined(separator: " + ")
     }
 
     /// what Start records, in a few words
     public var summary: String {
         let pics = [screen ? "the screen" : nil, camera ? "the \(cameraSide.rawValue) camera" : nil].compactMap { $0 }
-        if pics.isEmpty { return audio ? "the app's sound" : "nothing" }
-        return pics.joined(separator: " and ") + (audio ? " with the app's sound" : ", no sound")
+        let sound = recordsMic ? "the app's sound and the microphone" : "the app's sound"
+        if pics.isEmpty { return audio ? sound : "nothing" }
+        return pics.joined(separator: " and ") + (audio ? " with \(sound)" : ", no sound")
     }
 }
 

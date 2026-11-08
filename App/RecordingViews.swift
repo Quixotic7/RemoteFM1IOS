@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// Recording's page (the quick menu's Recording settings…: the top-left chip), the badge on the faceplate while it records (the time, Stop)
-// and the camera's preview in the corner.
+// Recording's page (the quick menu's Recording settings…: the top-left chip), the badge on the faceplate while it
+// records (the time, Stop) and the camera's preview, both drawn in a layer screen captures leave out (HiddenFromCapture),
+// so you see them and a screen video doesn't.
 
 import AVFoundation
 import UIKit
@@ -19,6 +20,7 @@ struct RecordingPage: View {
         SheetPage("Recording", back: back) {
             SheetList {
                 SheetToggle("Audio", on: s.audio)
+                if recorder.settings.audio { SheetToggle("Microphone", on: s.microphone) }
                 SheetToggle("Screen", on: s.screen)
                 SheetToggle("Camera", on: s.camera, divider: recorder.settings.camera)
                 if recorder.settings.camera {
@@ -27,15 +29,17 @@ struct RecordingPage: View {
                         recorder.settings.cameraSide = $0 == 0 ? .rear : .front
                     }
                     SheetSegmented("Zoom", options: RecordingSettings.zooms.map(Self.zoomText),
-                                   selected: RecordingSettings.zooms.firstIndex(of: recorder.settings.zoom) ?? 1, divider: false) {
+                                   selected: RecordingSettings.zooms.firstIndex(of: recorder.settings.zoom) ?? 1) {
                         recorder.settings.zoom = RecordingSettings.zooms[$0]
                     }
+                    SheetToggle("Show the camera while recording", on: s.cameraPreview, divider: false)
                 }
             }
             .padding(.top, 12)
-            SheetNote("Audio is the app's own sound, never the microphone. With Screen or Camera on, the sound goes into "
-                      + "the video; both on make two videos of the same take. The camera asks for permission the first "
-                      + "time it records. While the screen records nothing extra shows on it: stop from the top-left menu.")
+            SheetNote("Audio is the app's own sound. Microphone adds your mic (or the audio interface's input): each is "
+                      + "saved as its own WAV, and both are mixed into the videos. Screen and Camera both on make two "
+                      + "videos of the same take. The camera and the mic ask for permission the first time. The Stop "
+                      + "button and the camera's picture show only to you, never in a screen video.")
             SheetButton(recorder.isRecording ? "Stop recording" : "Start recording", accent: !recorder.isRecording) {
                 if recorder.isRecording { Task { await recorder.stop() } } else { closeThen { await recorder.start() } }
             }
@@ -59,10 +63,10 @@ struct RecordingPage: View {
                 SheetToggle("Copy to Photos", on: s.copyToPhotos, divider: false)
             }
             SheetNote(recorder.settings.copyToPhotos
-                      ? "Videos and screenshots go to Photos (it asks the first time). Sound alone stays in RemoteFM1 › "
-                        + "audio › recordings, where firmwares can load it as a sample."
+                      ? "Videos and screenshots go to Photos (it asks the first time). The sounds stay in RemoteFM1 › "
+                        + "audio › recordings, where firmwares can load them as samples."
                       : "In the Files app: videos in RemoteFM1 › recordings, screenshots in RemoteFM1 › screenshots, and "
-                        + "sound alone in RemoteFM1 › audio › recordings, where firmwares can load it as a sample.")
+                        + "the sounds in RemoteFM1 › audio › recordings, where firmwares can load them as samples.")
             if !recorder.note.isEmpty { SheetNote(recorder.note) }
         }
     }
@@ -88,28 +92,34 @@ struct RecordingBadge: View {
 
     private var badge: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            Button { Task { await recorder.stop() } } label: {
-                HStack(spacing: 8) {
-                    Circle().fill(Color.red).frame(width: 10, height: 10)
-                    TimelineView(.periodic(from: .now, by: 1)) { c in
-                        Text(Self.time(c.date.timeIntervalSince(recorder.started ?? c.date)))
-                            .font(RFMFonts.ui(14, 600)).monospacedDigit()
+            HiddenFromCapture {
+                Button { Task { await recorder.stop() } } label: {
+                    HStack(spacing: 8) {
+                        Circle().fill(Color.red).frame(width: 10, height: 10)
+                        TimelineView(.periodic(from: .now, by: 1)) { c in
+                            Text(Self.time(c.date.timeIntervalSince(recorder.started ?? c.date)))
+                                .font(RFMFonts.ui(14, 600)).monospacedDigit()
+                        }
+                        Text("Stop").font(RFMFonts.ui(14, 700))
                     }
-                    Text("Stop").font(RFMFonts.ui(14, 700))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.black.opacity(0.72)))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.black.opacity(0.72)))
+                .buttonStyle(.plain)
+                .disabled(recorder.busy)
+                .accessibilityLabel("Stop recording")
             }
-            .buttonStyle(.plain)
-            .disabled(recorder.busy)
-            .accessibilityLabel("Stop recording")
-            if let s = recorder.cameraSession {
-                CameraPreview(session: s)
-                    .frame(width: 96, height: 128)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.5), lineWidth: 1))
+            .fixedSize()
+            if recorder.settings.cameraPreview, let s = recorder.cameraSession {
+                HiddenFromCapture {
+                    CameraPreview(session: s)
+                        .frame(width: 96, height: 128)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.5), lineWidth: 1))
+                }
+                .frame(width: 96, height: 128)
             }
         }
     }
@@ -218,5 +228,58 @@ struct SavedCard: View {
 
     static func open(_ s: String) {
         if let u = URL(string: s) { UIApplication.shared.open(u) }
+    }
+}
+
+/// content screen captures leave out (ReplayKit, the system's screen recording, screenshots): drawn inside a secure text
+/// field's own layer, the one iOS blanks out of every capture. Sized to its content
+struct HiddenFromCapture<Content: View>: UIViewRepresentable {
+    @ViewBuilder let content: () -> Content
+
+    final class PassThrough: UIView {
+        weak var canvas: UIView?
+        weak var host: UIView?
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        let field = UITextField()
+        var host: UIHostingController<Content>?
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool { false }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> PassThrough {
+        let outer = PassThrough()
+        outer.backgroundColor = .clear
+        let c = context.coordinator
+        c.field.isSecureTextEntry = true
+        c.field.delegate = c
+        // (the field's first subview is the layer captures blank out; without it the content is shown as usual)
+        let canvas = c.field.subviews.first ?? UIView()
+        canvas.subviews.forEach { $0.removeFromSuperview() }
+        canvas.isUserInteractionEnabled = true
+        canvas.backgroundColor = .clear
+        canvas.frame = outer.bounds
+        canvas.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        outer.addSubview(canvas)
+        let h = UIHostingController(rootView: content())
+        h.safeAreaRegions = []
+        h.view.backgroundColor = .clear
+        h.view.frame = canvas.bounds
+        h.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        canvas.addSubview(h.view)
+        c.host = h
+        outer.canvas = canvas
+        outer.host = h.view
+        return outer
+    }
+
+    func updateUIView(_ v: PassThrough, context: Context) { context.coordinator.host?.rootView = content() }
+
+    /// as big as its content (the layer covers only it: touches elsewhere aren't taken)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PassThrough, context: Context) -> CGSize? {
+        context.coordinator.host?.sizeThatFits(in: CGSize(width: proposal.width ?? .infinity,
+                                                          height: proposal.height ?? .infinity))
     }
 }

@@ -291,8 +291,8 @@ struct MainScreen: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(4)
             }
-            if recorder.isRecording && !ui.sheetOpen && !recorder.recordingScreen {   // (not in a screen video)
-                RecordingBadge(recorder: recorder).zIndex(5)
+            if recorder.isRecording && !ui.sheetOpen {
+                RecordingBadge(recorder: recorder).zIndex(5)       // (you see it; a screen video doesn't)
             }
             if !ui.sheetOpen {
                 SavedCard(recorder: recorder, preview: $previewFile)

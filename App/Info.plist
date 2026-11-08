@@ -60,7 +60,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>RemoteFM1 saves your recordings and screenshots to Photos when you turn on Copy to Photos.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Some firmware can take audio in (a microphone or an audio interface), for example to record or process it. RemoteFM1 asks only when you turn a firmware's audio input on.</string>
+	<string>RemoteFM1 records your microphone (or audio interface) beside the app's sound when Microphone is on in Recording, and some firmware can take audio in to record or process it. RemoteFM1 asks only when you record with Microphone on or turn a firmware's audio input on.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

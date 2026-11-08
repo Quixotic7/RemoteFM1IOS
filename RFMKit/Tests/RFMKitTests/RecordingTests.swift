@@ -14,7 +14,8 @@ final class RecordingTests: XCTestCase {
         let s = RecordingSettings(defaults: d)
         XCTAssertEqual(s, RecordingSettings())
         XCTAssertTrue(s.audio)
-        XCTAssertFalse(s.screen || s.camera || s.copyToPhotos)
+        XCTAssertFalse(s.screen || s.camera || s.copyToPhotos || s.cameraPreview)
+        XCTAssertTrue(s.microphone && s.recordsMic)
         XCTAssertEqual(s.outputs, [.audioFile])
 
         var t = s
@@ -23,6 +24,8 @@ final class RecordingTests: XCTestCase {
         t.zoom = 2
         t.copyToPhotos = true
         t.screenshot = .raw
+        t.microphone = false
+        t.cameraPreview = true
         t.save(d)
         XCTAssertEqual(RecordingSettings(defaults: d), t)
     }
@@ -37,7 +40,10 @@ final class RecordingTests: XCTestCase {
         s.audio = true
         s.camera = true
         XCTAssertEqual(s.outputs, [.screenVideo(sound: true), .cameraVideo(sound: true)], "two videos of one take, no WAV")
+        XCTAssertEqual(s.summary, "the screen and the rear camera with the app's sound and the microphone")
+        s.microphone = false
         XCTAssertEqual(s.summary, "the screen and the rear camera with the app's sound")
+        XCTAssertEqual(s.shortSummary, "screen + camera + sound")
         s.screen = false
         s.camera = false
         XCTAssertEqual(s.summary, "the app's sound")

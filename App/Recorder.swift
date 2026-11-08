@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// Recording in the app (RFMKit's Recording.swift has the settings and the file names): the app's sound from the
-// player's output tap (never the microphone), the screen from ReplayKit, the camera from an AVCaptureSession that has no
-// audio input and leaves the app's audio session alone (so the firmware keeps playing and an FM-1 stays linked: a
-// separate camera app took the audio away). Every stream is timed by the host clock, so sound and picture line up.
+// Recording in the app (RFMKit's Recording.swift has the settings and the file names, RecordingMux the mix): the
+// app's sound from the player's output tap, the microphone (the default input: the built-in mic or an interface) from a
+// tap on the player's input (it switches the session to playAndRecord meanwhile), the camera from an AVCaptureSession
+// that leaves the app's audio session alone, the screen from ReplayKit. Each sound is written to its own WAV and each
+// picture to a video of its own as it comes; at the end the sounds are mixed into each video (RecordingMux: the picture
+// copied, not encoded again). Every stream is timed by the host clock, so they line up.
 // A take is written on one queue (Take); the app stops it when it leaves the front (the camera and ReplayKit stop then).
 
 import AVFoundation
@@ -21,11 +23,11 @@ final class Recorder {
     private(set) var isRecording = false
     private(set) var busy = false
     private(set) var started: Date?
-    /// the camera while it records (the preview in the corner)
+    /// the camera while it records (the preview in the corner, when that's on)
     private(set) var cameraSession: AVCaptureSession?
     /// what the last start, stop or screenshot did ("" none)
     private(set) var note = ""
-    /// the screen is in the take: nothing of ours drawn over it meanwhile (the badge, the camera's preview)
+    /// the screen is in the take
     private(set) var recordingScreen = false
 
     /// what was just saved: the card that opens it (Open, Show in Files, Photos); it goes after a while
@@ -53,7 +55,6 @@ final class Recorder {
     }
 
     var screenAvailable: Bool { RPScreenRecorder.shared().isAvailable }
-    var cameraAvailable: Bool { CameraSource.device(.rear) != nil || CameraSource.device(.front) != nil }
 
     // MARK: recording
 
@@ -63,56 +64,56 @@ final class Recorder {
         guard s.canRecord else { return show("Turn on Audio, Screen or Camera first.", .bad) }
         busy = true
         defer { busy = false }
-        if s.camera, !(await Self.cameraAllowed()) {
+        if s.camera, !(await Self.allowed(.video)) {
             return show("RemoteFM1 can't use the camera: allow it in Settings › RemoteFM1 › Camera.", .bad)
         }
         if s.screen, !screenAvailable { return show("Screen recording isn't available here.", .bad) }
-        if s.audio, !player.audioRunning { log.info("recording: the sound is off; the recording is silent until it plays") }
+        var mic = s.recordsMic
+        if mic, !(await Self.allowed(.audio)) {
+            mic = false
+            show("Recording without the microphone: allow it in Settings › RemoteFM1 › Microphone.", .bad)
+        }
+        if s.audio, !player.audioRunning { log.info("recording: the sound is off; the app's track is silent until it plays") }
 
         let name = RecordingFiles.name(firmware: player.current?.name ?? "RemoteFM1")
-        let t = Take(rate: player.outputRate ?? AVAudioSession.sharedInstance().sampleRate)
+        let audioDir = RecordingFiles.audio(), videoDir = RecordingFiles.videos()
+        let t = Take()
         do {
-            for o in s.outputs {
-                switch o {
-                case .audioFile:
-                    try t.openWAV(RecordingFiles.newFile(RecordingFiles.audio(), name, "wav"))
-                case .screenVideo(let sound):
-                    t.screen = try Movie(RecordingFiles.newFile(RecordingFiles.videos(), name + (s.camera ? " screen" : ""), "mp4"),
-                                         sound: sound, rate: t.rate)
-                case .cameraVideo(let sound):
-                    let cam = try CameraSource(side: s.cameraSide, zoom: s.zoom)
-                    t.camera = try Movie(RecordingFiles.newFile(RecordingFiles.videos(), name + (s.screen ? " camera" : ""), "mp4"),
-                                         sound: sound, rate: t.rate, transform: cam.transform)
-                    t.cameraSource = cam
-                }
+            if s.audio { t.app = try WavStem(RecordingFiles.newFile(audioDir, name + (mic ? " app" : ""), "wav")) }
+            if mic { t.mic = try WavStem(RecordingFiles.newFile(audioDir, name + " mic", "wav")) }
+            if s.screen {
+                t.screen = try Movie(RecordingFiles.newFile(videoDir, name + (s.camera ? " screen" : ""), "mp4"), sound: s.audio)
             }
-            // (a video with sound: the sound kept as a WAV too until a video is saved, so a take whose picture
-            // never came still has its sound)
-            if s.audio, !s.outputs.contains(.audioFile) {
-                try t.openWAV(RecordingFiles.newFile(RecordingFiles.audio(), name, "wav"), backup: true)
+            if s.camera {
+                let cap = try CaptureSource(side: s.cameraSide, zoom: s.zoom)
+                t.capture = cap
+                t.camera = try Movie(RecordingFiles.newFile(videoDir, name + (s.screen ? " camera" : ""), "mp4"),
+                                     sound: s.audio, transform: cap.transform)
             }
         } catch {
             t.discard()
             return show("Couldn't start recording: \(error.localizedDescription)", .bad)
         }
-        if t.wantsSound { player.setOutputTap(t.soundTap()) }
-        if let cam = t.cameraSource {
-            cam.start(on: t.q, deliver: t.cameraFrame())
-            cameraSession = cam.session
+        if t.app != nil { player.setOutputTap(t.soundTap()) }
+        if mic {                                        // (the session records too: the sound restarts once)
+            player.setInputTap(t.micTap())
+            player.recordingInput = true
         }
-        if t.screen != nil {
-            if let err = await SystemCalls.startScreenCapture(t.screenFrame()) {
-                await stopStreams(t)
-                t.discard()
-                return show("Screen recording didn't start: \(err.localizedDescription)", .bad)
-            }
+        if let cap = t.capture {
+            cap.start(on: t.q, deliver: t.cameraFrame())
+            cameraSession = cap.session
+        }
+        if t.screen != nil, let err = await SystemCalls.startScreenCapture(t.screenFrame()) {
+            await stopStreams(t)
+            t.discard()
+            return show("Screen recording didn't start: \(err.localizedDescription)", .bad)
         }
         take = t
         started = Date()
         recordingScreen = t.screen != nil
         isRecording = true
-        note = ""
-        log.info("recording: started (\(s.summary, privacy: .public))")
+        if note.hasPrefix("Recording without") == false { note = "" }
+        log.info("recording: started (\(s.summary, privacy: .public)\(mic ? "" : s.recordsMic ? ", no mic" : "", privacy: .public))")
     }
 
     func stop() async {
@@ -124,28 +125,34 @@ final class Recorder {
         take = nil
         started = nil
         await stopStreams(t)
-        let files = await t.finish()
+        if t.screen != nil || t.camera != nil { feed.toast.show("Saving the video…", .neutral, seconds: 30) }
+        let r = await t.finish()
+        feed.toast.hide()
+        let files = r.videos + r.sounds
         guard !files.isEmpty else { return show("Nothing was recorded.", .bad) }
-        let videos = files.filter { $0.pathExtension == "mp4" }
-        if videos.isEmpty, settings.screen || settings.camera {
+        if r.videos.isEmpty, settings.screen || settings.camera {
             return show("The video didn't record; the sound is saved in RemoteFM1 › audio › recordings.", .bad)
         }
-        if settings.copyToPhotos, !videos.isEmpty {
-            let moved = await Self.toPhotos(videos, video: true)
+        let sounds = r.sounds.isEmpty ? "" : r.sounds.count == 1 ? " The sound is in audio › recordings." :
+            " The app's sound and the mic are in audio › recordings."
+        if settings.copyToPhotos, !r.videos.isEmpty {
+            let moved = await Self.toPhotos(r.videos, video: true)
             let left = files.filter { FileManager.default.fileExists(atPath: $0.path) }
-            offer(moved == 0 ? "Photos didn't take it: saved in RemoteFM1 › recordings." :
-                  left.isEmpty ? "Saved to Photos." : "Video saved to Photos; the sound is in RemoteFM1 › audio › recordings.",
+            offer(moved == 0 ? "Photos didn't take it: saved in RemoteFM1 › recordings." : "Saved to Photos." + sounds,
                   left, photos: moved > 0)
         } else {
-            offer(videos.isEmpty ? "Saved in RemoteFM1 › audio › recordings." : "Saved in RemoteFM1 › recordings.", files)
+            offer(r.videos.isEmpty ? "Saved in RemoteFM1 › audio › recordings." : "Saved in RemoteFM1 › recordings." + sounds,
+                  files)
         }
     }
 
     private func stopStreams(_ t: Take) async {
         player.setOutputTap(nil)
+        player.setInputTap(nil)
         if t.screen != nil, RPScreenRecorder.shared().isRecording { await SystemCalls.stopScreenCapture() }
-        if let cam = t.cameraSource { await cam.stop(on: t.q) }
+        if let cap = t.capture { await cap.stop(on: t.q) }
         cameraSession = nil
+        player.recordingInput = false
     }
 
     // MARK: screenshots
@@ -180,10 +187,10 @@ final class Recorder {
 
     // MARK: permissions and Photos
 
-    private static func cameraAllowed() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+    private static func allowed(_ media: AVMediaType) async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: media) {
         case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .video)
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: media)
         default: return false
         }
     }
@@ -252,70 +259,34 @@ enum SystemCalls {
     }
 }
 
+/// a time on the host clock, in seconds (what every stream is timed by)
+private func hostSeconds(_ t: CMTime) -> Double { CMTimeGetSeconds(t) }
+
 // MARK: - one take, written on its queue
 
-/// one recording's files and streams; everything after start runs on `q`
+/// one recording's files and streams; the pictures and the mic arrive on `q`, the app's sound on the tap's thread
 final class Take: @unchecked Sendable {
     let q = DispatchQueue(label: "com.quixotic7.remotefm1.recording", qos: .userInitiated)
-    let rate: Double
+    var app: WavStem?
+    var mic: WavStem?
     var screen: Movie?
     var camera: Movie?
-    var cameraSource: CameraSource?
-    private var wav: AVAudioFile?                      // (written on the tap's thread: under lock)
-    private var wavURL: URL?
-    private let lock = NSLock()
+    var capture: CaptureSource?
     /// ReplayKit's frames: moved to the host clock when theirs is another
     private var screenShift: CMTime?
 
-    init(rate: Double) { self.rate = rate > 0 ? rate : 48000 }
+    /// the player's output tap: the app's sound to its WAV
+    func soundTap() -> CorePlayer.OutputTap { { [self] b, t in app?.write(b, at: Self.host(t)) } }
 
-    var wantsSound: Bool { wavURL != nil || screen?.sound == true || camera?.sound == true }
+    /// the player's input tap: the microphone to its WAV
+    func micTap() -> CorePlayer.OutputTap { { [self] b, t in mic?.write(b, at: Self.host(t)) } }
 
-    /// the WAV: made at the first buffer, at its rate and channels (24-bit)
-    func openWAV(_ url: URL, backup: Bool = false) throws {
-        try Data().write(to: url)                       // (the name taken now)
-        wavURL = url
-        wavBackup = backup
-    }
-    /// the WAV only keeps the sound in case no video is saved
-    private var wavBackup = false
-
-    private func wavFile(for f: AVAudioFormat) -> AVAudioFile? {
-        if let w = wav { return w }
-        guard let u = wavURL, !wavFailed else { return nil }
-        let set: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: f.sampleRate,
-                                  AVNumberOfChannelsKey: f.channelCount, AVLinearPCMBitDepthKey: 24,
-                                  AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false]
-        do {
-            wav = try AVAudioFile(forWriting: u, settings: set, commonFormat: f.commonFormat, interleaved: f.isInterleaved)
-        } catch {
-            wavFailed = true
-            RFMShared.log("recording").error("wav: \(error.localizedDescription, privacy: .public)")
-        }
-        return wav
-    }
-    private var wavFailed = false
-
-    /// the player's output tap: each buffer to the WAV (here, on the tap's thread) and to the videos (on q)
-    func soundTap() -> CorePlayer.OutputTap {
-        { [self] b, t in
-            lock.withLock {
-                if wavURL != nil, let w = wavFile(for: b.format), b.format == w.processingFormat {
-                    try? w.write(from: b)
-                }
-            }
-            guard screen?.sound == true || camera?.sound == true else { return }
-            let pts = t.isHostTimeValid ? CMClockMakeHostTimeFromSystemUnits(t.hostTime) : CMClockGetTime(CMClockGetHostTimeClock())
-            guard let sb = Self.sampleBuffer(b, pts) else { return }
-            q.async { [self] in
-                screen?.appendAudio(sb)
-                camera?.appendAudio(sb)
-            }
-        }
+    static func host(_ t: AVAudioTime) -> Double {
+        hostSeconds(t.isHostTimeValid ? CMClockMakeHostTimeFromSystemUnits(t.hostTime) : CMClockGetTime(CMClockGetHostTimeClock()))
     }
 
     func cameraFrame() -> (CMSampleBuffer) -> Void {
-        { [self] sb in camera?.appendVideo(sb) }       // (already on q: the output's queue)
+        { [self] sb in camera?.append(sb) }            // (already on q: the output's queue)
     }
 
     func screenFrame() -> (CMSampleBuffer, RPSampleBufferType, Error?) -> Void {
@@ -324,70 +295,46 @@ final class Take: @unchecked Sendable {
             q.async { [self] in
                 let pts = CMSampleBufferGetPresentationTimeStamp(sb)
                 if screenShift == nil {             // (host time already: no shift; else the arrival time)
-                    let now = CMClockGetTime(CMClockGetHostTimeClock())
-                    let off = CMTimeSubtract(now, pts)
+                    let off = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), pts)
                     screenShift = abs(CMTimeGetSeconds(off)) > 1 ? off : .zero
                     screen?.orientation = Self.orientation(sb)
                 }
                 guard let shift = screenShift else { return }
-                screen?.appendVideo(shift == .zero ? sb : Self.retimed(sb, by: shift) ?? sb)
+                screen?.append(shift == .zero ? sb : Movie.retimed(sb, by: shift) ?? sb)
             }
         }
     }
 
-    /// the files written
-    func finish() async -> [URL] {
+    /// the videos (each with the sounds mixed in) and the sound files
+    func finish() async -> (videos: [URL], sounds: [URL]) {
         await withCheckedContinuation { c in q.async { c.resume() } }      // (frames still queued go in first)
-        var out: [URL] = []
-        var sound: URL?
-        if let u = wavURL {
-            let wrote = lock.withLock { () -> Bool in
-                let w = wav != nil
-                wav = nil                               // (closes the file)
-                wavURL = nil
-                return w
-            }
-            if wrote { sound = u } else { try? FileManager.default.removeItem(at: u) }
-        }
+        let sounds = [app, mic].compactMap { $0?.close() }
+        var stems: [(url: URL, start: Double)] = []
+        for s in [app, mic] { if let s, let u = s.written, let at = s.start { stems.append((u, at)) } }
+        var videos: [URL] = []
         for m in [screen, camera].compactMap({ $0 }) {
-            if let u = await m.finish() { out.append(u) }
+            guard let pic = await m.finish(), let start = m.start else { continue }
+            let use = m.sound ? stems.map { RecordingMux.Stem($0.url, offset: $0.start - start) } : []
+            do {
+                if use.isEmpty {
+                    try FileManager.default.moveItem(at: pic, to: m.url)
+                } else {
+                    try await RecordingMux.mux(video: pic, stems: use, to: m.url)
+                    try? FileManager.default.removeItem(at: pic)
+                }
+                videos.append(m.url)
+            } catch {
+                RFMShared.log("recording").error("mix: \(error.localizedDescription, privacy: .public); the picture kept alone")
+                try? FileManager.default.removeItem(at: m.url)
+                if (try? FileManager.default.moveItem(at: pic, to: m.url)) != nil { videos.append(m.url) }
+            }
         }
-        if let u = sound {
-            if wavBackup && !out.isEmpty { try? FileManager.default.removeItem(at: u) } else { out.append(u) }
-        }
-        return out
+        return (videos, sounds)
     }
 
     func discard() {
-        lock.withLock { wav = nil }
-        defer { wavURL = nil }
-        if let u = wavURL { try? FileManager.default.removeItem(at: u) }
+        for s in [app, mic] { if let u = s?.close() { try? FileManager.default.removeItem(at: u) } }
         for m in [screen, camera].compactMap({ $0 }) { m.cancel() }
-    }
-
-    // MARK: buffers
-
-    static func sampleBuffer(_ b: AVAudioPCMBuffer, _ pts: CMTime) -> CMSampleBuffer? {
-        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(b.format.sampleRate)),
-                                        presentationTimeStamp: pts, decodeTimeStamp: .invalid)
-        var sb: CMSampleBuffer?
-        guard CMSampleBufferCreate(allocator: nil, dataBuffer: nil, dataReady: false, makeDataReadyCallback: nil, refcon: nil,
-                                   formatDescription: b.format.formatDescription, sampleCount: CMItemCount(b.frameLength),
-                                   sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 0,
-                                   sampleSizeArray: nil, sampleBufferOut: &sb) == noErr, let sb else { return nil }
-        guard CMSampleBufferSetDataBufferFromAudioBufferList(sb, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
-                                                             flags: 0, bufferList: b.audioBufferList) == noErr else { return nil }
-        return sb
-    }
-
-    static func retimed(_ sb: CMSampleBuffer, by shift: CMTime) -> CMSampleBuffer? {
-        var timing = CMSampleTimingInfo(duration: CMSampleBufferGetDuration(sb),
-                                        presentationTimeStamp: CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(sb), shift),
-                                        decodeTimeStamp: .invalid)
-        var out: CMSampleBuffer?
-        CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sb, sampleTimingEntryCount: 1,
-                                              sampleTimingArray: &timing, sampleBufferOut: &out)
-        return out
     }
 
     /// ReplayKit's frame orientation as a rotation for the video
@@ -402,37 +349,88 @@ final class Take: @unchecked Sendable {
     }
 }
 
-// MARK: - a video file
+// MARK: - a sound's WAV
 
-/// an MP4 (H.264, AAC): started at its first frame; sound before that left out
+/// one sound to a 24-bit WAV, made at its first buffer (its rate and channels); when that buffer began (host seconds)
+final class WavStem: @unchecked Sendable {
+    let url: URL
+    private let lock = NSLock()
+    private var file: AVAudioFile?
+    private var failed = false
+    private var first: Double?
+
+    init(_ url: URL) throws {
+        try Data().write(to: url)                       // (the name taken now)
+        self.url = url
+    }
+
+    func write(_ b: AVAudioPCMBuffer, at host: Double) {
+        lock.withLock {
+            if file == nil, !failed {
+                let f = b.format
+                let set: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: f.sampleRate,
+                                          AVNumberOfChannelsKey: f.channelCount, AVLinearPCMBitDepthKey: 24,
+                                          AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+                                          AVLinearPCMIsNonInterleaved: false]
+                do {
+                    file = try AVAudioFile(forWriting: url, settings: set, commonFormat: f.commonFormat, interleaved: f.isInterleaved)
+                    first = host
+                } catch {
+                    failed = true
+                    RFMShared.log("recording").error("wav \(self.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            guard let w = file, b.format == w.processingFormat else { return }   // (a rate change mid-take: left out)
+            try? w.write(from: b)
+        }
+    }
+
+    /// the file once something was written
+    var written: URL? { lock.withLock { file != nil || first != nil ? url : nil } }
+    var start: Double? { lock.withLock { first } }
+
+    /// closed: the file, or nil (nothing came: removed)
+    @discardableResult
+    func close() -> URL? {
+        lock.withLock {
+            let had = file != nil
+            file = nil
+            if !had { try? FileManager.default.removeItem(at: url) }
+            return had ? url : nil
+        }
+    }
+}
+
+// MARK: - a video's picture
+
+/// the picture alone (H.264) to a hidden file beside `url`, its timeline from the first frame; the sounds are mixed in
+/// at the end (Take.finish)
 final class Movie: @unchecked Sendable {
     let url: URL
     let sound: Bool
     var orientation: CGAffineTransform
+    private let picture: URL
     private let writer: AVAssetWriter
-    private let rate: Double
     private var video: AVAssetWriterInput?
-    private var audio: AVAssetWriterInput?
-    private var start: CMTime?
+    /// the first frame's time (host seconds)
+    private(set) var start: Double?
+    private var first: CMTime?
 
-    init(_ url: URL, sound: Bool, rate: Double, transform: CGAffineTransform = .identity) throws {
+    init(_ url: URL, sound: Bool, transform: CGAffineTransform = .identity) throws {
         self.url = url
         self.sound = sound
-        self.rate = rate
         orientation = transform
-        writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        try? FileManager.default.removeItem(at: url)    // (newFile only named it)
+        picture = url.deletingLastPathComponent().appendingPathComponent(".\(url.deletingPathExtension().lastPathComponent).picture.mp4")
+        try? FileManager.default.removeItem(at: picture)
+        writer = try AVAssetWriter(outputURL: picture, fileType: .mp4)
     }
 
-    func appendVideo(_ sb: CMSampleBuffer) {
+    func append(_ sb: CMSampleBuffer) {
         if video == nil, !begin(sb) { return }
-        guard writer.status == .writing, let v = video, v.isReadyForMoreMediaData else { return }
-        v.append(sb)
-    }
-
-    func appendAudio(_ sb: CMSampleBuffer) {
-        guard let s = start, let a = audio, writer.status == .writing, a.isReadyForMoreMediaData,
-              CMSampleBufferGetPresentationTimeStamp(sb) >= s else { return }
-        a.append(sb)
+        guard writer.status == .writing, let v = video, v.isReadyForMoreMediaData, let f = first,
+              let r = Self.retimed(sb, by: CMTimeSubtract(.zero, f)) else { return }
+        v.append(r)
     }
 
     private func begin(_ sb: CMSampleBuffer) -> Bool {
@@ -445,43 +443,47 @@ final class Movie: @unchecked Sendable {
         guard writer.canAdd(v) else { return false }
         writer.add(v)
         video = v
-        if sound {
-            let a = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 256_000])
-            a.expectsMediaDataInRealTime = true
-            if writer.canAdd(a) { writer.add(a); audio = a }
-        }
         guard writer.startWriting() else { return false }
+        writer.startSession(atSourceTime: .zero)
         let pts = CMSampleBufferGetPresentationTimeStamp(sb)
-        writer.startSession(atSourceTime: pts)
-        start = pts
+        first = pts
+        start = hostSeconds(pts)
         return true
     }
 
-    /// the file, or nil (no frame came, or it failed: removed)
+    /// the picture's file, or nil (no frame came, or it failed: removed)
     func finish() async -> URL? {
-        guard start != nil, writer.status == .writing else { cancel(); return nil }
+        guard first != nil, writer.status == .writing else { cancel(); return nil }
         video?.markAsFinished()
-        audio?.markAsFinished()
         await writer.finishWriting()
-        if writer.status == .completed { return url }
+        if writer.status == .completed { return picture }
         RFMShared.log("recording").error("video: \(self.writer.error?.localizedDescription ?? "failed", privacy: .public)")
-        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: picture)
         return nil
     }
 
     func cancel() {
         if writer.status == .writing { writer.cancelWriting() }
-        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: picture)
+    }
+
+    static func retimed(_ sb: CMSampleBuffer, by shift: CMTime) -> CMSampleBuffer? {
+        var timing = CMSampleTimingInfo(duration: CMSampleBufferGetDuration(sb),
+                                        presentationTimeStamp: CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(sb), shift),
+                                        decodeTimeStamp: .invalid)
+        var out: CMSampleBuffer?
+        CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sb, sampleTimingEntryCount: 1,
+                                              sampleTimingArray: &timing, sampleBufferOut: &out)
+        return out
     }
 }
 
 // MARK: - the camera
 
-/// the front or rear camera at a zoom, no microphone; frames to the take's queue
-final class CameraSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+/// the front or rear camera at a zoom (no microphone: that comes through the player's engine, on the app's clock); it
+/// leaves the app's audio session alone
+final class CaptureSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     let session = AVCaptureSession()
-    let device: AVCaptureDevice
     /// the rotation that makes the video upright as the phone is held now
     let transform: CGAffineTransform
     private let output = AVCaptureVideoDataOutput()
@@ -506,7 +508,6 @@ final class CameraSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
 
     init(side: RecordingSettings.Camera, zoom: Double) throws {
         guard let d = Self.device(side) else { throw RecordingError.noCamera }
-        device = d
         session.automaticallyConfiguresApplicationAudioSession = false     // (the firmware's sound left alone)
         session.beginConfiguration()
         for p in [AVCaptureSession.Preset.hd1920x1080, .high] where session.canSetSessionPreset(p) {
@@ -546,12 +547,12 @@ final class CameraSource: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // (the session's clock to the host clock, which the sound uses)
+        // (the session's clock to the host clock, which the sounds use)
         guard let clock = session.synchronizationClock else { deliver?(sb); return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sb)
         let host = CMSyncConvertTime(pts, from: clock, to: CMClockGetHostTimeClock())
         if CMTimeCompare(host, pts) == 0 { deliver?(sb); return }
-        if let r = Take.retimed(sb, by: CMTimeSubtract(host, pts)) { deliver?(r) }
+        if let r = Movie.retimed(sb, by: CMTimeSubtract(host, pts)) { deliver?(r) }
     }
 }
 

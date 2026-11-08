@@ -321,6 +321,9 @@ public final class CorePlayer {
     @ObservationIgnored private var resetObserver: NSObjectProtocol?
     /// (recording) the app's sound as it plays: a tap on the main mixer, put back on each new engine
     @ObservationIgnored private var outputTap: OutputTap?
+    /// (recording the microphone) a tap on the engine's input while recordingInput is on
+    @ObservationIgnored private var inputTap: OutputTap?
+    @ObservationIgnored private var inputTapOn = false
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
 
@@ -643,7 +646,7 @@ public final class CorePlayer {
 
     private func applyCategory() {
         #if os(iOS)
-        if inputWanted && audioRunning { configurationChangeSoon(); return }   // (playAndRecord: set again on restart)
+        if (inputWanted || recordingInput) && audioRunning { configurationChangeSoon(); return }   // (playAndRecord: set again on restart)
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: mixes ? [.mixWithOthers] : [])
         #endif
     }
@@ -694,6 +697,15 @@ public final class CorePlayer {
 
     // MARK: the output tap (recording)
 
+    /// (recording the microphone) the session records too (playAndRecord, the speaker kept) and the input's tap
+    /// (setInputTap) is on; the sound restarts once to change it
+    public var recordingInput = false {
+        didSet {
+            guard recordingInput != oldValue else { return }
+            if audioRunning { audioConfigurationChanged() }
+        }
+    }
+
     public typealias OutputTap = @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
 
     /// the rate the app plays at now (nil: no sound)
@@ -712,6 +724,27 @@ public final class CorePlayer {
         eng.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: Self.tapBlock(t))
     }
 
+    /// the microphone (the session's input: the built-in mic or an interface's) as it comes, while recordingInput is on;
+    /// set it before turning recordingInput on. Never played out (a tap only)
+    public func setInputTap(_ tap: OutputTap?) {
+        inputTap = tap
+        if tap == nil, inputTapOn, let eng = engine {
+            eng.inputNode.removeTap(onBus: 0)
+            inputTapOn = false
+        }
+    }
+
+    /// (startAudio, before the engine starts)
+    private func installInputTap(_ eng: AVAudioEngine) {
+        #if os(iOS)
+        guard let t = inputTap, recordingInput else { return }
+        let fmt = eng.inputNode.outputFormat(forBus: 0)
+        guard fmt.sampleRate > 0, fmt.channelCount > 0 else { log.error("recording: no input to record"); return }
+        eng.inputNode.installTap(onBus: 0, bufferSize: 1024, format: fmt, block: Self.tapBlock(t))
+        inputTapOn = true
+        #endif
+    }
+
     /// (made outside the main actor: a block made inside it would assert it runs there)
     nonisolated private static func tapBlock(_ t: @escaping OutputTap) -> AVAudioNodeTapBlock { { b, w in t(b, w) } }
 
@@ -720,7 +753,7 @@ public final class CorePlayer {
         do {
             let s = AVAudioSession.sharedInstance()
             // (ain1: recording too while this firmware's input is on; the speaker, not the earpiece)
-            if inputWanted {
+            if inputWanted || recordingInput {
                 try s.setCategory(.playAndRecord, mode: .default,
                                   options: mixes ? [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers]
                                                   : [.defaultToSpeaker, .allowBluetoothA2DP])
@@ -748,6 +781,7 @@ public final class CorePlayer {
         eng.connect(n, to: eng.mainMixerNode, format: fmt)
         #if os(iOS)
         if inputWanted { attachInput(eng) }
+        installInputTap(eng)
         #endif
         do {
             try eng.start()
@@ -824,6 +858,7 @@ public final class CorePlayer {
         configObserver = nil
         if let old = engine {
             if outputTap != nil { old.mainMixerNode.removeTap(onBus: 0) }
+            if inputTapOn { old.inputNode.removeTap(onBus: 0); inputTapOn = false }
             old.stop()
             retired.append(old)                     // (freed on the main thread in a moment, not now)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

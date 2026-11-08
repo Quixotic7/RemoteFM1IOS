@@ -906,18 +906,23 @@ so the FM-1's heartbeat stopped. Now (CorePlayer):
 
 Recording (the quick menu, the top-left chip: Record, Take screenshot, Recording settings…; RFMKit Recording.swift,
 App/Recorder.swift, App/RecordingViews.swift), the app only:
-- Audio (on), Screen (ReplayKit), Camera (front or rear, 0.5x-3x). The sound is the player's output tap, never the
-  microphone. With a picture it goes into the video (MP4, H.264 and AAC, timed by the host clock); Screen and Camera
-  both on make two videos of one take. Sound alone is a 24-bit WAV in RemoteFM1/audio/recordings, where firmwares
-  read samples; videos go to RemoteFM1/recordings and screenshots to RemoteFM1/screenshots (lowercase; the first test
+- Audio (on), Microphone (on, with Audio), Screen (ReplayKit), Camera (front or rear, 0.5x-3x). The app's sound is
+  the player's output tap; the microphone (the session's input: the built-in mic or an interface) a tap on the
+  player's input (CorePlayer.recordingInput: playAndRecord meanwhile; a capture session can't record sound in the
+  simulator). Each is a 24-bit WAV in RemoteFM1/audio/recordings ("<take> app.wav", "<take> mic.wav"), where firmwares
+  read samples. A picture is written alone as it comes; at the end RecordingMux mixes the WAVs into it (each at its own
+  start, the picture copied, AAC), all timed by the host clock. Screen and Camera both on make two videos of one take; videos go to RemoteFM1/recordings and screenshots to RemoteFM1/screenshots (lowercase; the first test
   build's Recordings folders are renamed), or to Photos with Copy to Photos.
 - The camera session has no audio input and leaves the app's audio session alone, so recording never stops the sound.
 - Screenshots: the whole screen, or the firmware's raw 240x240 screen.
 - The camera and Photos ask for permission only when they're first used. Recording stops when the app leaves the front.
-- A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview under it.
+- A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview under it when
+  that's on. Both are drawn inside a secure text field's layer (HiddenFromCapture), which iOS leaves out of every
+  capture: you see them, a screen video doesn't.
 - Callbacks from the system (Photos' changes, ReplayKit's stop, the camera preview's rotation) are written outside
   the main actor (Recorder.swift's SystemCalls): written inside it, Swift 6 checks they run on the main thread and
   stopped the app on the phone (the first test build's crashes on stop and with Copy to Photos).
-- Tests: RecordingTests (settings, outputs, names, the old folders renamed), AudioRestartTests (an interruption, the tap across a restart),
+- Tests: RecordingTests (settings, outputs, names, the old folders renamed), RecordingMuxTests (two stems at their
+  offsets, mono and another rate, one that began before the picture), AudioRestartTests (an interruption, the tap across a restart),
   TapLevelTests (a note heard in the tap). The screen and camera need a device: the simulator has no camera and
   ReplayKit gives it no frames.
