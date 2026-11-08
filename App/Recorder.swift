@@ -25,6 +25,18 @@ final class Recorder {
     private(set) var cameraSession: AVCaptureSession?
     /// what the last start, stop or screenshot did ("" none)
     private(set) var note = ""
+    /// the screen is in the take: nothing of ours drawn over it meanwhile (the badge, the camera's preview)
+    private(set) var recordingScreen = false
+
+    /// what was just saved: the card that opens it (Open, Show in Files, Photos); it goes after a while
+    struct Saved: Identifiable, Equatable {
+        let id = UUID()
+        let text: String
+        /// the files still here (not moved to Photos), the first opened by Open
+        let files: [URL]
+        let inPhotos: Bool
+    }
+    var saved: Saved?
 
     @ObservationIgnored private let player: CorePlayer
     @ObservationIgnored private let feed: PanelFeed
@@ -97,6 +109,7 @@ final class Recorder {
         }
         take = t
         started = Date()
+        recordingScreen = t.screen != nil
         isRecording = true
         note = ""
         log.info("recording: started (\(s.summary, privacy: .public))")
@@ -107,6 +120,7 @@ final class Recorder {
         busy = true
         defer { busy = false }
         isRecording = false
+        recordingScreen = false
         take = nil
         started = nil
         await stopStreams(t)
@@ -118,12 +132,12 @@ final class Recorder {
         }
         if settings.copyToPhotos, !videos.isEmpty {
             let moved = await Self.toPhotos(videos, video: true)
-            let kept = files.count - moved
-            show(moved == videos.count && kept == 0 ? "Saved to Photos." :
-                 moved > 0 ? "Video saved to Photos; the sound is in RemoteFM1 › audio › recordings." :
-                 "Photos didn't take it: saved in RemoteFM1 › recordings.", moved > 0 ? .ok : .bad)
+            let left = files.filter { FileManager.default.fileExists(atPath: $0.path) }
+            offer(moved == 0 ? "Photos didn't take it: saved in RemoteFM1 › recordings." :
+                  left.isEmpty ? "Saved to Photos." : "Video saved to Photos; the sound is in RemoteFM1 › audio › recordings.",
+                  left, photos: moved > 0)
         } else {
-            show(videos.isEmpty ? "Saved in RemoteFM1 › audio › recordings." : "Saved in RemoteFM1 › recordings.", .ok)
+            offer(videos.isEmpty ? "Saved in RemoteFM1 › audio › recordings." : "Saved in RemoteFM1 › recordings.", files)
         }
     }
 
@@ -156,11 +170,11 @@ final class Recorder {
                                        tag: settings.screenshot == .raw ? "240" : "")
         let url = RecordingFiles.newFile(RecordingFiles.screenshots(), name, "png")
         do { try png.write(to: url) } catch { return show("Couldn't save the screenshot: \(error.localizedDescription)", .bad) }
-        if settings.copyToPhotos {
-            show(await Self.toPhotos([url], video: false) == 1 ? "Screenshot saved to Photos." :
-                 "Photos didn't take it: saved in RemoteFM1 › screenshots.", .ok)
+        if settings.copyToPhotos, await Self.toPhotos([url], video: false) == 1 {
+            offer("Screenshot saved to Photos.", [], photos: true)
         } else {
-            show("Screenshot saved in RemoteFM1 › screenshots.", .ok)
+            offer(settings.copyToPhotos ? "Photos didn't take it: saved in RemoteFM1 › screenshots."
+                                        : "Screenshot saved in RemoteFM1 › screenshots.", [url])
         }
     }
 
@@ -189,6 +203,19 @@ final class Recorder {
             }
         }
         return n
+    }
+
+    /// the saved card (instead of a toast): it goes after 12 s unless another replaced it
+    private func offer(_ text: String, _ files: [URL], photos: Bool = false) {
+        note = text
+        let s = Saved(text: text, files: files, inPhotos: photos)
+        saved = s
+        UIAccessibility.post(notification: .announcement, argument: text)
+        log.info("recording: \(text, privacy: .public)")
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            if self?.saved?.id == s.id { self?.saved = nil }
+        }
     }
 
     private func show(_ text: String, _ tone: ToastCenter.Tone) {

@@ -26,6 +26,7 @@
 
 import UniformTypeIdentifiers
 
+import QuickLook
 import RFMKit
 import SwiftUI
 import UIKit
@@ -161,6 +162,7 @@ struct MainScreen: View {
     @State private var dataBack: AppSheetPage? = .firmware   // where States and Safety copies go back to
     @State private var saveOpen = false                 // Save state…: the States page with its field open
     @State private var recorder: Recorder
+    @State private var previewFile: URL?               // a recording or screenshot in Quick Look
     @Environment(\.scenePhase) private var phase
     @Environment(\.openURL) private var openURL
     private static let mirror = StateMirror()
@@ -288,8 +290,13 @@ struct MainScreen: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(4)
             }
-            if recorder.isRecording && !ui.sheetOpen {
+            if recorder.isRecording && !ui.sheetOpen && !recorder.recordingScreen {   // (not in a screen video)
                 RecordingBadge(recorder: recorder).zIndex(5)
+            }
+            if !ui.sheetOpen {
+                SavedCard(recorder: recorder, preview: $previewFile)
+                    .animation(.easeOut(duration: 0.2), value: recorder.saved?.id)
+                    .zIndex(5)
             }
             // MIDI learn's bar and the toasts (over the sheet; above the perf note when it shows)
             FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && !player.perfNote.isEmpty ? 64 : 14,
@@ -306,6 +313,7 @@ struct MainScreen: View {
         .onChange(of: catalog.checked, initial: true) { FirmwareDetailsShare.save(catalog.details) }   // (the AU's panel)
         .preferredColorScheme(ui.sheetOpen || ui.editorOpen || showManager || theme.body.luminance < 0.3 ? .dark : .light)
         .sheet(isPresented: $showBluetooth) { BluetoothSheet() }
+        .quickLookPreview($previewFile)
         .sheet(isPresented: $showAbout) {
             AboutFirmware(info: player.current, onDelete: deleteAction(player.current))
         }
