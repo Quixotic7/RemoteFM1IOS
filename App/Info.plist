@@ -55,6 +55,10 @@
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>RemoteFM1 records video with the camera when you turn on Camera in Recording and start a recording.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>RemoteFM1 saves your recordings and screenshots to Photos when you turn on Copy to Photos.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Some firmware can take audio in (a microphone or an audio interface), for example to record or process it. RemoteFM1 asks only when you turn a firmware's audio input on.</string>
 	<key>UIBackgroundModes</key>

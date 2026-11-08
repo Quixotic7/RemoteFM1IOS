@@ -51,7 +51,7 @@ final class Battery {
         loop?.cancel()
         loop = nil
         player.setFrameMs(15)
-        if player.suspended { player.resumeFromBattery() }
+        if player.suspended { player.resumeFromBattery() } else { player.resumeAudioIfNeeded() }   // (another app took the sound)
         nowPlaying()
     }
 

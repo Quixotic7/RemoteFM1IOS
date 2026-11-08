@@ -110,7 +110,7 @@ enum SoundSource: String { case phone, fm1 }
 enum AppSheetPage: String {
     case firmware, getFirmware = "getfirmware", catalogItem = "catalogitem", midi, midiInput = "midiinput", settings, install, cart
     case keyChannel = "keychannel", midiMode = "midimode", safetyCopies = "safetycopies"
-    case states, transfer
+    case states, transfer, recording
 }
 
 struct MainScreen: View {
@@ -160,6 +160,7 @@ struct MainScreen: View {
     @State private var lastBackup: URL?
     @State private var dataBack: AppSheetPage? = .firmware   // where States and Safety copies go back to
     @State private var saveOpen = false                 // Save state…: the States page with its field open
+    @State private var recorder: Recorder
     @Environment(\.scenePhase) private var phase
     @Environment(\.openURL) private var openURL
     private static let mirror = StateMirror()
@@ -178,6 +179,7 @@ struct MainScreen: View {
         self.midi = midi
         self.battery = battery
         _feed = State(initialValue: midi.feed)
+        _recorder = State(initialValue: Recorder(player: player, feed: midi.feed))
         _prompter = State(initialValue: InstallPrompter(controller: controller, installer: .shared(for: controller)))
         let saved = UserDefaults.standard.string(forKey: "rfm1.source").flatMap(SoundSource.init(rawValue:))
         _source = State(initialValue: LaunchOptions().source ?? saved ?? .fm1)
@@ -286,6 +288,9 @@ struct MainScreen: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(4)
             }
+            if recorder.isRecording && !ui.sheetOpen {
+                RecordingBadge(recorder: recorder).zIndex(5)
+            }
             // MIDI learn's bar and the toasts (over the sheet; above the perf note when it shows)
             FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && !player.perfNote.isEmpty ? 64 : 14,
                              barAtTop: ui.page == .controls && ui.deck == .buttons)
@@ -293,7 +298,7 @@ struct MainScreen: View {
         }
         .animation(.easeInOut(duration: 0.3), value: showManager)
         .persistentSystemOverlays(.hidden)
-        .statusBarHidden(ui.displayAlone)
+        .statusBarHidden(ui.displayAlone || recorder.isRecording)
         .onChange(of: player.current?.name, initial: true) { _, n in ui.firmwareName = n }
         .onChange(of: player.current?.firmwareID, initial: true) { _, id in
             CoreCartTransport.running = id == CoreCartTransport.firmwareID && player.mode == .core
@@ -330,7 +335,10 @@ struct MainScreen: View {
         .onAppear(perform: launch)
         .sheet(item: $shareItem) { ActivitySheet(url: $0.url) }
         .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
-        .onChange(of: phase) { _, p in if p == .active { syncMirror() } }   // (files put in Documents/States meanwhile)
+        .onChange(of: phase) { _, p in
+            if p == .active { syncMirror() }
+            if p == .background { Task { await recorder.stop() } }   // (the camera and ReplayKit stop in the background)
+        }   // (files put in Documents/States meanwhile)
         .onOpenURL { url in                             // (a .rfm1state: imported, its States page)
             guard url.isFileURL, url.pathExtension.lowercased() == StateFile.fileExtension else { return }
             openState(url)
@@ -507,6 +515,14 @@ struct MainScreen: View {
             }
         case .midi: midiPage
         case .midiInput: midiInputPage
+        case .recording:
+            RecordingPage(recorder: recorder, back: { page = .midi }) { work in
+                withAnimation(.easeInOut(duration: 0.28)) { ui.sheetOpen = false }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(450))     // (the sheet gone: not in the picture)
+                    await work()
+                }
+            }
         case .keyChannel:
             SheetPage("Keys from MIDI", backTitle: "MIDI & audio", back: { page = .midi }) {
                 KeyChannelList(channel: Binding(get: { player.midiSettings.keyChannel },
@@ -1149,6 +1165,13 @@ struct MainScreen: View {
                                divider: false)
             }
             if let h = AudioRoute.hint(player.outputs) { SheetNote(h) }
+            SheetList {
+                SheetToggle("Play alongside other apps", on: Binding(get: { player.mixWithOthers }, set: { player.mixWithOthers = $0 }))
+                SheetRow("Recording", value: recorder.isRecording ? "Recording" : "", divider: false) { page = .recording }
+            }
+            .padding(.top, 14)
+            SheetNote("Play alongside other apps: a camera or music app no longer stops the sound, so the firmware keeps "
+                      + "playing and your FM-1 stays linked. The lock screen's play controls don't show while it's on.")
             Live {
                 SheetNote(player.audioRunning ? player.audioText + String(format: "; %.1f ms ahead, %u underruns",
                                                                           player.status.latencyMs, player.status.underruns)

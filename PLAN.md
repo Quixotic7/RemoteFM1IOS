@@ -893,3 +893,26 @@ _fm1core_get. Tests: CoreTests (versions, licences, testLoomTrackOneOnChannelThr
 
 LOOM-8 is no longer built in (the owner's call, 2026-11-06): its .rfm1 (0.14, in RemoteFM1FW's catalog) gives the same
 ten channels through aout1, and Get firmware has it. vendor/loom removed; the native aout1 pair stays in NativeCore.
+
+## 26. Another app taking the sound, and recording (2026-11-07)
+
+A tester filming themself with the Camera app: the app's sound stopped and their FM-1 went back to its own firmware.
+Nothing restarted the engine after an audio interruption, and with no sound in the background iOS suspended the app,
+so the FM-1's heartbeat stopped. Now (CorePlayer):
+- **Interruptions:** the firmware runs on its timer while another app has the sound; it plays again when that app
+  lets go or when RemoteFM1 comes back to the front (Battery.becameActive). A media-services reset restarts it.
+- **Play alongside other apps** (MIDI & audio, off by default, `rfm1.mixWithOthers`): the session mixes, so a camera
+  or music app doesn't stop it. The lock screen's Now Playing controls don't show while it's on.
+
+Recording (MIDI & audio › Recording; RFMKit Recording.swift, App/Recorder.swift, App/RecordingViews.swift), the app only:
+- Audio (on), Screen (ReplayKit), Camera (front or rear, 0.5x-3x). The sound is the player's output tap, never the
+  microphone. With a picture it goes into the video (MP4, H.264 and AAC, timed by the host clock); Screen and Camera
+  both on make two videos of one take. Sound alone is a 24-bit WAV in RemoteFM1/audio/Recordings, where firmwares
+  read samples; videos and screenshots go to RemoteFM1/Recordings, or to Photos with Copy to Photos.
+- The camera session has no audio input and leaves the app's audio session alone, so recording never stops the sound.
+- Screenshots: the whole screen, or the firmware's raw 240x240 screen.
+- The camera and Photos ask for permission only when they're first used. Recording stops when the app leaves the front.
+- A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview under it.
+- Tests: RecordingTests (settings, outputs, names), AudioRestartTests (an interruption, the tap across a restart),
+  TapLevelTests (a note heard in the tap). The screen and camera need a device: the simulator has no camera and
+  ReplayKit gives it no frames.

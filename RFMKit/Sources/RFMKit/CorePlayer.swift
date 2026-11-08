@@ -317,6 +317,10 @@ public final class CorePlayer {
     @ObservationIgnored private var retired: [AVAudioEngine] = []
     @ObservationIgnored private var restartPending = false     // a configuration change waiting to settle
     @ObservationIgnored private var routeObserver: NSObjectProtocol?
+    @ObservationIgnored private var interruptObserver: NSObjectProtocol?
+    @ObservationIgnored private var resetObserver: NSObjectProtocol?
+    /// (recording) the app's sound as it plays: a tap on the main mixer, put back on each new engine
+    @ObservationIgnored private var outputTap: OutputTap?
     @ObservationIgnored private let io = DispatchQueue(label: "com.quixotic7.remotefm1.flash")
     @ObservationIgnored private let log = RFMShared.log("core")
 
@@ -332,6 +336,7 @@ public final class CorePlayer {
         self.history = history ?? flashDir.map { FlashHistory(root: $0.appendingPathComponent(".history")) } ?? .shared
         self.library = library ?? flashDir.map { StateLibrary(root: $0.appendingPathComponent(".states")) } ?? .shared
         self.midiDefaults = midiDefaults
+        mixWithOthers = midiDefaults.bool(forKey: Self.mixKey)
         midiSettings = AUSettings(midiDefaults.dictionary(forKey: Self.midiSettingsKey))
         self.selected = selected ?? ""
         // the flash files live in Application Support, out of the Files app's view (Documents shows the firmware folder)
@@ -620,10 +625,95 @@ public final class CorePlayer {
     public func setMixing(_ on: Bool) {
         guard on != mixing else { return }
         mixing = on
+        applyCategory()
+    }
+
+    /// the setting: play alongside other apps. Another app that plays or records (a camera app, a music app) then
+    /// doesn't stop the sound, so the firmware keeps playing and an FM-1 stays linked; the lock screen's Now Playing
+    /// controls don't show while it's on (iOS shows them only for apps that don't mix)
+    public static let mixKey = "rfm1.mixWithOthers"
+    public var mixWithOthers = false {
+        didSet {
+            guard mixWithOthers != oldValue else { return }
+            midiDefaults.set(mixWithOthers, forKey: Self.mixKey)
+            applyCategory()
+        }
+    }
+    private var mixes: Bool { mixing || mixWithOthers }
+
+    private func applyCategory() {
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, options: on ? [.mixWithOthers] : [])
+        if inputWanted && audioRunning { configurationChangeSoon(); return }   // (playAndRecord: set again on restart)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: mixes ? [.mixWithOthers] : [])
         #endif
     }
+
+    // MARK: interruptions (another app takes the audio)
+
+    /// the sound stopped by another app (a call, a camera app, an app that doesn't mix): the firmware runs on its timer
+    /// meanwhile, and the sound comes back when that app lets go or when RemoteFM1 comes back to the front. Before
+    /// (2026-11-07, a tester filming with the Camera app) nothing restarted it: the sound stayed off and, in the
+    /// background, iOS suspended the app, so a linked FM-1 lost its heartbeat and went back to its own firmware
+    public private(set) var interrupted = false
+
+    private func observeInterruptions() {
+        #if os(iOS)
+        guard interruptObserver == nil else { return }
+        interruptObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
+            let t = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+            MainActor.assumeIsolated {
+                if t == .began { self?.audioInterrupted() } else if t == .ended { self?.resumeAudioIfNeeded() }
+            }
+        }
+        resetObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.audioConfigurationChanged() }
+        }
+        #endif
+    }
+
+    func audioInterrupted() {
+        guard engine != nil else { return }
+        interrupted = true
+        log.info("audio: taken by another app; the firmware runs on its timer")
+        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
+        stopAudio()
+    }
+
+    /// after an interruption, or back in front: the sound again if it should be playing and isn't
+    public func resumeAudioIfNeeded() {
+        let was = interrupted
+        interrupted = false
+        guard mode == .core, audioOn, !suspended, engine?.isRunning != true else { return }
+        if was { log.info("audio: back after an interruption") }
+        rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
+        stopAudio()
+        applyClock()
+    }
+
+    // MARK: the output tap (recording)
+
+    public typealias OutputTap = @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void
+
+    /// the rate the app plays at now (nil: no sound)
+    public var outputRate: Double? { engine?.mainMixerNode.outputFormat(forBus: 0).sampleRate }
+
+    /// a block given each buffer the app plays (the main mixer's output, on an audio thread, not the render thread);
+    /// nil removes it. It stays across restarts (a device change, an interruption)
+    public func setOutputTap(_ tap: OutputTap?) {
+        if outputTap != nil { engine?.mainMixerNode.removeTap(onBus: 0) }
+        outputTap = tap
+        installTap()
+    }
+
+    private func installTap() {
+        guard let t = outputTap, let eng = engine else { return }
+        eng.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: Self.tapBlock(t))
+    }
+
+    /// (made outside the main actor: a block made inside it would assert it runs there)
+    nonisolated private static func tapBlock(_ t: @escaping OutputTap) -> AVAudioNodeTapBlock { { b, w in t(b, w) } }
 
     func startAudio() {
         #if os(iOS)
@@ -632,14 +722,14 @@ public final class CorePlayer {
             // (ain1: recording too while this firmware's input is on; the speaker, not the earpiece)
             if inputWanted {
                 try s.setCategory(.playAndRecord, mode: .default,
-                                  options: mixing ? [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers]
+                                  options: mixes ? [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers]
                                                   : [.defaultToSpeaker, .allowBluetoothA2DP])
                 if let uid = AudioInput.preferredUID(for: current?.firmwareID ?? ""),
                    let port = s.availableInputs?.first(where: { $0.uid == uid }) {
                     try? s.setPreferredInput(port)
                 }
             } else {
-                try s.setCategory(.playback, options: mixing ? [.mixWithOthers] : [])
+                try s.setCategory(.playback, options: mixes ? [.mixWithOthers] : [])
             }
             // ~10 ms buffers: the USB route (the FM-1 as a sound card) otherwise gets very short ones, and a firmware's
             // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
@@ -668,6 +758,8 @@ public final class CorePlayer {
         engine = eng
         node = n
         audioRunning = true
+        interrupted = false
+        installTap()
         // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup),
         // asked a moment later and only of the engine still playing: asked during a device change it crashed in the HAL.
         // Not on a Mac: there (an iPad app) the property doesn't return the +1 reference its header promises, so its
@@ -679,6 +771,7 @@ public final class CorePlayer {
             }
         } }
         observeRoute()
+        observeInterruptions()
         #if os(iOS)
         outputs = AudioRoute.current
         #endif
@@ -730,6 +823,7 @@ public final class CorePlayer {
         if let o = configObserver { NotificationCenter.default.removeObserver(o) }
         configObserver = nil
         if let old = engine {
+            if outputTap != nil { old.mainMixerNode.removeTap(onBus: 0) }
             old.stop()
             retired.append(old)                     // (freed on the main thread in a moment, not now)
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
