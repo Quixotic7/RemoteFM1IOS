@@ -129,6 +129,7 @@ struct MainScreen: View {
     @State private var modeSource: String?              // the mapping the Knob mode page shows
     @State private var midiScroll: String?              // where the MIDI & audio page opens (back from Knob mode)
     @AppStorage("firmware.sort") private var firmwareSort = FirmwareListing.Sort.name
+    @AppStorage("rfm1.perfWarnings") private var perfWarnings = true   // the CPU banner over the faceplate
     @State private var sidebarOpen = false              // the firmware sidebar (a swipe in from the left edge)
     @State private var editingFirmware = false          // the Firmware page's Edit: a delete control per imported row
     @State private var confirmDelete: String?           // the file (its name) whose row asks "Delete?"
@@ -239,7 +240,7 @@ struct MainScreen: View {
                         }
                         InstallPromptView(prompt: prompter.prompt, install: openInstall) { prompter.notNow() }
                     }
-                    PerfBanner(player.perfNote)
+                    if perfWarnings { PerfBanner(player.perfNote) }
                 }
                 .padding(.bottom, 12)
                 .animation(.easeInOut(duration: 0.2), value: player.perfNote.isEmpty)
@@ -299,7 +300,7 @@ struct MainScreen: View {
                     .zIndex(5)
             }
             // MIDI learn's bar and the toasts (over the sheet; above the perf note when it shows)
-            FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && !player.perfNote.isEmpty ? 64 : 14,
+            FaceplateOverlay(feed: feed, bottom: !ui.sheetOpen && !ui.editorOpen && perfWarnings && !player.perfNote.isEmpty ? 64 : 14,
                              barAtTop: ui.page == .controls && ui.deck == .buttons)
                 .zIndex(3)
         }
@@ -1279,6 +1280,12 @@ struct MainScreen: View {
                 SheetToggle("Step numbers on the keys", on: $ui.stepNumbers, divider: false)
             }
             SheetNote("Shows 1–16 on the lower keys, for a firmware in a step mode.")
+            SheetSectionTitle("Warnings")
+            SheetList {
+                SheetToggle("Performance warnings", on: $perfWarnings, divider: false)
+            }
+            SheetNote("The note over the keys when a firmware needs more of the processor than it gets (sound may "
+                      + "crackle). Off: it shows only on the firmware's page.")
             SheetSectionTitle("Diagnostics")
             SheetList {
                 // (not in the first half second: a slow tap on Settings landed here; the AU test is inside Diagnostics)
