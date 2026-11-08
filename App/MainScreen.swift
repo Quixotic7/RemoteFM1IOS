@@ -131,6 +131,7 @@ struct MainScreen: View {
     @State private var sidebarOpen = false              // the firmware sidebar (a swipe in from the left edge)
     @State private var editingFirmware = false          // the Firmware page's Edit: a delete control per imported row
     @State private var confirmDelete: String?           // the file (its name) whose row asks "Delete?"
+    @State private var askRemoveOld = false             // Remove old versions: asking
     @State private var showDiagnostics = false
     @State private var settingsOpened = Date.distantPast    // (a tap so soon after is the press that opened it)
     @State private var showBluetooth = false
@@ -753,6 +754,14 @@ struct MainScreen: View {
     }
 
     /// an imported file deleted (the folder, the App Group's mirror); the selection moves first when it was this one
+    /// Remove old versions: every imported file a newer version replaces (the lists hide them), not the one playing
+    private func removeOldVersions() {
+        for f in library.oldVersions(cores: player.cores, keep: player.selected) { player.willDelete(f.key) }
+        library.removeOldVersions(cores: player.cores, keep: player.selected)
+        player.catalogChanged()
+        askRemoveOld = false
+    }
+
     private func delete(_ f: ImportedFirmware) {
         if f.error == nil { player.willDelete(f.key) }
         library.delete(f)
@@ -858,6 +867,21 @@ struct MainScreen: View {
                 if !editingFirmware {
                     SheetRow("Add firmware file…", divider: false) { showImporter = true }
                 }
+            }
+            // (each update keeps the version before it, so a firmware's way back: these pile up)
+            let old = library.oldVersions(cores: player.cores, keep: player.selected)
+            if !editingFirmware, !old.isEmpty {
+                if askRemoveOld {
+                    SheetConfirm("Remove \(old.count) older version\(old.count == 1 ? "" : "s")?",
+                                 action: "Remove", cancel: { withAnimation { askRemoveOld = false } },
+                                 confirm: { withAnimation { removeOldVersions() } })
+                        .padding(.top, 10)
+                } else {
+                    SheetButton("Remove old versions (\(old.count))") { withAnimation { askRemoveOld = true } }
+                        .padding(.top, 10)
+                }
+                SheetNote("Each update keeps the version before it. This removes those, not the one playing; Get "
+                          + "firmware has them again if you need one.")
             }
             SheetNote(files.isEmpty
                       ? "Put .rfm1 firmware files in Files › On My \(UIDevice.current.model) › RemoteFM1 › Firmware, or add one here."

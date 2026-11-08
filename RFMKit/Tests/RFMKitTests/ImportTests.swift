@@ -318,4 +318,29 @@ final class ImportTests: XCTestCase {
             XCTAssertLessThan(render(units[1], ms: 600), 0.0005, "a note on one instance reached another")
         }
     }
+
+    /// Remove old versions: the files a newer one replaces go (here a rebuild: the same AMB-1 version, the copy added
+    /// last kept), never the one playing; nothing else is touched
+    func testRemoveOldVersions() throws {
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
+        let amb = fixtures.appendingPathComponent("amb-1.3.rfm1").path
+        try put(amb, as: "amb-old.rfm1")
+        let lib = library()
+        lib.sync()
+        Thread.sleep(forTimeInterval: 1.1)                     // (added later: a newer "added" date)
+        var rebuilt = try Data(contentsOf: URL(fileURLWithPath: amb))
+        rebuilt += Data([0, 5, 4]) + Data("note".utf8)          // (a custom section: another SHA-256, the same firmware)
+        try rebuilt.write(to: root.appendingPathComponent("Firmware/amb-new.rfm1"))
+        try put(fixtures.appendingPathComponent("ain_cart.rfm1").path)
+        lib.sync()
+        XCTAssertEqual(lib.files.filter { $0.error == nil }.count, 3)
+        let cores = FirmwareCatalog.shared.cores()
+        let oldKey = try XCTUnwrap(lib.files.first { $0.file == "amb-old.rfm1" }).key
+
+        XCTAssertTrue(lib.oldVersions(cores: cores, keep: oldKey).isEmpty, "the one playing stays")
+        XCTAssertEqual(lib.oldVersions(cores: cores, keep: "").map(\.file), ["amb-old.rfm1"])
+        XCTAssertEqual(lib.removeOldVersions(cores: cores, keep: ""), 1)
+        XCTAssertEqual(Set(lib.files.map(\.file)), ["amb-new.rfm1", "ain_cart.rfm1"])
+        XCTAssertEqual(lib.removeOldVersions(cores: FirmwareCatalog.shared.cores(), keep: ""), 0, "nothing left to remove")
+    }
 }

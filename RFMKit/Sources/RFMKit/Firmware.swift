@@ -356,6 +356,29 @@ public final class FirmwareLibrary {
         return got
     }
 
+    /// (clean up) the imported files a newer version replaces: those the lists hide (FirmwareListing.superseded over
+    /// `cores`, the built-in and the imported ones), never `keep` (the one playing). Each update keeps the version
+    /// before it, so these pile up; Get firmware has the older versions again
+    public func oldVersions(cores: [CoreInfo], keep: String) -> [ImportedFirmware] {
+        let added = Dictionary(files.map { ($0.sha256, $0.added) }, uniquingKeysWith: max)
+        let old = FirmwareListing.superseded(cores, added: added).subtracting([keep])
+        return files.filter { $0.error == nil && old.contains($0.key) }
+    }
+
+    /// oldVersions removed; how many
+    @discardableResult
+    public func removeOldVersions(cores: [CoreInfo], keep: String) -> Int {
+        let old = oldVersions(cores: cores, keep: keep)
+        for f in old where !f.file.isEmpty {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(f.file))
+        }
+        guard !old.isEmpty else { return 0 }
+        message = old.count == 1 ? "Removed \(old[0].name) \(old[0].version)" : "Removed \(old.count) older versions"
+        log.info("\(self.message, privacy: .public)")
+        sync()
+        return old.count
+    }
+
     /// the file removed from the folder (and so from the mirror and the index)
     public func delete(_ f: ImportedFirmware) {
         guard !f.file.isEmpty else { return }
