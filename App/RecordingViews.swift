@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// Recording's page (the quick menu's Recording settings…: the top-left chip), the badge on the faceplate while it
-// records (the time, Stop) and the camera's preview, both drawn in a layer screen captures leave out (HiddenFromCapture),
-// so you see them and a screen video doesn't.
+// Recording's page (the quick menu's Recording settings…: the top-left chip), the badge shown while it records (the
+// time, Stop), the camera's preview and the saved card. The badge and the preview sit in windows of their own
+// (RecordingOverlay.swift), so a screen video never has them.
 
 import AVFoundation
 import UIKit
@@ -39,7 +39,7 @@ struct RecordingPage: View {
             SheetNote("Audio is the app's own sound. Microphone adds your mic (or the audio interface's input): each is "
                       + "saved as its own WAV, and both are mixed into the videos. Screen and Camera both on make two "
                       + "videos of the same take. The camera and the mic ask for permission the first time. The Stop "
-                      + "button and the camera's picture show only to you, never in a screen video.")
+                      + "button and the camera's picture (drag it anywhere) show only to you, never in a screen video.")
             SheetButton(recorder.isRecording ? "Stop recording" : "Start recording", accent: !recorder.isRecording) {
                 if recorder.isRecording { Task { await recorder.stop() } } else { closeThen { await recorder.start() } }
             }
@@ -74,54 +74,29 @@ struct RecordingPage: View {
     static func zoomText(_ z: Double) -> String { z == 0.5 ? "0.5×" : "\(Int(z))×" }
 }
 
-/// the time and Stop while it records, where the status bar was (hidden meanwhile), so the firmware's name stays free
-/// to tap; with no status bar space (landscape) under the status row; the camera's picture under it
-struct RecordingBadge: View {
+/// the time and Stop while it records (in a window of its own above the app: RecordingOverlay)
+struct RecordingPill: View {
     let recorder: Recorder
 
     var body: some View {
-        GeometryReader { g in
-            let top = g.safeAreaInsets.top
-            badge
-                .padding(.top, top > 30 ? max(4, (top - 34) / 2) : 52)
-                .padding(.trailing, top > 30 ? 22 : 14)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .ignoresSafeArea()
-        }
-    }
-
-    private var badge: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            HiddenFromCapture {
-                Button { Task { await recorder.stop() } } label: {
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.red).frame(width: 10, height: 10)
-                        TimelineView(.periodic(from: .now, by: 1)) { c in
-                            Text(Self.time(c.date.timeIntervalSince(recorder.started ?? c.date)))
-                                .font(RFMFonts.ui(14, 600)).monospacedDigit()
-                        }
-                        Text("Stop").font(RFMFonts.ui(14, 700))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Color.black.opacity(0.72)))
+        Button { Task { await recorder.stop() } } label: {
+            HStack(spacing: 8) {
+                Circle().fill(Color.red).frame(width: 10, height: 10)
+                TimelineView(.periodic(from: .now, by: 1)) { c in
+                    Text(Self.time(c.date.timeIntervalSince(recorder.started ?? c.date)))
+                        .font(RFMFonts.ui(14, 600)).monospacedDigit()
                 }
-                .buttonStyle(.plain)
-                .disabled(recorder.busy)
-                .accessibilityLabel("Stop recording")
+                Text("Stop").font(RFMFonts.ui(14, 700))
             }
-            .fixedSize()
-            if recorder.settings.cameraPreview, let s = recorder.cameraSession {
-                HiddenFromCapture {
-                    CameraPreview(session: s)
-                        .frame(width: 96, height: 128)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.5), lineWidth: 1))
-                }
-                .frame(width: 96, height: 128)
-            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(Color.black.opacity(0.72)))
         }
+        .buttonStyle(.plain)
+        .disabled(recorder.busy)
+        .accessibilityLabel("Stop recording")
+        .fixedSize()
     }
 
     static func time(_ t: TimeInterval) -> String {
@@ -228,58 +203,5 @@ struct SavedCard: View {
 
     static func open(_ s: String) {
         if let u = URL(string: s) { UIApplication.shared.open(u) }
-    }
-}
-
-/// content screen captures leave out (ReplayKit, the system's screen recording, screenshots): drawn inside a secure text
-/// field's own layer, the one iOS blanks out of every capture. Sized to its content
-struct HiddenFromCapture<Content: View>: UIViewRepresentable {
-    @ViewBuilder let content: () -> Content
-
-    final class PassThrough: UIView {
-        weak var canvas: UIView?
-        weak var host: UIView?
-    }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        let field = UITextField()
-        var host: UIHostingController<Content>?
-        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool { false }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> PassThrough {
-        let outer = PassThrough()
-        outer.backgroundColor = .clear
-        let c = context.coordinator
-        c.field.isSecureTextEntry = true
-        c.field.delegate = c
-        // (the field's first subview is the layer captures blank out; without it the content is shown as usual)
-        let canvas = c.field.subviews.first ?? UIView()
-        canvas.subviews.forEach { $0.removeFromSuperview() }
-        canvas.isUserInteractionEnabled = true
-        canvas.backgroundColor = .clear
-        canvas.frame = outer.bounds
-        canvas.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        outer.addSubview(canvas)
-        let h = UIHostingController(rootView: content())
-        h.safeAreaRegions = []
-        h.view.backgroundColor = .clear
-        h.view.frame = canvas.bounds
-        h.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        canvas.addSubview(h.view)
-        c.host = h
-        outer.canvas = canvas
-        outer.host = h.view
-        return outer
-    }
-
-    func updateUIView(_ v: PassThrough, context: Context) { context.coordinator.host?.rootView = content() }
-
-    /// as big as its content (the layer covers only it: touches elsewhere aren't taken)
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PassThrough, context: Context) -> CGSize? {
-        context.coordinator.host?.sizeThatFits(in: CGSize(width: proposal.width ?? .infinity,
-                                                          height: proposal.height ?? .infinity))
     }
 }

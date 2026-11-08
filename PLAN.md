@@ -905,8 +905,8 @@ so the FM-1's heartbeat stopped. Now (CorePlayer):
   or music app doesn't stop it. The lock screen's Now Playing controls don't show while it's on.
 
 Recording (the quick menu, the top-left chip: Record, Take screenshot, Recording settings…; RFMKit Recording.swift,
-App/Recorder.swift, App/RecordingViews.swift), the app only:
-- Audio (on), Microphone (on, with Audio), Screen (ReplayKit), Camera (front or rear, 0.5x-3x). The app's sound is
+App/Recorder.swift, App/RecordingViews.swift, App/RecordingOverlay.swift), the app only:
+- Audio (on), Microphone (on, with Audio), Screen, Camera (front or rear, 0.5x-3x). The app's sound is
   the player's output tap; the microphone (the session's input: the built-in mic or an interface) a tap on the
   player's input (CorePlayer.recordingInput: playAndRecord meanwhile; a capture session can't record sound in the
   simulator). Each is a 24-bit WAV in RemoteFM1/audio/recordings ("<take> app.wav", "<take> mic.wav"), where firmwares
@@ -916,9 +916,12 @@ App/Recorder.swift, App/RecordingViews.swift), the app only:
 - The camera session has no audio input and leaves the app's audio session alone, so recording never stops the sound.
 - Screenshots: the whole screen, or the firmware's raw 240x240 screen.
 - The camera and Photos ask for permission only when they're first used. Recording stops when the app leaves the front.
-- A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview under it when
-  that's on. Both are drawn inside a secure text field's layer (HiddenFromCapture), which iOS leaves out of every
-  capture: you see them, a screen video doesn't.
+- Screen: the app's own window drawn into the video (drawHierarchy, ~30 a second, fewer when a frame is slow to draw:
+  at most half the main thread), not ReplayKit: its videos had everything on screen (a secure layer didn't hide
+  the badge from it), and it asked for permission.
+- A badge with the time and Stop sits where the status bar was (hidden meanwhile); the camera's preview (an option,
+  dragged anywhere) under it. Each is a small window of its own above the app's, so you see and tap them and a screen
+  video, which draws only the app's window, never has them.
 - Callbacks from the system (Photos' changes, ReplayKit's stop, the camera preview's rotation) are written outside
   the main actor (Recorder.swift's SystemCalls): written inside it, Swift 6 checks they run on the main thread and
   stopped the app on the phone (the first test build's crashes on stop and with Copy to Photos).

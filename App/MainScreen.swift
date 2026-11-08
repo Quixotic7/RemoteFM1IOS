@@ -291,9 +291,6 @@ struct MainScreen: View {
                     .transition(.move(edge: .trailing))
                     .zIndex(4)
             }
-            if recorder.isRecording && !ui.sheetOpen {
-                RecordingBadge(recorder: recorder).zIndex(5)       // (you see it; a screen video doesn't)
-            }
             if !ui.sheetOpen {
                 SavedCard(recorder: recorder, preview: $previewFile)
                     .animation(.easeOut(duration: 0.2), value: recorder.saved?.id)
@@ -346,7 +343,7 @@ struct MainScreen: View {
         .onReceive(NotificationCenter.default.publisher(for: StateLibrary.didChange)) { _ in syncMirror() }
         .onChange(of: phase) { _, p in
             if p == .active { syncMirror() }
-            if p == .background { Task { await recorder.stop() } }   // (the camera and ReplayKit stop in the background)
+            if p == .background { Task { await recorder.stop() } }   // (the camera and the screen stop in the background)
         }   // (files put in Documents/States meanwhile)
         .onOpenURL { url in                             // (a .rfm1state: imported, its States page)
             guard url.isFileURL, url.pathExtension.lowercased() == StateFile.fileExtension else { return }

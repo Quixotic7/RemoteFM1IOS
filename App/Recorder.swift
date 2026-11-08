@@ -3,15 +3,15 @@
 // Recording in the app (RFMKit's Recording.swift has the settings and the file names, RecordingMux the mix): the
 // app's sound from the player's output tap, the microphone (the default input: the built-in mic or an interface) from a
 // tap on the player's input (it switches the session to playAndRecord meanwhile), the camera from an AVCaptureSession
-// that leaves the app's audio session alone, the screen from ReplayKit. Each sound is written to its own WAV and each
+// that leaves the app's audio session alone, the screen from the app's own window (RecordingOverlay.swift: the badge and
+// the camera's picture are in windows of their own, so a screen video never has them). Each sound is written to its own WAV and each
 // picture to a video of its own as it comes; at the end the sounds are mixed into each video (RecordingMux: the picture
 // copied, not encoded again). Every stream is timed by the host clock, so they line up.
-// A take is written on one queue (Take); the app stops it when it leaves the front (the camera and ReplayKit stop then).
+// A take is written on one queue (Take); the app stops it when it leaves the front (the camera stops then).
 
 import AVFoundation
 import CoreMedia
 import Photos
-import ReplayKit
 import RFMKit
 import SwiftUI
 import UIKit
@@ -19,7 +19,12 @@ import UIKit
 @MainActor
 @Observable
 final class Recorder {
-    var settings: RecordingSettings { didSet { settings.save(defaults) } }
+    var settings: RecordingSettings {
+        didSet {
+            settings.save(defaults)
+            if isRecording, settings.cameraPreview != oldValue.cameraPreview { showPreview() }
+        }
+    }
     private(set) var isRecording = false
     private(set) var busy = false
     private(set) var started: Date?
@@ -44,6 +49,8 @@ final class Recorder {
     @ObservationIgnored private let feed: PanelFeed
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var take: Take?
+    @ObservationIgnored private var screenCapture: ScreenCapture?
+    @ObservationIgnored private let overlay = RecordingOverlay()
     @ObservationIgnored private let log = RFMShared.log("recording")
 
     init(player: CorePlayer, feed: PanelFeed, defaults: UserDefaults = .standard) {
@@ -53,8 +60,6 @@ final class Recorder {
         settings = RecordingSettings(defaults: defaults)
         DispatchQueue.global(qos: .utility).async { RecordingFiles.lowercaseOldFolders() }
     }
-
-    var screenAvailable: Bool { RPScreenRecorder.shared().isAvailable }
 
     // MARK: recording
 
@@ -67,7 +72,7 @@ final class Recorder {
         if s.camera, !(await Self.allowed(.video)) {
             return show("RemoteFM1 can't use the camera: allow it in Settings › RemoteFM1 › Camera.", .bad)
         }
-        if s.screen, !screenAvailable { return show("Screen recording isn't available here.", .bad) }
+        guard let main = Self.mainWindow else { return show("No screen to record.", .bad) }
         var mic = s.recordsMic
         if mic, !(await Self.allowed(.audio)) {
             mic = false
@@ -103,15 +108,17 @@ final class Recorder {
             cap.start(on: t.q, deliver: t.cameraFrame())
             cameraSession = cap.session
         }
-        if t.screen != nil, let err = await SystemCalls.startScreenCapture(t.screenFrame()) {
-            await stopStreams(t)
-            t.discard()
-            return show("Screen recording didn't start: \(err.localizedDescription)", .bad)
+        if t.screen != nil {
+            let c = ScreenCapture(window: main, deliver: t.screenFrame())
+            c.start()
+            screenCapture = c
         }
         take = t
         started = Date()
         recordingScreen = t.screen != nil
         isRecording = true
+        overlay.show(recorder: self, over: main)
+        showPreview()
         if note.hasPrefix("Recording without") == false { note = "" }
         log.info("recording: started (\(s.summary, privacy: .public)\(mic ? "" : s.recordsMic ? ", no mic" : "", privacy: .public))")
     }
@@ -149,10 +156,23 @@ final class Recorder {
     private func stopStreams(_ t: Take) async {
         player.setOutputTap(nil)
         player.setInputTap(nil)
-        if t.screen != nil, RPScreenRecorder.shared().isRecording { await SystemCalls.stopScreenCapture() }
+        screenCapture?.stop()
+        screenCapture = nil
+        overlay.hide()
         if let cap = t.capture { await cap.stop(on: t.q) }
         cameraSession = nil
         player.recordingInput = false
+    }
+
+    /// the camera's picture beside the badge, when that's on (it can be dragged)
+    private func showPreview() {
+        guard let main = Self.mainWindow else { return }
+        if settings.cameraPreview, let s = cameraSession { overlay.showPreview(s, over: main) } else { overlay.hidePreview() }
+    }
+
+    /// the app's own window (the overlay's never become key)
+    static var mainWindow: UIWindow? {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
     }
 
     // MARK: screenshots
@@ -164,7 +184,7 @@ final class Recorder {
         case .raw:
             png = feed.screen.image.flatMap { UIImage(cgImage: $0).pngData() }
         case .screen:
-            guard let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
+            guard let w = Self.mainWindow else {
                 return show("No screen to take.", .bad)
             }
             let f = UIGraphicsImageRendererFormat(for: w.traitCollection)
@@ -235,23 +255,8 @@ final class Recorder {
 // MARK: - system calls
 
 /// calls whose callbacks come on the system's own queues, made outside the main actor: a callback written inside it
-/// asserts it runs there and stops the app (2026-11-07 on a phone: Photos' changes queue, ReplayKit's reply on stop)
+/// asserts it runs there and stops the app (2026-11-07 on a phone: Photos' changes queue)
 enum SystemCalls {
-    static func startScreenCapture(_ frames: @escaping (CMSampleBuffer, RPSampleBufferType, Error?) -> Void) async -> Error? {
-        let r = RPScreenRecorder.shared()
-        r.isMicrophoneEnabled = false
-        r.isCameraEnabled = false
-        return await withCheckedContinuation { c in
-            r.startCapture(handler: frames) { e in c.resume(returning: e) }
-        }
-    }
-
-    static func stopScreenCapture() async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            RPScreenRecorder.shared().stopCapture { _ in c.resume() }
-        }
-    }
-
     static func addToPhotos(_ u: URL, video: Bool) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             PHAssetCreationRequest.forAsset().addResource(with: video ? .video : .photo, fileURL: u, options: nil)
@@ -272,8 +277,6 @@ final class Take: @unchecked Sendable {
     var screen: Movie?
     var camera: Movie?
     var capture: CaptureSource?
-    /// ReplayKit's frames: moved to the host clock when theirs is another
-    private var screenShift: CMTime?
 
     /// the player's output tap: the app's sound to its WAV
     func soundTap() -> CorePlayer.OutputTap { { [self] b, t in app?.write(b, at: Self.host(t)) } }
@@ -289,20 +292,9 @@ final class Take: @unchecked Sendable {
         { [self] sb in camera?.append(sb) }            // (already on q: the output's queue)
     }
 
-    func screenFrame() -> (CMSampleBuffer, RPSampleBufferType, Error?) -> Void {
-        { [self] sb, type, _ in
-            guard type == .video, CMSampleBufferDataIsReady(sb) else { return }
-            q.async { [self] in
-                let pts = CMSampleBufferGetPresentationTimeStamp(sb)
-                if screenShift == nil {             // (host time already: no shift; else the arrival time)
-                    let off = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), pts)
-                    screenShift = abs(CMTimeGetSeconds(off)) > 1 ? off : .zero
-                    screen?.orientation = Self.orientation(sb)
-                }
-                guard let shift = screenShift else { return }
-                screen?.append(shift == .zero ? sb : Movie.retimed(sb, by: shift) ?? sb)
-            }
-        }
+    /// ScreenCapture's frames (already on the host clock)
+    func screenFrame() -> (CMSampleBuffer) -> Void {
+        { [self] sb in q.async { [self] in screen?.append(sb) } }
     }
 
     /// the videos (each with the sounds mixed in) and the sound files
@@ -335,17 +327,6 @@ final class Take: @unchecked Sendable {
     func discard() {
         for s in [app, mic] { if let u = s?.close() { try? FileManager.default.removeItem(at: u) } }
         for m in [screen, camera].compactMap({ $0 }) { m.cancel() }
-    }
-
-    /// ReplayKit's frame orientation as a rotation for the video
-    static func orientation(_ sb: CMSampleBuffer) -> CGAffineTransform {
-        let n = CMGetAttachment(sb, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil) as? NSNumber
-        switch n.flatMap({ CGImagePropertyOrientation(rawValue: $0.uint32Value) }) {
-        case .right?: return CGAffineTransform(rotationAngle: .pi / 2)
-        case .left?: return CGAffineTransform(rotationAngle: -.pi / 2)
-        case .down?: return CGAffineTransform(rotationAngle: .pi)
-        default: return .identity
-        }
     }
 }
 
