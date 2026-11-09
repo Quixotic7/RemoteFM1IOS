@@ -350,6 +350,7 @@ public final class CorePlayer {
         e = rfme_new(link?.core)
         if let core = link?.core { rfmc_set_ble_audio(core, midiDefaults.bool(forKey: Self.soundOnFM1Key) ? 1 : 0) }
         mapFollower = MidiMapFollower(engine: e)
+        link?.onStateChange = { [weak self] in self?.outputRuleChanged() }
         applyMidiSettings()
         rfms_scan(slotsDir)
         rescan()
@@ -644,7 +645,19 @@ public final class CorePlayer {
             guard soundOnFM1 != oldValue else { return }
             midiDefaults.set(soundOnFM1, forKey: Self.soundOnFM1Key)
             if let core = link?.core { rfmc_set_ble_audio(core, soundOnFM1 ? 1 : 0) }
+            outputRuleChanged()
         }
+    }
+
+    /// Sound on the FM-1 over its USB cable: on, the sound goes where iOS sends it (the FM-1's USB audio, the sound card
+    /// it just plugged in); off, to this device's speaker (playAndRecord, the speaker override: .playback can't choose
+    /// an output). Over Bluetooth the switch is the link's audio mode instead (rfmc_set_ble_audio)
+    private var wantsSpeaker: Bool { !soundOnFM1 && link?.linkedOverUSB == true }
+    @ObservationIgnored private var speakerForced = false
+
+    /// the link or the switch changed: the sound restarts when where it should go changed
+    func outputRuleChanged() {
+        if audioRunning, wantsSpeaker != speakerForced { configurationChangeSoon() }
     }
 
     public static let mixKey = "rfm1.mixWithOthers"
@@ -659,7 +672,7 @@ public final class CorePlayer {
 
     private func applyCategory() {
         #if os(iOS)
-        if (inputWanted || recordingInput) && audioRunning { configurationChangeSoon(); return }   // (playAndRecord: set again on restart)
+        if (inputWanted || recordingInput || speakerForced) && audioRunning { configurationChangeSoon(); return }   // (playAndRecord: set again on restart)
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: mixes ? [.mixWithOthers] : [])
         #endif
     }
@@ -766,7 +779,8 @@ public final class CorePlayer {
         do {
             let s = AVAudioSession.sharedInstance()
             // (ain1: recording too while this firmware's input is on; the speaker, not the earpiece)
-            if inputWanted || recordingInput {
+            let speaker = wantsSpeaker
+            if inputWanted || recordingInput || speaker {
                 try s.setCategory(.playAndRecord, mode: .default,
                                   options: mixes ? [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers]
                                                   : [.defaultToSpeaker, .allowBluetoothA2DP])
@@ -781,6 +795,11 @@ public final class CorePlayer {
             // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
             try? s.setPreferredIOBufferDuration(0.010)
             try s.setActive(true)
+            if s.category == .playAndRecord { try? s.overrideOutputAudioPort(speaker ? .speaker : .none) }
+            if speaker != speakerForced {
+                log.info("audio: \(speaker ? "this device's speaker, not the FM-1's USB audio" : "the system's route")")
+            }
+            speakerForced = speaker
         } catch {
             message = "audio session: \(error.localizedDescription)"
         }

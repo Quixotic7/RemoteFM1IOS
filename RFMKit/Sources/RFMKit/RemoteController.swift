@@ -87,6 +87,7 @@ public final class RemoteController {
             watcher = MIDISetupWatcher { [weak self] in
                 Task { @MainActor in self?.midiSetupChanged() }
             }
+            fm1OnUSB = ControllerInput.fm1OnUSB()
         }
         #endif
         if demoInput, backend.isFake { startDemo() }
@@ -147,6 +148,36 @@ public final class RemoteController {
     func midiSetupChanged() {
         midiSetupChanges += 1
         rescan()
+        #if canImport(CoreMIDI)
+        let usb = ControllerInput.fm1OnUSB()
+        if usb != fm1OnUSB { fm1OnUSB = usb }
+        relinks = 0
+        #endif
+    }
+
+    /// the FM-1 is on a USB cable (its USB MIDI port is there): a Bluetooth session moves to it (relinkIfNeeded), and
+    /// its USB audio is a sound card iOS may send the app's sound to (CorePlayer.soundOnFM1)
+    public private(set) var fm1OnUSB = false
+
+    /// a session with the real FM-1 over its USB cable (its USB audio then a sound card iOS may play through)
+    public var linkedOverUSB: Bool {
+        guard backend == .device, case .connected(bluetooth: false) = state else { return false }
+        return true
+    }
+
+    /// (CorePlayer) the link's state changed
+    @ObservationIgnored public var onStateChange: (@MainActor () -> Void)?
+    @ObservationIgnored private var relinks = 0
+    @ObservationIgnored private var lastRelink = Date.distantPast
+
+    /// connected over Bluetooth while the FM-1's USB port is there: the link looks for the unit again, and finds the
+    /// USB port first (libremotefm1 only picks when it looks). A few tries a plug-in, 4 s apart
+    private func relinkIfNeeded() {
+        guard fm1OnUSB, case .connected(bluetooth: true) = state, relinks < 3,
+              Date().timeIntervalSince(lastRelink) > 4, let core else { return }
+        relinks += 1
+        lastRelink = Date()
+        rfmc_relink(core)
     }
 
     // MARK: the fake unit's panel (tests, -fake)
@@ -207,7 +238,10 @@ public final class RemoteController {
         // (observation fires on every assignment, equal or not: a view reading these would redraw at every poll)
         if (st.wanted != 0) != isRunning { isRunning = st.wanted != 0 }
         let s = Self.state(of: st, searchingSince: &searchingSince)
-        if s != state { state = s }
+        if s != state {
+            state = s
+            onStateChange?()
+        }
         let text = Self.string(st.text), log = Self.string(st.log)
         if text != statusText { statusText = text }
         if log != lastLog { lastLog = log }
@@ -215,6 +249,7 @@ public final class RemoteController {
         if h != hello { hello = h }
         let ls = Self.stats(of: st)
         if ls != stats { stats = ls }
+        relinkIfNeeded()
         if let session {
             let p = session.status()
             if p != panel { panel = p }

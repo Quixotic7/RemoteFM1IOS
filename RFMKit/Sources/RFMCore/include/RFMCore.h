@@ -48,6 +48,7 @@ void rfmc_start(rfmc_t *c);
 void rfmc_stop(rfmc_t *c);
 void rfmc_set_pattern(rfmc_t *c, int on);
 void rfmc_rescan(rfmc_t *c);    // CoreMIDI's setup changed
+void rfmc_relink(rfmc_t *c);    // look for the unit again (its USB port came during a Bluetooth session)
 // TOUCH: velocity and pressure from the FM-1's keys (RFMC_TOUCH_*; default both). Asked after each SESSION start's
 // ACK from a unit with RFMC_CAP_TOUCH, and at once when changed; 0: not asked (velocity 100, no pressure, as before)
 void rfmc_set_key_touch(rfmc_t *c, uint32_t flags);
@@ -93,6 +94,7 @@ typedef struct {
     int audio_wanted, audio;
     uint32_t audio_rate, audio_blocks, audio_wire, audio_buffer_ms, audio_fill_ms, audio_lost, audio_underruns;
     uint32_t audio_skipped, audio_overflow;
+    uint32_t relinks;                    // rfmc_relink()s done
 } rfmc_status_t;
 void rfmc_status(rfmc_t *c, rfmc_status_t *st);
 

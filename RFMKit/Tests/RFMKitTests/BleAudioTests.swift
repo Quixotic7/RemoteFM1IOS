@@ -141,6 +141,18 @@ final class BleAudioTests: XCTestCase {
         XCTAssertGreaterThan(localPeak, 0.4, "the sound stays here")
     }
 
+    /// rfmc_relink (the FM-1's USB port came during a Bluetooth session): the session starts again (a USB port would be
+    /// picked first; the fake has only its Bluetooth one) and asks for the audio mode again
+    func testRelinkStartsTheSessionAgain() {
+        open()
+        XCTAssertTrue(until(3) { self.status().audio == 1 })
+        let sessions = status().sessions
+        rfmc_relink(link)
+        XCTAssertTrue(until(3) { self.status().relinks == 1 && self.status().sessions > sessions }, "no new session")
+        XCTAssertTrue(until(3) { self.status().audio == 1 && Int(self.status().state) == RFMC_CONNECTED },
+                      "the audio mode not asked again")
+    }
+
     func testAudioText() {
         var s = LinkStats()
         XCTAssertEqual(s.audioText, "Off")

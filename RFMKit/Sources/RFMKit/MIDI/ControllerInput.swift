@@ -232,5 +232,23 @@ public final class ControllerInput {
         let devName = dev != 0 ? name(dev) : ""
         return devName.withCString { d in name(src).withCString { e in rfme_fm1_candidate(hasUSB ? 1 : 0, usb, d, e) } } != 0
     }
+
+    /// a source on Bluetooth MIDI (its device's driver says so)
+    nonisolated static func bluetooth(_ src: MIDIEndpointRef) -> Bool {
+        var ent = MIDIEntityRef(), dev = MIDIDeviceRef()
+        guard MIDIEndpointGetEntity(src, &ent) == noErr, ent != 0, MIDIEntityGetDevice(ent, &dev) == noErr, dev != 0
+        else { return false }
+        var drv: Unmanaged<CFString>?
+        MIDIObjectGetStringProperty(dev, kMIDIPropertyDriverOwner, &drv)
+        return ((drv?.takeRetainedValue() as String?) ?? "").localizedCaseInsensitiveContains("Bluetooth")
+    }
+
+    /// an FM-1 on a USB cable now (a source of it that isn't Bluetooth MIDI)
+    nonisolated static func fm1OnUSB() -> Bool {
+        (0..<MIDIGetNumberOfSources()).contains { i in
+            let s = MIDIGetSource(i)
+            return s != 0 && !offline(s) && !bluetooth(s) && isFM1(s)
+        }
+    }
     #endif
 }

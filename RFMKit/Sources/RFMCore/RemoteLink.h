@@ -146,6 +146,7 @@ public:
         bool audioWanted = false, audio = false;
         uint32_t audioRate = 0, audioBlocks = 0, audioWire = 0, audioBufferMs = 0, audioFillMs = 0, audioLost = 0;
         uint32_t audioUnderruns = 0, audioSkipped = 0, audioOverflow = 0;
+        uint32_t relinks = 0;                    // sessions started again by relink()
     };
     Status status() const;
     static const char *stateName(State s);
@@ -190,6 +191,9 @@ public:
 
     // ---- any thread: CoreMIDI's setup changed (a Bluetooth device came or went): the session thread rescans
     void requestRescan() { rescan_.store(true, std::memory_order_release); }
+    // ---- any thread: the FM-1's USB port came while the session runs over Bluetooth: the session thread rescans and
+    // looks for the unit again (libremotefm1 picks a USB port before a Bluetooth one only when it looks)
+    void relink() { relink_.store(true, std::memory_order_release); }
 
     // ---- any thread: the device's screen is unknown (a power cycle, a core switch): the next frame resends it all
     void invalidateScreen();
@@ -289,7 +293,8 @@ private:
     std::thread th_;
     std::mutex mu_;                                 // want_ / quit_ changes, the condition variable
     std::condition_variable cv_;
-    std::atomic<bool> want_{false}, quit_{false}, engaged_{false}, fullReq_{false}, invalidate_{false}, rescan_{false};
+    std::atomic<bool> want_{false}, quit_{false}, engaged_{false}, fullReq_{false}, invalidate_{false}, rescan_{false},
+        relink_{false};
     EventQueue<4096> q_;
     EventQueue<1024, MidiMsg> midiQ_;                // (TRS MIDI in) the session thread -> the panel's consumer
     TripleBuffer tb_;
@@ -323,5 +328,5 @@ private:
     mutable std::mutex stMu_;
     Status st_;
     std::atomic<uint32_t> trsMidiIn_{0}, trsMidiDropped_{0};
-    std::atomic<uint32_t> eventsIn_{0}, eventsDropped_{0}, snapshotsTaken_{0}, fullResends_{0}, runs_{0};
+    std::atomic<uint32_t> eventsIn_{0}, eventsDropped_{0}, snapshotsTaken_{0}, fullResends_{0}, runs_{0}, relinks_{0};
 };

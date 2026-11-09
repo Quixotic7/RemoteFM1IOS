@@ -725,7 +725,7 @@ struct MainScreen: View {
     }
 
     /// the chip's quick menu (a tap on the chip; the grabber opens the full sheet): where the firmware runs, the FM-1's
-    /// Use this FM-1 when another instance has it, Sound on the FM-1 (on a link that can), Bluetooth. Any choice or a tap
+    /// Use this FM-1 when another instance has it, Sound on the FM-1 (on a link that can: USB, or Bluetooth with 0.3.6), Bluetooth. Any choice or a tap
     /// outside closes it (the switch doesn't).
     private var chipMenuView: some View {
         let done = { withAnimation(.easeOut(duration: 0.15)) { chipMenu = false } }
@@ -1204,16 +1204,18 @@ struct MainScreen: View {
                       + "playing and your FM-1 stays linked. The lock screen's play controls don't show while it's on.")
             if player.soundOnFM1 || fm1CanPlaySound {
                 SheetList {
-                    SheetToggle("Sound on the FM-1 over Bluetooth",
+                    SheetToggle("Sound on the FM-1",
                                 on: Binding(get: { player.soundOnFM1 }, set: { player.soundOnFM1 = $0 }), divider: false)
                 }
                 .padding(.top, 14)
-                SheetNote("Your FM-1 plays the firmware's sound and shows \"RemoteFM1\" instead of the screen; this "
-                          + "device is silent and still shows the screen. Bluetooth only, RemoteFM1 0.3.6 or later. The "
-                          + "sound is mono and a little behind the keys (about 0.2 s).")
+                SheetNote("Over USB the sound plays out of the FM-1's USB audio and its screen keeps updating; off, it "
+                          + "plays on this \(UIDevice.current.model)'s speaker. Over Bluetooth (RemoteFM1 0.3.6 or later) "
+                          + "your FM-1 plays the sound and shows \"RemoteFM1\" instead of the screen; the sound is mono "
+                          + "and a little behind the keys (about 0.2 s).")
                 if player.soundOnFM1 {
-                    Live { SheetNote(fm1CanPlaySound || controller.stats.audio ? controller.stats.audioText
-                                     : "Waiting for an FM-1 with RemoteFM1 0.3.6 over Bluetooth.") }
+                    Live { SheetNote(controller.linkedOverUSB ? "Over USB: the sound goes to \(AudioRoute.name(player.outputs))."
+                                     : fm1CanPlaySound || controller.stats.audio ? controller.stats.audioText
+                                     : "Waiting for your FM-1 over USB, or over Bluetooth with RemoteFM1 0.3.6.") }
                 }
             }
             Live {
@@ -1286,8 +1288,10 @@ struct MainScreen: View {
         }
     }
 
-    /// a Bluetooth link to an FM-1 whose RemoteFM1 can play the sound (0.3.6: HELLO_R caps bit 11)
+    /// a link to an FM-1 that can play the sound: over USB (its USB audio), or over Bluetooth with RemoteFM1 0.3.6
+    /// (HELLO_R caps bit 11)
     private var fm1CanPlaySound: Bool {
+        if controller.linkedOverUSB { return true }
         guard case .connected(let ble) = controller.state, ble else { return false }
         return controller.hello?.hasBleAudio == true
     }

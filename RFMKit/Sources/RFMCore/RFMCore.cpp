@@ -384,6 +384,7 @@ int rfmc_claim(rfmc_t *c, uint32_t wait_ms, rfml_claim_t *out)
 void rfmc_drop(rfmc_t *c) { c->link.drop(); }
 
 void rfmc_rescan(rfmc_t *c) { c->link.requestRescan(); }
+void rfmc_relink(rfmc_t *c) { c->link.relink(); }
 
 static void copyStr(char *dst, size_t n, const char *src)
 {
@@ -424,6 +425,7 @@ void rfmc_status(rfmc_t *c, rfmc_status_t *st)
     st->audio_underruns = s.audioUnderruns;
     st->audio_skipped = s.audioSkipped;
     st->audio_overflow = s.audioOverflow;
+    st->relinks = s.relinks;
     st->events_dropped = s.eventsDropped;
     st->snapshots = s.snapshotsTaken;
     st->colors = s.colors;

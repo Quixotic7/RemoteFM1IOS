@@ -150,6 +150,7 @@ RemoteLink::Status RemoteLink::status() const
     s.eventsDropped = eventsDropped_.load();
     s.snapshotsTaken = snapshotsTaken_.load();
     s.fullResends = fullResends_.load();
+    s.relinks = relinks_.load();
     s.runs = runs_.load();
     s.drops = drops_.load();
     s.gateBlocked = gateBlocked_.load();
@@ -353,6 +354,12 @@ void RemoteLink::runOnce()
             break;
         if (!fakePath && rescan_.exchange(false, std::memory_order_acq_rel))
             rfm_mac_rescan(mac_);
+        if (relink_.exchange(false, std::memory_order_acq_rel) && !stopping) {
+            if (!fakePath)
+                rfm_mac_rescan(mac_);            // (the new port a link before the unit is looked for)
+            rfm_session_restart(s_, t);          // (a new SESSION: the unit leaves an audio mode with the old one)
+            relinks_.fetch_add(1);
+        }
         if (fakePath)
             pumpFake(t);
         else
