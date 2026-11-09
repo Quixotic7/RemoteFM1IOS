@@ -390,6 +390,7 @@ public final class CorePlayer {
     deinit {
         if let o = libraryObserver { NotificationCenter.default.removeObserver(o) }
         poller?.cancel()
+        watchdog?.cancel()
         mapFollower.stop()
         rfme_free(e)
     }
@@ -837,6 +838,10 @@ public final class CorePlayer {
         node = n
         audioRunning = true
         interrupted = false
+        #if os(iOS)
+        startedOnUSB = AudioRoute.current.contains(where: \.usb)
+        #endif
+        watchAudio()
         installTap()
         // the core thread rendering ahead joins the output's audio workgroup (kAudioOutputUnitProperty_OSWorkgroup),
         // asked a moment later and only of the engine still playing: asked during a device change it crashed in the HAL.
@@ -895,6 +900,42 @@ public final class CorePlayer {
         #else
         audioText = String(format: "%.0f Hz", rate)
         #endif
+    }
+
+    // MARK: the watchdog (2026-11-08, the owner: Bluetooth link, the FM-1 plugged in over USB and pulled again: no
+    // sound anywhere, back only after locking the phone; the engine had restarted while iOS still had the FM-1's
+    // USB audio, and kept "running" there once it was gone)
+
+    @ObservationIgnored private var watchdog: Task<Void, Never>?
+    @ObservationIgnored private var startedOnUSB = false
+    @ObservationIgnored private var lastRestart = Date.distantPast
+
+    /// once a second while the sound plays: a new engine when its renders stopped, or when it started on a USB output
+    /// (the FM-1's) that's gone now. At most one every 3 s
+    private func watchAudio() {
+        guard watchdog == nil else { return }
+        watchdog = Task { @MainActor [weak self] in
+            var lastRenders: UInt64 = 0, still = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                guard audioRunning, engine != nil, !suspended, !interrupted, !restartPending else { still = 0; continue }
+                var r = rfme_status_t()
+                rfme_status(e, &r)
+                still = r.renders == lastRenders ? still + 1 : 0
+                lastRenders = r.renders
+                #if os(iOS)
+                let usbGone = startedOnUSB && !AudioRoute.current.contains(where: \.usb)
+                #else
+                let usbGone = false
+                #endif
+                guard still >= 2 || usbGone, Date().timeIntervalSince(lastRestart) > 3 else { continue }
+                log.info("audio: \(usbGone ? "the USB output it played to is gone" : "no renders for 2 s"); a new engine")
+                lastRestart = Date()
+                still = 0
+                audioConfigurationChanged()
+            }
+        }
     }
 
     func stopAudio() {
