@@ -151,6 +151,19 @@ final class FirmwareInstallTests: XCTestCase {
         XCTAssertEqual(RemoteFM1Version(identity: "FM-1_52000203"), RemoteFM1Version(0, 2, 3))
         XCTAssertEqual(RemoteFM1Version(identity: "FM-1_52011005"), RemoteFM1Version(1, 10, 5))
         XCTAssertNil(RemoteFM1Version(identity: "FM-1_5200"), "a dev build has no version")
+        // 0.3.7 on: FM-1_72XXYYZZ (QUADRO's 1.x is FM-1_5201xxxx); both read
+        XCTAssertEqual(RemoteFM1Version(identity: "FM-1_52000306"), RemoteFM1Version(0, 3, 6))
+        XCTAssertEqual(RemoteFM1Version(identity: "FM-1_72000307"), RemoteFM1Version(0, 3, 7))
+        XCTAssertEqual(RemoteFM1Version(identity: "FM-1_72010000"), RemoteFM1Version(1, 0, 0))
+        XCTAssertNil(RemoteFM1Version(identity: "FM-1_7200"), "a dev build has no version")
+        XCTAssertNil(RemoteFM1Version(identity: "FM-1_62000307"))
+        XCTAssertEqual(RemoteFM1Version(0, 3, 6).identity, "FM-1_52000306")
+        XCTAssertEqual(RemoteFM1Version(0, 3, 7).identity, "FM-1_72000307")
+        XCTAssertEqual(RemoteFM1Version(1, 0, 0).identity, "FM-1_72010000")
+        for dev in ["FM-1_5200", "FM-1_7200"] {
+            XCTAssertEqual(InstallSummary.name(of: dev), "a RemoteFM1 development build")
+        }
+        XCTAssertEqual(InstallSummary.name(of: "FM-1_72000307"), "RemoteFM1 0.3.7")
         XCTAssertNil(RemoteFM1Version(identity: "FM-1_015"))
         XCTAssertNil(RemoteFM1Version(identity: "ota-FM-1_900"))
         XCTAssertEqual(RemoteFM1Version(0, 2, 3).identity, "FM-1_52000203")

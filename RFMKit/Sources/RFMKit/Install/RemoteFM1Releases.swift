@@ -29,19 +29,28 @@ public struct RemoteFM1Version: Comparable, Hashable, Sendable, CustomStringConv
         self.init(parts[0]!, parts[1]!, parts.count > 2 ? parts[2]! : 0)
     }
 
-    /// RemoteFM1's release identities: FM-1_52XXYYZZ is XX.YY.ZZ (firmware/fm1.toml's id_prefix "FM-1_52"; a dev
-    /// build reports FM-1_5200, which has no version). nil for anything else, including 0.1.x's FM-1_015 (V15's)
+    /// RemoteFM1's release identities: FM-1_52XXYYZZ (0.2.0 to 0.3.6) or FM-1_72XXYYZZ (0.3.7 on: QUADRO's 1.x is
+    /// FM-1_5201xxxx, so RemoteFM1 1.0 would have collided) is XX.YY.ZZ; a dev build reports FM-1_5200 or FM-1_7200,
+    /// which has no version. nil for anything else, including 0.1.x's FM-1_015 (V15's)
     public init?(identity: String) {
-        guard identity.hasPrefix(Self.identityPrefix) else { return nil }
-        let digits = identity.dropFirst(Self.identityPrefix.count)
+        guard let p = Self.identityPrefixes.first(where: { identity.hasPrefix($0) }) else { return nil }
+        let digits = identity.dropFirst(p.count)
         guard digits.count == 6, let n = Int(digits) else { return nil }
         self.init(n / 10000, (n / 100) % 100, n % 100)
     }
 
-    public static let identityPrefix = "FM-1_52"
+    /// the prefix before 0.3.7, and from it on
+    public static let identityPrefix = "FM-1_52", identityPrefix72 = "FM-1_72"
+    public static let identityPrefixes = [identityPrefix, identityPrefix72]
+
+    /// a RemoteFM1 development build (no version)
+    public static func isDevBuild(_ identity: String) -> Bool { identityPrefixes.contains { identity == $0 + "00" } }
 
     /// the identity a release with this version installs as
-    public var identity: String { String(format: "\(Self.identityPrefix)%02d%02d%02d", major, minor, patch) }
+    public var identity: String {
+        let p = self < RemoteFM1Version(0, 3, 7) ? Self.identityPrefix : Self.identityPrefix72
+        return String(format: "\(p)%02d%02d%02d", major, minor, patch)
+    }
 
     public var description: String { "\(major).\(minor).\(patch)" }
 

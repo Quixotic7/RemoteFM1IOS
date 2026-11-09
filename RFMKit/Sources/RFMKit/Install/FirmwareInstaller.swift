@@ -65,7 +65,7 @@ public struct InstallSummary: Equatable, Sendable {
     public static func name(of identity: String) -> String {
         if let v = RemoteFM1Version(identity: identity) { return "RemoteFM1 \(v)" }
         if identity == "FM-1_015" { return "M-VAVE V15 (or RemoteFM1 0.1)" }
-        if identity == RemoteFM1Version.identityPrefix + "00" { return "a RemoteFM1 development build" }
+        if RemoteFM1Version.isDevBuild(identity) { return "a RemoteFM1 development build" }
         if let id = FM1Identity(text: identity) {
             if id.isLoader { return "its update loader (part-way through an update)" }
             if id.isOpenFirmware { return "M-VAVE's open firmware" }
