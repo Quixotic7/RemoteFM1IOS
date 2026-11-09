@@ -725,7 +725,8 @@ struct MainScreen: View {
     }
 
     /// the chip's quick menu (a tap on the chip; the grabber opens the full sheet): where the firmware runs, the FM-1's
-    /// Use this FM-1 when another instance has it, Bluetooth. Any choice or a tap outside closes it.
+    /// Use this FM-1 when another instance has it, Sound on the FM-1 (on a link that can), Bluetooth. Any choice or a tap
+    /// outside closes it (the switch doesn't).
     private var chipMenuView: some View {
         let done = { withAnimation(.easeOut(duration: 0.15)) { chipMenu = false } }
         return ZStack(alignment: .topLeading) {
@@ -738,6 +739,9 @@ struct MainScreen: View {
                 SheetRow("My FM-1", value: source == .fm1 ? chip.text : nil, chevron: false, check: source == .fm1) { pick(.fm1); done() }
                 if source == .fm1, controller.lease.heldElsewhere || (!controller.isRunning && !controller.lease.owner) {
                     SheetRow("Use this FM-1", chevron: false) { controller.start(); done() }
+                }
+                if player.soundOnFM1 || fm1CanPlaySound {   // (Settings › MIDI & audio's switch; the menu stays open)
+                    SheetToggle("Sound on the FM-1", on: Binding(get: { player.soundOnFM1 }, set: { player.soundOnFM1 = $0 }))
                 }
                 SheetRow("Bluetooth…", divider: false) { done(); showBluetooth = true }
                 Text("RECORDING").font(RFMFonts.ui(11, 700)).tracking(1.2).foregroundStyle(Palette.sheetMuted)
