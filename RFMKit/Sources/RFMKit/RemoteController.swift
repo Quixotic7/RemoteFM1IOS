@@ -150,7 +150,10 @@ public final class RemoteController {
         rescan()
         #if canImport(CoreMIDI)
         let usb = ControllerInput.fm1OnUSB()
-        if usb != fm1OnUSB { fm1OnUSB = usb }
+        if usb != fm1OnUSB {
+            fm1OnUSB = usb
+            onStateChange?()
+        }
         relinks = 0
         #endif
     }
@@ -159,13 +162,7 @@ public final class RemoteController {
     /// its USB audio is a sound card iOS may send the app's sound to (CorePlayer.soundOnFM1)
     public private(set) var fm1OnUSB = false
 
-    /// a session with the real FM-1 over its USB cable (its USB audio then a sound card iOS may play through)
-    public var linkedOverUSB: Bool {
-        guard backend == .device, case .connected(bluetooth: false) = state else { return false }
-        return true
-    }
-
-    /// (CorePlayer) the link's state changed
+    /// (CorePlayer) the link's state or fm1OnUSB changed
     @ObservationIgnored public var onStateChange: (@MainActor () -> Void)?
     @ObservationIgnored private var relinks = 0
     @ObservationIgnored private var lastRelink = Date.distantPast

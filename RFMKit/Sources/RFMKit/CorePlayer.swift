@@ -649,15 +649,20 @@ public final class CorePlayer {
         }
     }
 
-    /// Sound on the FM-1 over its USB cable: on, the sound goes where iOS sends it (the FM-1's USB audio, the sound card
-    /// it just plugged in); off, to this device's speaker (playAndRecord, the speaker override: .playback can't choose
-    /// an output). Over Bluetooth the switch is the link's audio mode instead (rfmc_set_ble_audio)
-    private var wantsSpeaker: Bool { !soundOnFM1 && link?.linkedOverUSB == true }
+    /// Sound on the FM-1 with the FM-1 on a USB cable (linked or not: Firmware runs on This iPhone too): on, the sound
+    /// goes where iOS sends it (the FM-1's USB audio, the sound card it just plugged in); off, playAndRecord (whose
+    /// route picker lists the iPhone and AirPods too; .playback's has only the FM-1 and AirPlay) and, while iOS sends it
+    /// to the FM-1, the speaker override (.playback can't choose an output). An output picked in Audio output stays.
+    /// Over Bluetooth the switch is the link's audio mode instead (rfmc_set_ble_audio)
+    private var wantsSpeaker: Bool { !soundOnFM1 && link?.fm1OnUSB == true }
     @ObservationIgnored private var speakerForced = false
+    @ObservationIgnored private var speakerOverride = false
 
-    /// the link or the switch changed: the sound restarts when where it should go changed
+    /// the link, the FM-1's cable or the switch changed: the sound restarts when where it should go changed, or when
+    /// it should play and doesn't
     func outputRuleChanged() {
-        if audioRunning, wantsSpeaker != speakerForced { configurationChangeSoon() }
+        guard audioRunning else { return }
+        if wantsSpeaker != speakerForced || engine?.isRunning != true { configurationChangeSoon() }
     }
 
     public static let mixKey = "rfm1.mixWithOthers"
@@ -795,7 +800,14 @@ public final class CorePlayer {
             // screen redraw inside one callback then makes it late (a dropout); the speaker's default is longer anyway
             try? s.setPreferredIOBufferDuration(0.010)
             try s.setActive(true)
-            if s.category == .playAndRecord { try? s.overrideOutputAudioPort(speaker ? .speaker : .none) }
+            let outs = s.currentRoute.outputs.map(\.portType)
+            if speaker && (outs.contains(.usbAudio) || (speakerOverride && outs.contains(.builtInSpeaker))) {
+                try? s.overrideOutputAudioPort(.speaker)
+                speakerOverride = true
+            } else if speakerOverride {
+                if !speaker { try? s.overrideOutputAudioPort(.none) }   // (else another output was picked: it stays)
+                speakerOverride = false
+            }
             if speaker != speakerForced {
                 log.info("audio: \(speaker ? "this device's speaker, not the FM-1's USB audio" : "the system's route")")
             }

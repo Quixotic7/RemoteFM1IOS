@@ -1213,7 +1213,7 @@ struct MainScreen: View {
                           + "your FM-1 plays the sound and shows \"RemoteFM1\" instead of the screen; the sound is mono "
                           + "and a little behind the keys (about 0.2 s).")
                 if player.soundOnFM1 {
-                    Live { SheetNote(controller.linkedOverUSB ? "Over USB: the sound goes to \(AudioRoute.name(player.outputs))."
+                    Live { SheetNote(controller.fm1OnUSB ? "Over USB: the sound goes to \(AudioRoute.name(player.outputs))."
                                      : fm1CanPlaySound || controller.stats.audio ? controller.stats.audioText
                                      : "Waiting for your FM-1 over USB, or over Bluetooth with RemoteFM1 0.3.6.") }
                 }
@@ -1288,10 +1288,10 @@ struct MainScreen: View {
         }
     }
 
-    /// a link to an FM-1 that can play the sound: over USB (its USB audio), or over Bluetooth with RemoteFM1 0.3.6
-    /// (HELLO_R caps bit 11)
+    /// an FM-1 that can play the sound: on a USB cable (its USB audio, linked or not), or linked over Bluetooth with
+    /// RemoteFM1 0.3.6 (HELLO_R caps bit 11)
     private var fm1CanPlaySound: Bool {
-        if controller.linkedOverUSB { return true }
+        if controller.fm1OnUSB { return true }
         guard case .connected(let ble) = controller.state, ble else { return false }
         return controller.hello?.hasBleAudio == true
     }

@@ -9,7 +9,8 @@ final class AudioRouteTests: XCTestCase {
     func testActions() {
         for c: AudioRoute.Cause in [.newDevice, .oldDeviceGone, .categoryChange, .override, .other] {
             XCTAssertEqual(AudioRoute.action(c, audioOn: false, engineRunning: false), .none, "sound off: nothing")
-            XCTAssertEqual(AudioRoute.action(c, audioOn: true, engineRunning: true), .rename, "still running: the name")
+            XCTAssertEqual(AudioRoute.action(c, audioOn: true, engineRunning: true), c == .oldDeviceGone ? .restart : .rename,
+                           "still running: the name (a device gone: a new engine anyway)")
             XCTAssertEqual(AudioRoute.action(c, audioOn: true, engineRunning: false), .restart, "stopped: a new engine")
         }
     }

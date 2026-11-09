@@ -21,9 +21,11 @@ public enum AudioRoute {
     /// after a route change: the name always read again; the engine started again when it stopped (iOS stops it when the
     /// device in use goes, e.g. the FM-1's USB cable pulled) or never ran. A rate or buffer change also posts
     /// AVAudioEngineConfigurationChange, which restarts it (CorePlayer.audioConfigurationChanged).
+    /// The device in use gone (the FM-1's USB cable pulled) restarts it even when it says it runs: it may be left
+    /// playing to nothing (2026-11-08, the owner: no sound anywhere after pulling the cable)
     public static func action(_ cause: Cause, audioOn: Bool, engineRunning: Bool) -> Action {
         guard audioOn else { return .none }
-        return engineRunning ? .rename : .restart
+        return engineRunning && cause != .oldDeviceGone ? .rename : .restart
     }
 
     public struct Output: Sendable, Equatable {
@@ -39,7 +41,7 @@ public enum AudioRoute {
 
     /// a hint under the row when the sound goes to a USB sound card (the FM-1)
     public static func hint(_ outs: [Output]) -> String? {
-        outs.contains(where: \.usb) ? "The sound goes out of the FM-1's USB audio. Tap Audio output for the iPhone, AirPods or headphones." : nil
+        outs.contains(where: \.usb) ? "The sound goes out of the FM-1's USB audio. Turn off Sound on the FM-1 for this device's speaker, AirPods or headphones." : nil
     }
 
     #if os(iOS)
