@@ -3,6 +3,11 @@
 // RFMCore: RemoteLink and the M1 producer (see include/RFMCore.h). M3: an engine (RFMEngine.cpp) can take the link
 // over (rfmc_set_external): the producer then neither pops the panel's events nor publishes, and the engine reports
 // what it applied back here for the app's Panel card. M4: the lease (rfmc_set_lease, rfmc_claim) and the shared fake.
+#include <cstdio>
+#include <mutex>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 #include "RFMCore.h"
 #include "RFMInternal.h"
 
@@ -384,6 +389,35 @@ int rfmc_claim(rfmc_t *c, uint32_t wait_ms, rfml_claim_t *out)
 void rfmc_drop(rfmc_t *c) { c->link.drop(); }
 
 void rfmc_rescan(rfmc_t *c) { c->link.requestRescan(); }
+
+static std::mutex g_diagMu;
+static FILE *g_diag = nullptr;
+
+void rfmc_set_diag_path(const char *path)
+{
+    std::lock_guard<std::mutex> g(g_diagMu);
+    if (g_diag)
+        fclose(g_diag);
+    g_diag = nullptr;
+    if (!path || !*path)
+        return;
+    struct stat st{};
+    const bool big = ::stat(path, &st) == 0 && st.st_size > (1 << 20);
+    g_diag = fopen(path, big ? "w" : "a");
+}
+
+void rfmc_diag(const char *line)
+{
+    std::lock_guard<std::mutex> g(g_diagMu);
+    if (!g_diag || !line)
+        return;
+    struct timeval tv{};
+    gettimeofday(&tv, nullptr);
+    struct tm tm{};
+    localtime_r(&tv.tv_sec, &tm);
+    fprintf(g_diag, "%02d:%02d:%02d.%03d %s\n", tm.tm_hour, tm.tm_min, tm.tm_sec, (int)(tv.tv_usec / 1000), line);
+    fflush(g_diag);
+}
 void rfmc_relink(rfmc_t *c) { c->link.relink(); }
 
 static void copyStr(char *dst, size_t n, const char *src)

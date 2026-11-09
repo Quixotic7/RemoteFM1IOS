@@ -4,6 +4,10 @@
 // no bulk side either, so it is SysEx only like the real unit here. M4: no unit lock when lockPath is empty (the
 // lease decides); the gate and the drop path (no SESSION 0); the process-wide shared fake (SharedFake.h).
 // Remote FM-1: the session thread, the unit lock, the back ends (see RemoteLink.h).
+#ifdef __APPLE__
+#include <os/log.h>
+#endif
+#include "include/RFMCore.h"
 #include "RemoteLink.h"
 
 #include <errno.h>
@@ -388,7 +392,10 @@ void RemoteLink::runOnce()
         }
         pumpAudio();
         rfm_session_poll(s_, t);
-        audioOn_.store(rfm_session_audio_on(s_) != 0, std::memory_order_release);
+        if (const bool on = rfm_session_audio_on(s_) != 0; on != audioOn_.load(std::memory_order_relaxed)) {
+            audioOn_.store(on, std::memory_order_release);
+            cbLog(this, on ? "this device silent: the FM-1 plays the sound" : "this device plays the sound again");
+        }
         if (fakePath)
             pumpFake(t);
         if (!stopping)
@@ -658,6 +665,11 @@ void RemoteLink::cbRescan(void *ctx)
 
 void RemoteLink::cbLog(void *ctx, const char *m)
 {
+#ifdef __APPLE__
+    static os_log_t lg = os_log_create("com.quixotic7.remotefm1", "link");   // (the phone's log too: sudo log collect)
+    os_log(lg, "%{public}s", m ? m : "");
+#endif
+    rfmc_diag(m);
     RemoteLink *self = static_cast<RemoteLink *>(ctx);
     std::lock_guard<std::mutex> g(self->stMu_);
     self->st_.lastLog = m ? m : "";

@@ -48,6 +48,10 @@ void rfmc_start(rfmc_t *c);
 void rfmc_stop(rfmc_t *c);
 void rfmc_set_pattern(rfmc_t *c, int on);
 void rfmc_rescan(rfmc_t *c);    // CoreMIDI's setup changed
+// a diagnostics file (each line timestamped, appended; started again past 1 MB): the link's log lines and the app's
+// own (rfmc_diag); NULL or "" turns it off. Copied off a phone with devicectl
+void rfmc_set_diag_path(const char *path);
+void rfmc_diag(const char *line);
 void rfmc_relink(rfmc_t *c);    // look for the unit again (its USB port came during a Bluetooth session)
 // TOUCH: velocity and pressure from the FM-1's keys (RFMC_TOUCH_*; default both). Asked after each SESSION start's
 // ACK from a unit with RFMC_CAP_TOUCH, and at once when changed; 0: not asked (velocity 100, no pressure, as before)

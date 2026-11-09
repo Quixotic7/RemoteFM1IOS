@@ -351,6 +351,10 @@ public final class CorePlayer {
         if let core = link?.core { rfmc_set_ble_audio(core, midiDefaults.bool(forKey: Self.soundOnFM1Key) ? 1 : 0) }
         mapFollower = MidiMapFollower(engine: e)
         link?.onStateChange = { [weak self] in self?.outputRuleChanged() }
+        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            rfmc_set_diag_path(caches.appendingPathComponent("diag.log").path)
+            rfmc_diag("--- RemoteFM1 started")
+        }
         applyMidiSettings()
         rfms_scan(slotsDir)
         rescan()
@@ -662,6 +666,7 @@ public final class CorePlayer {
     /// the link, the FM-1's cable or the switch changed: the sound restarts when where it should go changed, or when
     /// it should play and doesn't
     func outputRuleChanged() {
+        diag("audio: link \(String(describing: self.link?.state)), FM-1 on USB \(self.link?.fm1OnUSB ?? false), sound on the FM-1 \(self.soundOnFM1), running \(self.audioRunning) \(self.engine?.isRunning ?? false)")
         guard audioRunning else { return }
         if wantsSpeaker != speakerForced || engine?.isRunning != true { configurationChangeSoon() }
     }
@@ -697,8 +702,23 @@ public final class CorePlayer {
         interruptObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
             let t = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+            let why = (n.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt).flatMap(AVAudioSession.InterruptionReason.init)
             MainActor.assumeIsolated {
-                if t == .began { self?.audioInterrupted() } else if t == .ended { self?.resumeAudioIfNeeded() }
+                guard let self else { return }
+                if t == .began {
+                    self.audioInterrupted()
+                    // the device it played to gone (the FM-1's USB cable pulled): no end comes, so the sound starts
+                    // again on the route iOS picks now (2026-11-08, the owner: silent after the unplug until the
+                    // phone was locked; the diagnostics file showed this interruption right after the restart)
+                    if why == .routeDisconnected {
+                        self.diag("audio: interrupted, its route disconnected: started again")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                            MainActor.assumeIsolated { self?.resumeAudioIfNeeded() }
+                        }
+                    }
+                } else if t == .ended {
+                    self.resumeAudioIfNeeded()
+                }
             }
         }
         resetObserver = NotificationCenter.default.addObserver(
@@ -711,7 +731,7 @@ public final class CorePlayer {
     func audioInterrupted() {
         guard engine != nil else { return }
         interrupted = true
-        log.info("audio: taken by another app; the firmware runs on its timer")
+        diag("audio: taken by another app; the firmware runs on its timer")
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
         stopAudio()
     }
@@ -721,7 +741,7 @@ public final class CorePlayer {
         let was = interrupted
         interrupted = false
         guard mode == .core, audioOn, !suspended, engine?.isRunning != true else { return }
-        if was { log.info("audio: back after an interruption") }
+        if was { diag("audio: back after an interruption") }
         rfme_set_clock(e, Int32(RFME_CLOCK_TIMER))
         stopAudio()
         applyClock()
@@ -810,7 +830,7 @@ public final class CorePlayer {
                 speakerOverride = false
             }
             if speaker != speakerForced {
-                log.info("audio: \(speaker ? "this device's speaker, not the FM-1's USB audio" : "the system's route")")
+                diag("audio: \(speaker ? "this device's speaker, not the FM-1's USB audio" : "the system's route")")
             }
             speakerForced = speaker
         } catch {
@@ -840,6 +860,7 @@ public final class CorePlayer {
         interrupted = false
         #if os(iOS)
         startedOnUSB = AudioRoute.current.contains(where: \.usb)
+        diag("audio: started, \(AVAudioSession.sharedInstance().category.rawValue), \(rate) Hz, \(AudioRoute.name(AudioRoute.current))")
         #endif
         watchAudio()
         installTap()
@@ -883,6 +904,7 @@ public final class CorePlayer {
         routeChanges += 1
         #if os(iOS)
         outputs = AudioRoute.current
+        diag("audio: route \(String(describing: cause)) → \(AudioRoute.name(self.outputs)), engine running \(self.engine?.isRunning ?? false)")
         #endif
         switch AudioRoute.action(cause, audioOn: mode == .core && audioOn, engineRunning: engine?.isRunning ?? false) {
         case .none: break
@@ -907,6 +929,14 @@ public final class CorePlayer {
     // USB audio, and kept "running" there once it was gone)
 
     @ObservationIgnored private var watchdog: Task<Void, Never>?
+
+    /// a line in the unified log and the diagnostics file (rfmc_diag: Library/Caches/diag.log)
+    func diag(_ s: String) {
+        log.info("\(s, privacy: .public)")
+        rfmc_diag(s)
+        lastDiag = Date()
+    }
+    @ObservationIgnored private var lastDiag = Date.distantPast
     @ObservationIgnored private var startedOnUSB = false
     @ObservationIgnored private var lastRestart = Date.distantPast
 
@@ -915,13 +945,23 @@ public final class CorePlayer {
     private func watchAudio() {
         guard watchdog == nil else { return }
         watchdog = Task { @MainActor [weak self] in
-            var lastRenders: UInt64 = 0, still = 0
+            var lastRenders: UInt64 = 0, still = 0, ticks = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self else { return }
                 guard audioRunning, engine != nil, !suspended, !interrupted, !restartPending else { still = 0; continue }
                 var r = rfme_status_t()
                 rfme_status(e, &r)
+                if ticks % 2 == 0, Date().timeIntervalSince(lastDiag) < 30 {   // (the 30 s after an audio event)
+                    #if os(iOS)
+                    let route = AudioRoute.name(AudioRoute.current)
+                    #else
+                    let route = ""
+                    #endif
+                    let fm1 = link?.core.map { rfmc_ble_audio_on($0) != 0 } ?? false
+                    rfmc_diag("tick: renders \(r.renders), engine running \(engine?.isRunning ?? false), \(route), link \(String(describing: link?.state)), FM-1 plays \(fm1)")
+                }
+                ticks += 1
                 still = r.renders == lastRenders ? still + 1 : 0
                 lastRenders = r.renders
                 #if os(iOS)
@@ -930,7 +970,7 @@ public final class CorePlayer {
                 let usbGone = false
                 #endif
                 guard still >= 2 || usbGone, Date().timeIntervalSince(lastRestart) > 3 else { continue }
-                log.info("audio: \(usbGone ? "the USB output it played to is gone" : "no renders for 2 s"); a new engine")
+                diag("audio: \(usbGone ? "the USB output it played to is gone" : "no renders for 2 s"); a new engine")
                 lastRestart = Date()
                 still = 0
                 audioConfigurationChanged()
