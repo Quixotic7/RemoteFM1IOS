@@ -18,6 +18,7 @@ final class AppMidi {
     let learn: MidiLearnMode
     let omx: OmxLink
     let omxTarget: PanelOmxTarget
+    let move: MoveController
     let thumbCapture = ThumbCapture()
     private var terminate: NSObjectProtocol?
 
@@ -29,7 +30,8 @@ final class AppMidi {
         learn = MidiLearnMode(feed: feed, host: player)
         omxTarget = PanelOmxTarget(feed: feed)
         omx = OmxLink(target: omxTarget)
-        let omx = omx, input = input
+        move = MoveController(player: player)
+        let omx = omx, input = input, move = move
         input.exclude = { e in MainActor.assumeIsolated { omx.owns(e) } }
         input.reconnect()
         omx.onActive = { _ in input.reconnect() }
@@ -43,6 +45,7 @@ final class AppMidi {
         terminate = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification,
                                                            object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { omx.willClose() }
+            MainActor.assumeIsolated { move.shutdown() }
         }
         omx.auto()
     }

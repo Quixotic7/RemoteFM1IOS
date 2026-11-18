@@ -6,7 +6,7 @@
 // API the app and the extension use. FM1Kit (MIT, github.com/ocean/FM1Kit): installing RemoteFM1 on the FM-1 (Install/).
 import PackageDescription
 
-let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 0.3.6 (Bluetooth audio, host/src/audio.c), its own submodule
+let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 main 18c6a82 (0.3.6 + the Ableton Move core, host/src/move), its own submodule
 let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
 let package = Package(
@@ -36,6 +36,16 @@ let package = Package(
                 "\(rfm)/host/src/tiles_ref.c",
                 "\(rfm)/host/src/macos/host.c",
                 "\(rfm)/host/src/macos/usb.c",
+                // the Ableton Move as a panel (rfm_move) on libmoveremote's host side (vendored there, MPL-2.0)
+                "\(rfm)/host/src/move/move.c",
+                "\(rfm)/host/src/move/project.c",
+                "\(rfm)/host/src/move/screen.c",
+                "\(rfm)/host/src/move/seq.c",
+                "\(rfm)/host/src/move/seq_ui.c",
+                "\(rfm)/host/src/move/v2.c",
+                "\(rfm)/host/third_party/moveremote/host/mr_client.c",
+                "\(rfm)/host/third_party/moveremote/host/mr_gfx.c",
+                "\(rfm)/host/third_party/moveremote/common/font5x7.c",
                 "FM1VST/plugin/RemoteMidi.c",
             ],
             publicHeadersPath: "\(rfm)/host/include",
@@ -44,6 +54,7 @@ let package = Package(
                 .headerSearchPath("\(rfm)/proto"),
                 .headerSearchPath("\(rfm)/firmware/src"),
                 .headerSearchPath("\(rfm)/host/src/macos"),
+                .headerSearchPath("\(rfm)/host/third_party/moveremote/include"),
                 .headerSearchPath("FM1VST/plugin"),
                 .define("RFM_NO_LIBUSB", to: "1"),
             ],
@@ -79,6 +90,7 @@ let package = Package(
                 .headerSearchPath("\(vendorRFM)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
                 .headerSearchPath("\(vendorRFM)/host/src/macos"),      // mac_priv.h (RFMProbe: cm_scan)
+                .headerSearchPath("\(vendorRFM)/host/third_party/moveremote/include"),   // rfm/move.h's client.h
                 .define("FM1_REMOTE_NO_BULK", to: "1"),
                 // a Debug build also links to a fake unit on a virtual CoreMIDI port of this name (RemoteLink.cpp;
                 // elasticatfm1 tools/promo/fake_fm1.py): an iPad app on a Mac gets no environment or arguments

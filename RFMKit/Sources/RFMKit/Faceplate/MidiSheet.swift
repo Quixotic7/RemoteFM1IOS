@@ -310,4 +310,67 @@ public struct OmxSection: View {
         }
     }
 }
+
+/// Settings › MIDI & audio › Ableton Move: the switch, the Move's address, the link's status (MoveController)
+public struct MoveSection: View {
+    @Bindable var move: MoveController
+
+    public init(move: MoveController) { self.move = move }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("An Ableton Move running Move Remote becomes this FM-1's controller: its pads play the keys, its knobs "
+                 + "and buttons are the FM-1's, and its screen and lights follow the firmware. Track 1 to 4 pick FM-1, "
+                 + "MIDI, Control and Sequencer mode.")
+                .font(RFMFonts.ui(13)).foregroundStyle(Palette.sheetMuted2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 10)
+            SheetList {
+                SheetToggle("Use my Ableton Move", on: $move.enabled)
+                HStack {
+                    Text("Address").font(RFMFonts.ui(15, 600)).foregroundStyle(Palette.sheetText)
+                    Spacer(minLength: 12)
+                    TextField("move.local", text: $move.host)
+                        .multilineTextAlignment(.trailing)
+                        .font(RFMFonts.ui(15))
+                        .foregroundStyle(Palette.sheetMuted2)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        #endif
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 52)
+            }
+            if move.enabled {
+                SheetStatus(move.status.summary, dot: Self.dot(move.status.state), pulsing: move.status.state == .connecting,
+                            color: move.status.state == .connected ? Palette.linkedDot : Palette.sheetMuted)
+                    .padding(.top, 8)
+            }
+            SheetNote("Install Move Remote on the Move (github.com/Quixotic7/abletonmoveremote) and start it; the Move "
+                      + "and this \(Self.device) must be on the same Wi-Fi. The address is move.local, or the Move's IP "
+                      + "address if that doesn't work. The first time, iOS asks to find devices on your local network: "
+                      + "allow it. The sequencer's 32 projects are files in RemoteFM1 › move, the same files as the website's.")
+        }
+    }
+
+    static var device: String {
+        #if os(iOS)
+        UIDevice.current.model
+        #else
+        "Mac"
+        #endif
+    }
+
+    static func dot(_ s: MoveStatus.State) -> Color {
+        switch s {
+        case .off: Palette.sheetDim
+        case .connecting, .retrying: Palette.sheetAccent
+        case .connected: Palette.linkedDot
+        case .error: OmxSection.bad
+        }
+    }
+}
 #endif

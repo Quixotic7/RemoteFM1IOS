@@ -743,6 +743,9 @@ struct MainScreen: View {
                 if player.soundOnFM1 || fm1CanPlaySound {   // (Settings › MIDI & audio's switch; the menu stays open)
                     SheetToggle("Sound on the FM-1", on: Binding(get: { player.soundOnFM1 }, set: { player.soundOnFM1 = $0 }))
                 }
+                if midi.move.enabled || UserDefaults.standard.object(forKey: MoveController.enabledKey) != nil {
+                    SheetToggle("Ableton Move", on: Binding(get: { midi.move.enabled }, set: { midi.move.enabled = $0 }))
+                }
                 SheetRow("Bluetooth…", divider: false) { done(); showBluetooth = true }
                 Text("RECORDING").font(RFMFonts.ui(11, 700)).tracking(1.2).foregroundStyle(Palette.sheetMuted)
                     .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
@@ -1248,6 +1251,8 @@ struct MainScreen: View {
             }, learn: startLearn).id("knobs")
             SheetSectionTitle("OMX-27").id("omx")
             OmxSection(link: midi.omx)
+            SheetSectionTitle("Ableton Move").id("move")
+            MoveSection(move: midi.move)
         }
     }
 

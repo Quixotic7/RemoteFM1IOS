@@ -930,6 +930,9 @@ public final class CorePlayer {
 
     @ObservationIgnored private var watchdog: Task<Void, Never>?
 
+    /// (MoveController) the Ableton Move's core runs on this engine's core thread; nil detaches it
+    public func attachMove(_ m: OpaquePointer?) { rfme_attach_move(e, m) }
+
     /// a line in the unified log and the diagnostics file (rfmc_diag: Library/Caches/diag.log)
     func diag(_ s: String) {
         log.info("\(s, privacy: .public)")

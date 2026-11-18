@@ -169,4 +169,5 @@ static inline rfmc_sender_t rfmc_shared_sender(const rfmc_shared_t *s, uint32_t 
 #include "RFMEngine.h"
 #include "RFMHostClock.h"
 #include "RFMWasm.h"
+#include "RFMMove.h"
 #endif

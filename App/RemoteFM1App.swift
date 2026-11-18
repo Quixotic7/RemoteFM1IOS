@@ -104,6 +104,8 @@ struct RemoteFM1App: App {
         }
         .onChange(of: phase) { _, p in
             if p == .background, let player { Self.saveInBackground(player) }
+            if p == .background { midi?.move.flush() }                 // (the Move's open project saved)
+            if p == .active { midi?.move.refreshProjects() }           // (project files added in Files meanwhile)
             if p == .background, !coreTest { battery?.enteredBackground() }     // (the battery: stop when the setting says)
             if p == .active { battery?.becameActive() }
             if p == .active, let library, let player {          // (files added in the Files app meanwhile)

@@ -942,3 +942,23 @@ the app's sound (mono, 22,050 Hz, 4-bit ADPCM, ~13.7 KB/s) and shows "RemoteFM1"
 - Off, the session over or the link lost: libremotefm1 ends the mode and the screen is sent again.
 - The submodule needs host/src/audio.c in Package.swift.
 - Tests: BleAudioTests (the echo core's CC 23 test tone: decoded on the fake, silent here; off; USB; a unit before 0.3.6).
+
+## 28. The Ableton Move as a controller (2026-11-18, branch move-controller)
+
+The owner's request (relayed by the RemoteFM1 firmware session): the website's Move support (RemoteFM1 PR 20) in the
+app. The plan: side-session notes `move-controller-ios-plan.md`.
+
+- RemoteFM1's rfm_move C core and libmoveremote's client compile into CRemoteFM1 as they are (the submodule at main
+  18c6a82). Nothing of the mapping, screen or sequencer is written again in Swift.
+- MoveLink (RFMCore, C++): a network thread on mr_client (TCP 7720: move.local, an IP, or address:port); the core on
+  the engine's core thread (RFMEngine's between hook, once a device ms): the input applied there, the sequencer
+  advanced by the device clock with its notes into the firmware then, the firmware's MIDI clock back to it, the FM-1's
+  LEDs and screen (byte-swapped: the panel's is big-endian) out. Only queues between the threads. The Android app
+  ports this (agreed with its session).
+- rfmm_* (RFMMove.h): the C API; MoveController (Swift): the switch, the address, the status, the settings in
+  defaults, the 32 projects as files in Documents/move in the web's .rfmmove format (so files go between them).
+- UI: Settings › MIDI & audio › Ableton Move; an "Ableton Move" switch in the top-left menu once it was turned on.
+  NSLocalNetworkUsageDescription (iOS asks on the first connect).
+- Not yet: Sample (the audio loop), the metronome click, the Move's speaker playing the app, the AU, encoder labels.
+- Tests: MoveLinkTests against a fake Move on loopback (connect, LEDs and screen, a pad plays a key, MIDI mode into
+  the firmware, a sequencer step plays on the beat, a lost link reconnects, the project files).
