@@ -1,35 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
-// MoveLink (MoveLink.h): the Ableton Move on libmoveremote's client, the rfm_move core on the engine's core thread.
+// MoveLink (MoveLink.h): rfm1cs-abletonmove's session over a POSIX socket, its core on the engine's core thread.
 
 #include "MoveLink.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 
-#include "moveremote/client.h"
+#include "rfm1cs/posix_tcp.h"
 
 namespace rfm {
 
 namespace {
-constexpr uint32_t kScreenMs = 33;          // the Move's screen at most ~30 a second (the web's SCREEN_MS)
-constexpr uint32_t kLedMs = 5;              // the FM-1's LEDs onto the Move at most every 5 ms (and after input)
-constexpr uint64_t kPingUs = 1000000, kSilentUs = 3000000;   // PING a second; nothing for 3 s: lost (STATUS: 500 ms)
-constexpr int kConnectMs = 3000;
-constexpr int kRetryMs[] = {1000, 2000, 4000};
-constexpr size_t kMaxToCore = 4096;         // (inputs while no firmware runs the core: the oldest go)
+constexpr uint32_t kFrameMs = 33;           // a new FM-1 screen into the session at most this often (its thumbnail)
+constexpr uint32_t kEngineMs = 200;         // the engine ticked this recently: a firmware runs the core
+constexpr size_t kMaxEngineQ = 4096;        // (keys from the network thread waiting for the engine)
+constexpr size_t kMaxMidiIn = 4096;
 
-uint64_t nowUs() { return mr_now_us(); }
+uint32_t nowMs()
+{
+    using namespace std::chrono;
+    return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 } // namespace
 
 MoveLink::MoveLink(const uint8_t *settings, uint32_t n, std::string hostName) : hostName_(std::move(hostName))
 {
-    m_ = static_cast<rfm_move_t *>(std::calloc(1, sizeof(rfm_move_t)));
-    rfm_move_settings_t s;
-    if (!settings || rfm_move_load(&s, settings, n) != 0)
-        rfm_move_settings_default(&s);
-    rfm_move_init(m_, &s, onAct, this);
+    s_ = static_cast<rfm1cs_session_t *>(std::calloc(1, sizeof(rfm1cs_session_t)));   // (~180 KB: not the stack)
+    rfm1cs_session_init(s_, settings, n, hostName_.c_str(), onEvent, this);
+    st_ = *rfm1cs_session_status(s_);
     lcd_.resize(240 * 240);
     net_ = std::thread([this] { netMain(); });
 }
@@ -37,14 +38,17 @@ MoveLink::MoveLink(const uint8_t *settings, uint32_t n, std::string hostName) : 
 MoveLink::~MoveLink()
 {
     {
-        std::lock_guard<std::mutex> g(mu_);
+        std::lock_guard<std::mutex> g(sm_);
+        rfm1cs_session_stop(s_);
+    }
+    {
+        std::lock_guard<std::mutex> g(qmu_);
         quit_ = true;
-        want_ = false;
     }
     cv_.notify_all();
     if (net_.joinable())
         net_.join();
-    std::free(m_);
+    std::free(s_);
 }
 
 // ------------------------------------------------------------------ the app ---
@@ -52,34 +56,80 @@ MoveLink::~MoveLink()
 void MoveLink::start(const std::string &host)
 {
     {
-        std::lock_guard<std::mutex> g(mu_);
-        host_ = host;
-        want_ = true;
+        std::lock_guard<std::mutex> g(qmu_);
+        host_ = host.empty() ? "move.local" : host;
+        lostWhy_ = byeWhy_ = 0;
     }
-    cv_.notify_all();
+    std::lock_guard<std::mutex> g(sm_);
+    if (rfm1cs_session_status(s_)->state != RFM1CS_OFF)
+        rfm1cs_session_stop(s_);                // (another address: from the start)
+    rfm1cs_session_start(s_, nowMs());
+    snap();
 }
 
 void MoveLink::stop()
 {
-    {
-        std::lock_guard<std::mutex> g(mu_);
-        want_ = false;
-    }
-    cv_.notify_all();
+    std::lock_guard<std::mutex> g(sm_);
+    rfm1cs_session_stop(s_);
+    snap();
 }
+
+bool MoveLink::engineLive() const { return nowMs() - (uint32_t)lastTickMs_.load(std::memory_order_relaxed) < kEngineMs; }
 
 MoveLink::Status MoveLink::status() const
 {
-    std::lock_guard<std::mutex> g(mu_);
-    Status s = st_;
-    s.ticking = nowUs() - lastTickUs_.load(std::memory_order_relaxed) < 500000;
+    std::lock_guard<std::mutex> g(qmu_);
+    Status s;
+    s.state = st_.state;
+    s.name = st_.name;
+    s.via = st_.via;
+    s.battery = st_.battery;
+    s.mode = st_.mode;
+    s.project = st_.project;
+    s.playing = st_.playing != 0;
+    s.ticking = engineLive();
+    s.inputs = st_.inputs;
+    s.leds = st_.led_writes;
+    s.screens = st_.screens;
+    s.connects = st_.connects;
     s.seqMidi = seqMidi_.load(std::memory_order_relaxed);
+    const std::string &host = host_;
+    const std::string name = s.name.empty() ? "the Move" : s.name;
+    const std::string again = " Trying again in " + std::to_string((st_.retry_ms + 999) / 1000) + " s.";
+    switch (st_.state) {
+    case RFM1CS_OFF:
+        s.text = byeWhy_ == MR_BYE_REPLACED ? "Another app took the Move."
+               : byeWhy_ ? "The Move left Move Remote." : "Off";
+        break;
+    case RFM1CS_CONNECTING:
+        s.text = "Connecting to " + host + "...";
+        break;
+    case RFM1CS_CONNECTED:
+        s.text = "Connected to " + name + (st_.via == MR_VIA_USB ? " over USB" : st_.via == MR_VIA_WIFI ? " over Wi-Fi" : "");
+        break;
+    case RFM1CS_RETRYING:
+        switch (lostWhy_) {
+        case RFM1CS_WHY_SILENT: s.text = "The Move stopped answering." + again; break;
+        case RFM1CS_WHY_GARBLED: s.text = "The Move's messages didn't make sense." + again; break;
+        case RFM1CS_WHY_NOT_MOVE: s.text = host + " isn't a Move running Move Remote." + again; break;
+        case RFM1CS_WHY_SHUTDOWN: s.text = "The Move shut down: connecting again when it's back."; break;
+        default:
+            s.text = st_.ever_live ? "Link lost." + again
+                                   : "No answer. Is Move Remote running on the Move, and is " + host + " its address?" + again;
+        }
+        break;
+    default:
+        s.text = lostWhy_ == RFM1CS_WHY_PROTO
+                     ? "This Move Remote speaks another protocol version (" + std::to_string(st_.proto) +
+                           "): update the app or Move Remote."
+                     : "Couldn't connect to the Move.";
+    }
     return s;
 }
 
 bool MoveLink::takeRequest(Request &r)
 {
-    std::lock_guard<std::mutex> g(mu_);
+    std::lock_guard<std::mutex> g(qmu_);
     if (requests_.empty())
         return false;
     r = std::move(requests_.front());
@@ -87,222 +137,146 @@ bool MoveLink::takeRequest(Request &r)
     return true;
 }
 
-void MoveLink::post(CoreMsg &&m)
-{
-    std::lock_guard<std::mutex> g(mu_);
-    if (toCore_.size() >= kMaxToCore)
-        toCore_.pop_front();
-    toCore_.push_back(std::move(m));
-}
+static const uint8_t *ptr(const std::vector<uint8_t> &b) { return b.empty() ? nullptr : b.data(); }
 
 void MoveLink::projectsInit(uint32_t dirBits, int openSlot, const std::vector<uint8_t> &openBlob)
 {
-    CoreMsg m{CoreMsg::kInit};
-    m.bits = dirBits;
-    m.slot = openSlot;
-    m.blob = openBlob;
-    post(std::move(m));
+    std::lock_guard<std::mutex> g(sm_);
+    rfm1cs_session_projects_init(s_, nowMs(), dirBits, openSlot, ptr(openBlob), (uint32_t)openBlob.size());
+    snap();
 }
 
 void MoveLink::projectDir(uint32_t bits)
 {
-    CoreMsg m{CoreMsg::kDir};
-    m.bits = bits;
-    post(std::move(m));
+    std::lock_guard<std::mutex> g(sm_);
+    rfm_move_project_dir(&s_->core, bits);
+    rfm1cs_session_redraw(s_, nowMs());
 }
 
 void MoveLink::projectInfo(int slot, const std::vector<uint8_t> &blob)
 {
-    CoreMsg m{CoreMsg::kInfo};
-    m.slot = slot;
-    m.blob = blob;
-    post(std::move(m));
+    std::lock_guard<std::mutex> g(sm_);
+    rfm_move_project_info(&s_->core, slot, ptr(blob), (uint32_t)blob.size());
+    rfm1cs_session_redraw(s_, nowMs());
 }
 
 void MoveLink::projectAnswer(int slot, const std::vector<uint8_t> &blob)
 {
-    CoreMsg m{CoreMsg::kLoad};
-    m.slot = slot;
-    m.blob = blob;
-    post(std::move(m));
+    std::lock_guard<std::mutex> g(sm_);
+    const uint32_t now = nowMs();
+    if (rfm1cs_session_project_answer(s_, now, slot, ptr(blob), (uint32_t)blob.size()) < 0)
+        rfm1cs_session_project_answer(s_, now, slot, nullptr, 0);   // (unreadable: an empty project there)
+    snap();
 }
 
-void MoveLink::flushProject() { post(CoreMsg{CoreMsg::kFlush}); }
-
-void MoveLink::setStatus(State s, const std::string &text)
+void MoveLink::flushProject()
 {
-    std::lock_guard<std::mutex> g(mu_);
-    st_.state = s;
-    st_.text = text;
+    std::lock_guard<std::mutex> g(sm_);
+    rfm1cs_session_flush(s_);
 }
 
-// ------------------------------------------------------------------ the network thread ---
-
-void MoveLink::netMain()
+void MoveLink::snap()
 {
-    std::unique_lock<std::mutex> l(mu_);
-    int retries = 0;
-    while (!quit_) {
-        cv_.wait(l, [this] { return quit_ || want_; });
-        if (quit_)
-            break;
-        const std::string host = host_.empty() ? "move.local" : host_;
-        st_.state = kConnecting;
-        st_.text = "Connecting to " + host + "...";
-        l.unlock();
-        mr_callbacks_t cb{};
-        cb.user = this;
-        cb.on_input = [](void *u, const mr_event_t *ev) {
-            auto *self = static_cast<MoveLink *>(u);
-            self->lastRxUs_.store(nowUs(), std::memory_order_relaxed);
-            CoreMsg m{CoreMsg::kInput};
-            m.ev = *ev;
-            self->post(std::move(m));
-            std::lock_guard<std::mutex> g(self->mu_);
-            self->st_.inputs++;
-        };
-        cb.on_status = [](void *u, const mr_status_t *st) {
-            auto *self = static_cast<MoveLink *>(u);
-            self->lastRxUs_.store(nowUs(), std::memory_order_relaxed);
-            bool changed;
-            {
-                std::lock_guard<std::mutex> g(self->mu_);
-                changed = self->st_.battery != st->battery;
-                self->st_.battery = st->battery;
-            }
-            if (changed) {
-                CoreMsg m{CoreMsg::kBattery};
-                m.a = st->battery;
-                m.b = st->power;
-                self->post(std::move(m));
-            }
-        };
-        cb.on_pong = [](void *u, uint32_t, uint64_t, uint32_t) {
-            static_cast<MoveLink *>(u)->lastRxUs_.store(nowUs(), std::memory_order_relaxed);
-        };
-        cb.on_bye = [](void *u, int reason) { static_cast<MoveLink *>(u)->bye_.store(reason ? reason : -1); };
-        std::string addr = host;                // "address" or "address:port" (port 0: MR_PORT)
-        int port = 0;
-        if (const size_t colon = addr.rfind(':'); colon != std::string::npos && addr.find(':') == colon &&
-            colon + 1 < addr.size() && addr.find_first_not_of("0123456789", colon + 1) == std::string::npos) {
-            port = std::atoi(addr.c_str() + colon + 1);
-            addr.resize(colon);
-        }
-        mr_client_t *c = mr_connect(addr.c_str(), port, hostName_.c_str(), &cb, kConnectMs);
-        if (!c) {
-            const char *e = mr_last_error();
-            const int ms = kRetryMs[retries < 2 ? retries : 2];
-            retries++;
-            l.lock();
-            st_.state = kRetrying;
-            st_.text = std::string(e && *e ? e : "no answer") + ". Is Move Remote running on the Move, and is " + host +
-                       " its address? Trying again in " + std::to_string(ms / 1000) + " s.";
-            cv_.wait_for(l, std::chrono::milliseconds(ms), [this] { return quit_ || !want_; });
-            if (!want_ && !quit_) {
-                st_.state = kOff;
-                st_.text = "Off";
-            }
-            continue;
-        }
-        retries = 0;
-        session(c);
-        mr_close(c);
-        post(CoreMsg{CoreMsg::kLost});
-        l.lock();
-        st_.via = -1;
-        if (!want_ && st_.state != kError) {
-            st_.state = kOff;
-            if (st_.text.empty() || st_.text.rfind("Connected", 0) == 0)
-                st_.text = "Off";
-        }
-    }
+    std::lock_guard<std::mutex> g(qmu_);
+    st_ = *rfm1cs_session_status(s_);
 }
 
-void MoveLink::session(mr_client_t *c)
+// ------------------------------------------------------------------ the session's events (sm_ held) ---
+
+void MoveLink::onEvent(void *ctx, const rfm1cs_event_t *ev) { static_cast<MoveLink *>(ctx)->event(*ev); }
+
+void MoveLink::event(const rfm1cs_event_t &ev)
 {
-    bye_.store(0);
-    mr_config(c, MR_CFG_AUDIO_CLOCK, 0);        // (no AUDIO messages: the app plays its own sound)
-    const mr_hello_t *h = mr_hello(c);
-    {
-        std::lock_guard<std::mutex> g(mu_);
-        st_.state = kConnected;
-        st_.name = h && h->name[0] ? h->name : "Move";
-        st_.via = h ? h->via : -1;
-        st_.text = "Connected to " + st_.name + (st_.via == MR_VIA_USB ? " over USB" : st_.via == MR_VIA_WIFI ? " over Wi-Fi" : "");
-        st_.connects++;
-        ledsOut_.clear();
-        screenDue_ = false;
-    }
-    post(CoreMsg{CoreMsg::kConnected});
-    lastRxUs_.store(nowUs());
-    uint64_t lastPing = nowUs();
-    uint32_t token = 0;
-    std::vector<rfm_move_led_t> leds;
-    std::array<uint8_t, MR_SCREEN_BYTES> screen{};
-    for (;;) {
+    switch (ev.type) {
+    case RFM1CS_EV_SEND:
+    case RFM1CS_EV_OPEN:
+    case RFM1CS_EV_CLOSE: {
+        Out o{ev.type == RFM1CS_EV_SEND ? Out::kSend : ev.type == RFM1CS_EV_OPEN ? Out::kOpen : Out::kClose, {}};
+        if (ev.type == RFM1CS_EV_SEND)
+            o.bytes.assign(ev.data, ev.data + ev.len);
         {
-            std::lock_guard<std::mutex> g(mu_);
-            if (quit_ || !want_)
-                return;
+            std::lock_guard<std::mutex> g(qmu_);
+            out_.push_back(std::move(o));
         }
-        if (mr_poll(c, 2) < 0) {
-            setStatus(kRetrying, "Link lost: connecting again...");
-            return;
-        }
-        if (const int bye = bye_.load()) {
-            std::lock_guard<std::mutex> g(mu_);
-            if (bye == MR_BYE_SHUTDOWN || bye < 0) {
-                st_.state = kRetrying;
-                st_.text = "The Move shut down: connecting again when it's back...";
+        if (ev.type != RFM1CS_EV_SEND)
+            cv_.notify_all();
+        break;
+    }
+    case RFM1CS_EV_ACTION:
+        if (ev.act)
+            act(*ev.act, ev.data, ev.len);
+        break;
+    case RFM1CS_EV_LOST: {
+        std::lock_guard<std::mutex> g(qmu_);
+        lostWhy_ = ev.reason;
+        byeWhy_ = 0;
+        break;
+    }
+    case RFM1CS_EV_BYE: {
+        std::lock_guard<std::mutex> g(qmu_);
+        byeWhy_ = ev.reason ? ev.reason : -1;
+        break;
+    }
+    default:                                    // (RELEASED: no timed MIDI is queued here; STATUS: snap())
+        break;
+    }
+}
+
+void MoveLink::act(const rfm_move_act_t &a, const uint8_t *data, uint32_t len)
+{
+    switch (a.kind) {
+    case RFM_MOVE_ACT_KEY:
+    case RFM_MOVE_ACT_PRESS:
+    case RFM_MOVE_ACT_BTN:
+    case RFM_MOVE_ACT_TURN:
+    case RFM_MOVE_ACT_MASTER:
+    case RFM_MOVE_ACT_MIDI:
+        if (inCore_) {
+            engineAct(a);
+        } else if (engineLive()) {              // (from the network thread: the engine takes it next millisecond)
+            rfm_move_act_t e = a;                // (its MIDI bytes are inline)
+            e.data = nullptr;
+            e.len = 0;
+            std::lock_guard<std::mutex> g(qmu_);
+            if (engineQ_.size() < kMaxEngineQ)
+                engineQ_.push_back(e);
+        }                                       // (no firmware running: nothing to play it into)
+        return;
+    case RFM_MOVE_ACT_SETTINGS:
+    case RFM_MOVE_ACT_PROJECT_SAVE:
+    case RFM_MOVE_ACT_PROJECT_LOAD:
+    case RFM_MOVE_ACT_PROJECT_DELETE:
+    case RFM_MOVE_ACT_PROJECT_CUT:
+    case RFM_MOVE_ACT_PROJECT_COPY:
+    case RFM_MOVE_ACT_PROJECT_PASTE:
+    case RFM_MOVE_ACT_PROJECT_COLOR: {
+        Request r;
+        r.kind = a.kind;
+        r.slot = a.kind == RFM_MOVE_ACT_SETTINGS ? -1 : a.index;
+        r.value = a.value;
+        if (a.kind == RFM_MOVE_ACT_SETTINGS) {
+            if (data && len) {
+                r.data.assign(data, data + len);
             } else {
-                want_ = false;
-                st_.state = kOff;
-                st_.text = bye == MR_BYE_REPLACED ? "Another app took the Move." : "The Move left Move Remote.";
+                r.data.resize(RFM_MOVE_SETTINGS_BYTES);
+                rfm_move_save(&s_->core.s, r.data.data());
             }
-            return;
+        } else if (a.kind == RFM_MOVE_ACT_PROJECT_SAVE && a.data) {
+            r.data.assign(a.data, a.data + a.len);
         }
-        bool sendScreen = false;
-        {
-            std::lock_guard<std::mutex> g(mu_);
-            leds.swap(ledsOut_);
-            if (screenDue_) {
-                screen = screenOut_;
-                screenDue_ = false;
-                sendScreen = true;
-            }
-        }
-        for (const rfm_move_led_t &d : leds) {
-            if (d.rgb)
-                mr_led_rgb(c, d.cc, d.number, d.r, d.g, d.b);
-            else
-                mr_led(c, d.cc, d.number, d.r, 0);
-        }
-        if (sendScreen)
-            mr_display(c, screen.data());
-        {
-            std::lock_guard<std::mutex> g(mu_);
-            st_.leds += (uint32_t)leds.size();
-            st_.screens += sendScreen ? 1 : 0;
-        }
-        leds.clear();
-        const uint64_t t = nowUs();
-        if (t - lastPing >= kPingUs) {
-            lastPing = t;
-            mr_ping(c, ++token);
-        }
-        if (t - lastRxUs_.load(std::memory_order_relaxed) > kSilentUs) {
-            setStatus(kRetrying, "The Move stopped answering: connecting again...");
-            return;
-        }
+        std::lock_guard<std::mutex> g(qmu_);
+        requests_.push_back(std::move(r));
+        return;
+    }
+    default:                                    // (Sample's audio loop, the metronome click: not yet)
+        return;
     }
 }
 
-// ------------------------------------------------------------------ the core thread ---
-
-void MoveLink::onAct(void *ctx, const rfm_move_act_t *a) { static_cast<MoveLink *>(ctx)->act(*a); }
-
-void MoveLink::act(const rfm_move_act_t &a)
+void MoveLink::engineAct(const rfm_move_act_t &a)
 {
+    if (!target_)
+        return;
     rfm_event_t e{};
     switch (a.kind) {
     case RFM_MOVE_ACT_KEY:
@@ -321,169 +295,174 @@ void MoveLink::act(const rfm_move_act_t &a)
         e.type = RFM_EV_MASTER, e.value = a.value;
         break;
     case RFM_MOVE_ACT_MIDI:
-        if (target_ && a.n) {
+        if (a.n) {
             target_->moveMidi(a.bytes, a.n);
             seqMidi_.fetch_add(1, std::memory_order_relaxed);
         }
         return;
-    case RFM_MOVE_ACT_SETTINGS: {
-        Request r;
-        r.kind = a.kind;
-        r.data.resize(RFM_MOVE_SETTINGS_BYTES);
-        rfm_move_save(&m_->s, r.data.data());
-        request(std::move(r));
+    default:
         return;
     }
-    case RFM_MOVE_ACT_PROJECT_SAVE:
-    case RFM_MOVE_ACT_PROJECT_LOAD:
-    case RFM_MOVE_ACT_PROJECT_DELETE:
-    case RFM_MOVE_ACT_PROJECT_CUT:
-    case RFM_MOVE_ACT_PROJECT_COPY:
-    case RFM_MOVE_ACT_PROJECT_PASTE:
-    case RFM_MOVE_ACT_PROJECT_COLOR: {
-        Request r;
-        r.kind = a.kind;
-        r.slot = a.index;
-        r.value = a.value;
-        if (a.kind == RFM_MOVE_ACT_PROJECT_SAVE && a.data)
-            r.data.assign(a.data, a.data + a.len);
-        request(std::move(r));
-        return;
-    }
-    default:                                    // (Sample's audio loop, the metronome: not yet)
-        return;
-    }
-    if (target_)
-        target_->moveEvent(e);
+    target_->moveEvent(e);
 }
 
-void MoveLink::request(Request &&r) { reqPending_.push_back(std::move(r)); }
+// ------------------------------------------------------------------ the network thread ---
 
-void MoveLink::coreMsg(CoreMsg &m, uint32_t ms)
+void MoveLink::netMain()
 {
-    switch (m.kind) {
-    case CoreMsg::kInput:
-        if (live_) {
-            rfm_move_input(m_, &m.ev, ms);
-            screenDirty_ = true;
+    std::vector<uint8_t> buf(16384);
+    int fd = -1;
+    bool connecting = false;
+    std::unique_lock<std::mutex> q(qmu_);
+    while (!quit_) {
+        std::deque<Out> outs;
+        outs.swap(out_);
+        const std::string host = host_;
+        q.unlock();
+        bool failed = false, opened = false;
+        for (Out &o : outs) {
+            switch (o.kind) {
+            case Out::kSend:
+                if (fd >= 0 && !connecting && rfm1cs_tcp_write(fd, o.bytes.data(), (int)o.bytes.size()) != 0) {
+                    rfm1cs_tcp_close(fd);
+                    fd = -1;
+                    failed = true;
+                }
+                break;
+            case Out::kOpen: {
+                if (fd >= 0)
+                    rfm1cs_tcp_close(fd);
+                std::string addr = host;        // "address" or "address:port" (port 0: Move Remote's 7720)
+                int port = 0;
+                if (const size_t colon = addr.rfind(':'); colon != std::string::npos && addr.find(':') == colon &&
+                    colon + 1 < addr.size() && addr.find_first_not_of("0123456789", colon + 1) == std::string::npos) {
+                    port = std::atoi(addr.c_str() + colon + 1);
+                    addr.resize(colon);
+                }
+                fd = rfm1cs_tcp_connect(addr.c_str(), port);
+                connecting = fd >= 0;
+                failed = fd < 0;
+                break;
+            }
+            case Out::kClose:
+                if (fd >= 0)
+                    rfm1cs_tcp_close(fd);
+                fd = -1;
+                connecting = false;
+                failed = false;
+                break;
+            }
         }
-        break;
-    case CoreMsg::kConnected:
-        live_ = true;
-        lastMs_ = ms;
-        rfm_move_leds_invalidate(m_);
-        screenSent_.fill(0xA5);                 // (the first screen goes out whatever it is)
-        screenDirty_ = true;
-        lastLedMs_ = ms - kLedMs;
-        break;
-    case CoreMsg::kLost:
-        if (live_) {
-            rfm_move_release_all(m_);           // (every key, button and note let go; the sequencer stops)
-            rfm_move_project_flush(m_);
+        int n = 0;
+        if (fd >= 0 && connecting) {
+            const int r = rfm1cs_tcp_wait(fd, 2);
+            if (r == 1) {
+                connecting = false;
+                opened = true;
+            } else if (r < 0) {
+                rfm1cs_tcp_close(fd);
+                fd = -1;
+                connecting = false;
+                failed = true;
+            }
+        } else if (fd >= 0) {
+            n = rfm1cs_tcp_read(fd, buf.data(), (int)buf.size(), 2);
+            if (n < 0) {
+                rfm1cs_tcp_close(fd);
+                fd = -1;
+                failed = true;
+                n = 0;
+            }
         }
-        live_ = false;
-        break;
-    case CoreMsg::kBattery:
-        if (rfm_move_set_battery(m_, m.a, m.b))
-            screenDirty_ = true;
-        break;
-    case CoreMsg::kInit:
-        rfm_move_project_dir(m_, m.bits);
-        if (rfm_move_project_load(m_, m.slot, m.blob.empty() ? nullptr : m.blob.data(), (uint32_t)m.blob.size()) < 0)
-            rfm_move_project_load(m_, m.slot, nullptr, 0);   // (unreadable: it starts empty; the stored copy stays)
-        screenDirty_ = true;
-        break;
-    case CoreMsg::kDir:
-        rfm_move_project_dir(m_, m.bits);
-        screenDirty_ = true;
-        break;
-    case CoreMsg::kInfo:
-        rfm_move_project_info(m_, m.slot, m.blob.empty() ? nullptr : m.blob.data(), (uint32_t)m.blob.size());
-        screenDirty_ = true;
-        break;
-    case CoreMsg::kLoad:
-        if (rfm_move_project_load(m_, m.slot, m.blob.empty() ? nullptr : m.blob.data(), (uint32_t)m.blob.size()) < 0)
-            rfm_move_project_load(m_, m.slot, nullptr, 0);
-        screenDirty_ = true;
-        break;
-    case CoreMsg::kFlush:
-        rfm_move_project_flush(m_);
-        break;
+        int32_t next;
+        {
+            std::lock_guard<std::mutex> g(sm_);
+            const uint32_t now = nowMs();
+            if (failed)
+                rfm1cs_session_closed(s_, now, 0);
+            if (opened)
+                rfm1cs_session_opened(s_, now);
+            if (n > 0)
+                rfm1cs_session_rx(s_, now, buf.data(), (uint32_t)n);
+            rfm1cs_session_tick(s_, now);
+            next = rfm1cs_session_next_ms(s_, now);
+            snap();
+        }
+        q.lock();
+        if (fd < 0 && out_.empty() && !quit_) {
+            const int32_t w = next < 0 ? 100 : std::min<int32_t>(next, 100);
+            if (w > 0)
+                cv_.wait_for(q, std::chrono::milliseconds(w), [this] { return quit_ || !out_.empty(); });
+        }
     }
+    q.unlock();
+    if (fd >= 0)
+        rfm1cs_tcp_close(fd);
 }
+
+// ------------------------------------------------------------------ the core thread ---
 
 void MoveLink::coreTick(uint32_t ms, MoveTarget &t, const uint8_t levels[RFM_MOVE_NLEVELS], uint8_t playGreen,
                         int master, const uint16_t *lcdBE, uint32_t lcdWrites)
 {
     target_ = &t;
-    lastTickUs_.store(nowUs(), std::memory_order_relaxed);
-    // what came in (never waiting: the lock busy, it waits for the next millisecond)
-    if (mu_.try_lock()) {
-        work_.insert(work_.end(), std::make_move_iterator(toCore_.begin()), std::make_move_iterator(toCore_.end()));
-        toCore_.clear();
-        if (!ledsPending_.empty()) {
-            ledsOut_.insert(ledsOut_.end(), ledsPending_.begin(), ledsPending_.end());
-            ledsPending_.clear();
-        }
-        if (screenPending_) {
-            screenOut_ = screen_;
-            screenDue_ = true;
-            screenPending_ = false;
-        }
-        while (!reqPending_.empty()) {
-            requests_.push_back(std::move(reqPending_.front()));
-            reqPending_.pop_front();
-        }
-        st_.mode = m_->s.mode;
-        st_.project = rfm_move_project_slot(m_);
-        st_.playing = m_->seq.playing != 0;
-        mu_.unlock();
-    }
-    const bool hadInput = !work_.empty();
-    rfm_move_set_master(m_, master);
-    for (CoreMsg &m : work_)
-        coreMsg(m, ms);
-    work_.clear();
-    if (!live_)
-        return;
-    // the sequencer and the popups' timers, by the device clock (us)
-    const uint32_t dt = ms - lastMs_;
+    lastTickMs_.store(nowMs(), std::memory_order_relaxed);
+    const uint32_t dt = started_ ? ms - lastMs_ : 0;
+    started_ = true;
     lastMs_ = ms;
     if (dt > 0 && dt < 1000)
-        rfm_move_seq_advance(m_, dt * 1000u, 1000000u);
-    // the FM-1's LEDs onto the Move
-    if (hadInput || ms - lastLedMs_ >= kLedMs) {
-        lastLedMs_ = ms;
-        rfm_move_panel(m_, levels, playGreen);
-        rfm_move_led_t buf[RFM_MOVE_NLEDS];
-        const int n = rfm_move_leds(m_, buf, RFM_MOVE_NLEDS);
-        if (n > 0)
-            ledsPending_.insert(ledsPending_.end(), buf, buf + n);
+        pendingUs_ += dt * 1000u;
+    // the keys and pads that came in on the network thread
+    std::deque<rfm_move_act_t> acts;
+    {
+        std::lock_guard<std::mutex> g(qmu_);
+        acts.swap(engineQ_);
     }
-    // the screen: after input, a new FM-1 frame, or while it moves with the clock; only when it changed
-    if (ms - lastScreenMs_ >= kScreenMs &&
-        (screenDirty_ || hadInput || lcdWrites != lastLcdWrites_ || rfm_move_screen_timed(m_))) {
-        lastScreenMs_ = ms;
-        screenDirty_ = false;
-        const uint16_t *px = nullptr;
-        if (lcdBE && lcdWrites != lastLcdWrites_) {
+    for (const rfm_move_act_t &a : acts)
+        engineAct(a);
+    if (!sm_.try_lock())                        // (never waiting: the next millisecond, with the time kept)
+        return;
+    inCore_ = true;
+    const uint32_t now = nowMs();
+    const bool live = rfm1cs_session_status(s_)->state == RFM1CS_CONNECTED;
+    if (master != master_) {
+        master_ = master;
+        rfm_move_set_master(&s_->core, master);
+        if (live)
+            rfm1cs_session_redraw(s_, now);
+    }
+    if (live) {
+        for (size_t i = 0; i < midiIn_.size(); i += 1 + midiIn_[i])
+            rfm1cs_session_midi_in(s_, now, &midiIn_[i + 1], midiIn_[i]);
+        if (pendingUs_)
+            rfm1cs_session_advance(s_, now, (uint32_t)pendingUs_, 1000000u);
+        rfm1cs_session_panel(s_, levels, playGreen);
+        // a new FM-1 screen (the session draws it onto the Move's when due); every new connection gets one
+        if (rfm1cs_session_status(s_)->connects != lastConnects_) {
+            lastConnects_ = rfm1cs_session_status(s_)->connects;
+            lastLcdWrites_ = ~0u;
+        }
+        if (lcdBE && lcdWrites != lastLcdWrites_ && now - lastFrameMs_ >= kFrameMs) {
+            lastFrameMs_ = now;
+            lastLcdWrites_ = lcdWrites;
             for (size_t i = 0; i < lcd_.size(); i++)
                 lcd_[i] = (uint16_t)(lcdBE[i] >> 8 | lcdBE[i] << 8);   // (the FM-1's are big-endian, as sent)
-            px = lcd_.data();
-        }
-        lastLcdWrites_ = lcdWrites;
-        rfm_move_screen(m_, px, screen_.data());
-        if (screen_ != screenSent_) {
-            screenSent_ = screen_;
-            screenPending_ = true;
+            rfm1cs_session_frame(s_, now, lcd_.data());
         }
     }
+    midiIn_.clear();
+    pendingUs_ = 0;
+    snap();
+    inCore_ = false;
+    sm_.unlock();
 }
 
 void MoveLink::coreMidiOut(const uint8_t *msg, int n)
 {
-    if (live_ && n > 0)
-        rfm_move_seq_midi_in(m_, msg, n);
+    if (n > 0 && n < 256 && midiIn_.size() + 1 + n <= kMaxMidiIn) {   // (into the session at the next tick)
+        midiIn_.push_back((uint8_t)n);
+        midiIn_.insert(midiIn_.end(), msg, msg + n);
+    }
 }
 
 } // namespace rfm

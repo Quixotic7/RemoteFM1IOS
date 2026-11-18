@@ -6,8 +6,10 @@
 // API the app and the extension use. FM1Kit (MIT, github.com/ocean/FM1Kit): installing RemoteFM1 on the FM-1 (Install/).
 import PackageDescription
 
-let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 main 18c6a82 (0.3.6 + the Ableton Move core, host/src/move), its own submodule
+let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 main 18c6a82 (0.3.6), its own submodule
+let abletonMove = "rfm1cs-abletonmove"  // inside vendor: the Ableton Move code shared with the web and Android, v0.2.0
 let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
+let vendorMove = "../../vendor/rfm1cs-abletonmove"       // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore
 let package = Package(
     name: "RFMKit",
@@ -36,16 +38,20 @@ let package = Package(
                 "\(rfm)/host/src/tiles_ref.c",
                 "\(rfm)/host/src/macos/host.c",
                 "\(rfm)/host/src/macos/usb.c",
-                // the Ableton Move as a panel (rfm_move) on libmoveremote's host side (vendored there, MPL-2.0)
-                "\(rfm)/host/src/move/move.c",
-                "\(rfm)/host/src/move/project.c",
-                "\(rfm)/host/src/move/screen.c",
-                "\(rfm)/host/src/move/seq.c",
-                "\(rfm)/host/src/move/seq_ui.c",
-                "\(rfm)/host/src/move/v2.c",
-                "\(rfm)/host/third_party/moveremote/host/mr_client.c",
-                "\(rfm)/host/third_party/moveremote/host/mr_gfx.c",
-                "\(rfm)/host/third_party/moveremote/common/font5x7.c",
+                // the Ableton Move (rfm1cs-abletonmove, MPL-2.0, shared with the web and Android): its core, the session
+                // (the link's protocol), the store helpers, a POSIX TCP client, and Move Remote's client vendored there
+                "\(abletonMove)/src/move.c",
+                "\(abletonMove)/src/project.c",
+                "\(abletonMove)/src/screen.c",
+                "\(abletonMove)/src/seq.c",
+                "\(abletonMove)/src/seq_ui.c",
+                "\(abletonMove)/src/v2.c",
+                "\(abletonMove)/src/session.c",
+                "\(abletonMove)/src/store.c",
+                "\(abletonMove)/src/posix_tcp.c",
+                "\(abletonMove)/third_party/moveremote/host/mr_client.c",
+                "\(abletonMove)/third_party/moveremote/host/mr_gfx.c",
+                "\(abletonMove)/third_party/moveremote/common/font5x7.c",
                 "FM1VST/plugin/RemoteMidi.c",
             ],
             publicHeadersPath: "\(rfm)/host/include",
@@ -54,7 +60,8 @@ let package = Package(
                 .headerSearchPath("\(rfm)/proto"),
                 .headerSearchPath("\(rfm)/firmware/src"),
                 .headerSearchPath("\(rfm)/host/src/macos"),
-                .headerSearchPath("\(rfm)/host/third_party/moveremote/include"),
+                .headerSearchPath("\(abletonMove)/include"),
+                .headerSearchPath("\(abletonMove)/third_party/moveremote/include"),
                 .headerSearchPath("FM1VST/plugin"),
                 .define("RFM_NO_LIBUSB", to: "1"),
             ],
@@ -90,7 +97,8 @@ let package = Package(
                 .headerSearchPath("\(vendorRFM)/proto"),
                 .headerSearchPath("\(vendorRFM)/host/tools/fm1remote"),
                 .headerSearchPath("\(vendorRFM)/host/src/macos"),      // mac_priv.h (RFMProbe: cm_scan)
-                .headerSearchPath("\(vendorRFM)/host/third_party/moveremote/include"),   // rfm/move.h's client.h
+                .headerSearchPath("\(vendorMove)/include"),          // rfm1cs/move.h, session.h, posix_tcp.h
+                .headerSearchPath("\(vendorMove)/third_party/moveremote/include"),   // move.h's client.h
                 .define("FM1_REMOTE_NO_BULK", to: "1"),
                 // a Debug build also links to a fake unit on a virtual CoreMIDI port of this name (RemoteLink.cpp;
                 // elasticatfm1 tools/promo/fake_fm1.py): an iPad app on a Mac gets no environment or arguments

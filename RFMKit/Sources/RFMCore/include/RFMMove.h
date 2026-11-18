@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 RemoteFM1 contributors
 // THE ABLETON MOVE (rfmm_*): an Ableton Move running Move Remote (github.com/Quixotic7/abletonmoveremote) as the
-// emulated FM-1's controller, through RemoteFM1's rfm_move core (MoveLink.h says how). The app keeps the settings and
+// emulated FM-1's controller, through rfm1cs-abletonmove, the Move code shared with the web and Android (MoveLink.h says how). The app keeps the settings and
 // the 32 project slots: it answers the link's requests (rfmm_take_request) and gives it the store at start.
 //   rfmm_t *m = rfmm_new(settings, n, "RemoteFM1 iOS");   rfme_attach_move(engine, m);   rfmm_start(m, "move.local");
 // Free order: rfme_attach_move(engine, NULL), the engine's clock stopped (or the engine freed), then rfmm_free.
@@ -18,7 +18,7 @@ extern "C" {
 
 typedef struct rfmm rfmm_t;
 
-enum { RFMM_OFF = 0, RFMM_CONNECTING = 1, RFMM_CONNECTED = 2, RFMM_RETRYING = 3, RFMM_ERROR = 4 };
+enum { RFMM_OFF = 0, RFMM_CONNECTING = 1, RFMM_CONNECTED = 2, RFMM_RETRYING = 3, RFMM_ERROR = 4 };   // (RFM1CS_*; ERROR: FAILED)
 enum { RFMM_VIA_WIFI = 0, RFMM_VIA_USB = 1, RFMM_VIA_LOCAL = 2 };   // (MR_VIA_*)
 // requests (rfm_move's RFM_MOVE_ACT_* numbers)
 enum {
