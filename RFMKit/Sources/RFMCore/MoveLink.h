@@ -77,6 +77,7 @@ private:
     struct Out {                            // session -> network thread, in order
         enum Kind { kSend, kOpen, kClose } kind;
         std::vector<uint8_t> bytes;
+        uint32_t attempt = 0;               // kOpen: the session's try (its _opened / _rx / _closed carry it)
     };
     static void onEvent(void *ctx, const rfm1cs_event_t *ev);
     void event(const rfm1cs_event_t &ev);
@@ -96,7 +97,6 @@ private:
     std::deque<Request> requests_;
     std::deque<rfm_move_act_t> engineQ_;    // keys and pads for the engine from outside its thread
     rfm1cs_status_t st_{};
-    int lostWhy_ = 0, byeWhy_ = 0;          // the last LOST / BYE reason (the status text)
     std::thread net_;
 
     // ---- the core thread's

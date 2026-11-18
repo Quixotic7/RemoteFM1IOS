@@ -58,7 +58,6 @@ void MoveLink::start(const std::string &host)
     {
         std::lock_guard<std::mutex> g(qmu_);
         host_ = host.empty() ? "move.local" : host;
-        lostWhy_ = byeWhy_ = 0;
     }
     std::lock_guard<std::mutex> g(sm_);
     if (rfm1cs_session_status(s_)->state != RFM1CS_OFF)
@@ -93,37 +92,11 @@ MoveLink::Status MoveLink::status() const
     s.screens = st_.screens;
     s.connects = st_.connects;
     s.seqMidi = seqMidi_.load(std::memory_order_relaxed);
-    const std::string &host = host_;
-    const std::string name = s.name.empty() ? "the Move" : s.name;
-    const std::string again = " Trying again in " + std::to_string((st_.retry_ms + 999) / 1000) + " s.";
-    switch (st_.state) {
-    case RFM1CS_OFF:
-        s.text = byeWhy_ == MR_BYE_REPLACED ? "Another app took the Move."
-               : byeWhy_ ? "The Move left Move Remote." : "Off";
-        break;
-    case RFM1CS_CONNECTING:
-        s.text = "Connecting to " + host + "...";
-        break;
-    case RFM1CS_CONNECTED:
-        s.text = "Connected to " + name + (st_.via == MR_VIA_USB ? " over USB" : st_.via == MR_VIA_WIFI ? " over Wi-Fi" : "");
-        break;
-    case RFM1CS_RETRYING:
-        switch (lostWhy_) {
-        case RFM1CS_WHY_SILENT: s.text = "The Move stopped answering." + again; break;
-        case RFM1CS_WHY_GARBLED: s.text = "The Move's messages didn't make sense." + again; break;
-        case RFM1CS_WHY_NOT_MOVE: s.text = host + " isn't a Move running Move Remote." + again; break;
-        case RFM1CS_WHY_SHUTDOWN: s.text = "The Move shut down: connecting again when it's back."; break;
-        default:
-            s.text = st_.ever_live ? "Link lost." + again
-                                   : "No answer. Is Move Remote running on the Move, and is " + host + " its address?" + again;
-        }
-        break;
-    default:
-        s.text = lostWhy_ == RFM1CS_WHY_PROTO
-                     ? "This Move Remote speaks another protocol version (" + std::to_string(st_.proto) +
-                           "): update the app or Move Remote."
-                     : "Couldn't connect to the Move.";
-    }
+    // the words every host shows (rfm1cs_status_text: the web player's)
+    const rfm1cs_words_t w{host_.c_str(), nullptr, "TCP", "app"};
+    char text[256];
+    rfm1cs_status_text(&st_, &w, text, sizeof text);
+    s.text = text;
     return s;
 }
 
@@ -191,7 +164,8 @@ void MoveLink::event(const rfm1cs_event_t &ev)
     case RFM1CS_EV_SEND:
     case RFM1CS_EV_OPEN:
     case RFM1CS_EV_CLOSE: {
-        Out o{ev.type == RFM1CS_EV_SEND ? Out::kSend : ev.type == RFM1CS_EV_OPEN ? Out::kOpen : Out::kClose, {}};
+        Out o{ev.type == RFM1CS_EV_SEND ? Out::kSend : ev.type == RFM1CS_EV_OPEN ? Out::kOpen : Out::kClose, {},
+              ev.attempt};
         if (ev.type == RFM1CS_EV_SEND)
             o.bytes.assign(ev.data, ev.data + ev.len);
         {
@@ -206,18 +180,7 @@ void MoveLink::event(const rfm1cs_event_t &ev)
         if (ev.act)
             act(*ev.act, ev.data, ev.len);
         break;
-    case RFM1CS_EV_LOST: {
-        std::lock_guard<std::mutex> g(qmu_);
-        lostWhy_ = ev.reason;
-        byeWhy_ = 0;
-        break;
-    }
-    case RFM1CS_EV_BYE: {
-        std::lock_guard<std::mutex> g(qmu_);
-        byeWhy_ = ev.reason ? ev.reason : -1;
-        break;
-    }
-    default:                                    // (RELEASED: no timed MIDI is queued here; STATUS: snap())
+    default:                                    // (RELEASED: no timed MIDI queued here; LOST, BYE, STATUS: snap())
         break;
     }
 }
@@ -312,6 +275,7 @@ void MoveLink::netMain()
 {
     std::vector<uint8_t> buf(16384);
     int fd = -1;
+    uint32_t attempt = 0;                       // the session's try that fd belongs to
     bool connecting = false;
     std::unique_lock<std::mutex> q(qmu_);
     while (!quit_) {
@@ -332,14 +296,8 @@ void MoveLink::netMain()
             case Out::kOpen: {
                 if (fd >= 0)
                     rfm1cs_tcp_close(fd);
-                std::string addr = host;        // "address" or "address:port" (port 0: Move Remote's 7720)
-                int port = 0;
-                if (const size_t colon = addr.rfind(':'); colon != std::string::npos && addr.find(':') == colon &&
-                    colon + 1 < addr.size() && addr.find_first_not_of("0123456789", colon + 1) == std::string::npos) {
-                    port = std::atoi(addr.c_str() + colon + 1);
-                    addr.resize(colon);
-                }
-                fd = rfm1cs_tcp_connect(addr.c_str(), port);
+                attempt = o.attempt;
+                fd = rfm1cs_tcp_connect(host.c_str(), 0);   // ("address" or "address:port"; 7720 by default)
                 connecting = fd >= 0;
                 failed = fd < 0;
                 break;
@@ -379,11 +337,11 @@ void MoveLink::netMain()
             std::lock_guard<std::mutex> g(sm_);
             const uint32_t now = nowMs();
             if (failed)
-                rfm1cs_session_closed(s_, now, 0);
+                rfm1cs_session_closed(s_, now, attempt, 0);
             if (opened)
-                rfm1cs_session_opened(s_, now);
+                rfm1cs_session_opened(s_, now, attempt);
             if (n > 0)
-                rfm1cs_session_rx(s_, now, buf.data(), (uint32_t)n);
+                rfm1cs_session_rx(s_, now, attempt, buf.data(), (uint32_t)n);
             rfm1cs_session_tick(s_, now);
             next = rfm1cs_session_next_ms(s_, now);
             snap();

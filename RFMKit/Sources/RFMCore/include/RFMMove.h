@@ -66,6 +66,13 @@ int rfmm_project_check(const uint8_t *blob, uint32_t n);     // 0: a valid proje
 // a stored blob with a new colour (byte 18) and its check made again, in place (n: its length)
 void rfmm_project_with_color(uint8_t *blob, uint32_t n, int color);
 uint32_t rfmm_project_max(void);
+// the project file (.rfmmove one project, .rfmmoveset a set: rfm1cs-abletonmove's, byte for byte the web's and
+// Android's): pack n entries into out (its length, 0: cap too small); unpack reads and checks one (the count, entries
+// pointing into b; or < 0 with what is wrong in err, as the web says it)
+typedef struct { int slot; uint32_t saved; const uint8_t *bytes; uint32_t len; } rfmm_file_entry_t;
+uint32_t rfmm_file_max(void);
+uint32_t rfmm_file_pack(const rfmm_file_entry_t *e, int n, uint8_t *out, uint32_t cap);
+int rfmm_file_unpack(const uint8_t *b, uint32_t n, rfmm_file_entry_t e[32], char *err, uint32_t errcap);
 uint32_t rfmm_settings_bytes(void);
 // (tests) a new, empty project's blob, as the core saves it: its bytes, or -1 (cap too small)
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap);

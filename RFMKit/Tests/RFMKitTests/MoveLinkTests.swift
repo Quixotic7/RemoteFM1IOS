@@ -192,6 +192,8 @@ final class MoveLinkTests: XCTestCase {
         XCTAssertEqual(RemoteController.string(s.name), "Fake Move")
         XCTAssertEqual(Int(s.via), Int(RFMM_VIA_WIFI), "the fake says Wi-Fi (MR_VIA_WIFI 0)")
         XCTAssertFalse(MoveController.status(of: s).overUSB)
+        XCTAssertTrue(RemoteController.string(s.text).hasPrefix("Fake Move connected over Wi-Fi (TCP)"),
+                      "the shared words: \(RemoteController.string(s.text))")
         XCTAssertTrue(until { self.status().battery == 77 }, "STATUS's battery")
         XCTAssertTrue(until { self.fake.counts.rgb > 0 && self.fake.counts.screens > 0 }, "LEDs and the screen")
         XCTAssertEqual(fake.lastScreen.count, 1024)
@@ -267,11 +269,23 @@ final class MoveLinkTests: XCTestCase {
         blob = Array(blob[0..<n])
         XCTAssertTrue(MoveProjectFile.check(blob))
         let file = MoveProjectFile.pack([MoveProject(slot: 4, bytes: blob, saved: Date(timeIntervalSince1970: 1_800_000_000))])
-        XCTAssertEqual(Array(file[0..<6]), [0x52, 0x4D, 0x56, 0x50, 1, 1])
+        // the shared layout: RMVP, version 1, kind 1, count 1; slot 4, flags 0, saved, len (little-endian), the blob
+        let t: UInt32 = 1_800_000_000
+        XCTAssertEqual(Array(file[0..<18]), [0x52, 0x4D, 0x56, 0x50, 1, 1, 1, 0, 4, 0,
+                                             UInt8(t & 255), UInt8(t >> 8 & 255), UInt8(t >> 16 & 255), UInt8(t >> 24),
+                                             UInt8(n & 255), UInt8(n >> 8 & 255), UInt8(n >> 16 & 255), UInt8(n >> 24 & 255)])
+        XCTAssertEqual(file.count, 18 + n)
         let back = try MoveProjectFile.unpack(file)
         XCTAssertEqual(back.count, 1)
         XCTAssertEqual(back[0].slot, 4)
         XCTAssertEqual(back[0].bytes, blob)
+        XCTAssertEqual(back[0].saved, Date(timeIntervalSince1970: 1_800_000_000))
+        let set = MoveProjectFile.pack([MoveProject(slot: 1, bytes: blob, saved: Date()), MoveProject(slot: 9, bytes: blob, saved: Date())])
+        XCTAssertEqual(set[5], 2, "a set")
+        XCTAssertEqual(try MoveProjectFile.unpack(set).map(\.slot), [1, 9])
+        XCTAssertThrowsError(try MoveProjectFile.unpack([1, 2, 3, 4, 5, 6, 7, 8])) { e in
+            XCTAssertTrue("\(e)".hasPrefix("Not a Move project file"), "\(e)")
+        }
         let red = MoveProjectFile.withColor(blob, 3)
         XCTAssertEqual(red[18], 3)
         XCTAssertTrue(MoveProjectFile.check(red), "the check made again")

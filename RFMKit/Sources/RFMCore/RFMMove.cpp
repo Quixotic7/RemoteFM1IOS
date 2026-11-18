@@ -71,6 +71,32 @@ int rfmm_project_check(const uint8_t *b, uint32_t n) { return rfm_move_project_c
 void rfmm_project_with_color(uint8_t *b, uint32_t n, int color) { rfm1cs_project_set_color(b, n, color); }
 
 uint32_t rfmm_project_max(void) { return RFM_MOVE_PROJECT_MAX; }
+uint32_t rfmm_file_max(void) { return RFM1CS_FILE_MAX; }
+
+uint32_t rfmm_file_pack(const rfmm_file_entry_t *e, int n, uint8_t *out, uint32_t cap)
+{
+    if (n < 0 || n > RFM1CS_SLOTS)
+        return 0;
+    rfm1cs_file_entry_t f[RFM1CS_SLOTS];
+    for (int i = 0; i < n; i++)
+        f[i] = {e[i].slot, e[i].saved, e[i].bytes, e[i].len};
+    return rfm1cs_file_pack(f, n, 0, out, cap);
+}
+
+int rfmm_file_unpack(const uint8_t *b, uint32_t n, rfmm_file_entry_t e[32], char *err, uint32_t errcap)
+{
+    rfm1cs_file_entry_t f[RFM1CS_SLOTS];
+    rfm1cs_file_error_t why{};
+    const int k = rfm1cs_file_unpack(b, n, nullptr, f, &why);
+    if (k < 0) {
+        if (err && errcap)
+            rfm1cs_file_error_text(&why, "app", err, errcap);
+        return k;
+    }
+    for (int i = 0; i < k; i++)
+        e[i] = {f[i].slot, f[i].saved, f[i].bytes, f[i].len};
+    return k;
+}
 uint32_t rfmm_settings_bytes(void) { return RFM_MOVE_SETTINGS_BYTES; }
 
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap)

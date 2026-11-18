@@ -25,14 +25,12 @@ public struct MoveStatus: Equatable, Sendable {
     public static let modeNames = ["FM-1", "MIDI", "Control", "Sequencer"]
     /// a line for the settings page
     public var summary: String {
-        guard state == .connected else { return text }
-        var s = text
-        if let battery { s += ", battery \(battery) %" }
-        s += ". \(Self.modeNames[min(max(mode, 0), 3)]) mode"
-        if project >= 0 { s += ", \(MoveProjectFile.displayName(project))" }
-        if playing { s += ", playing" }
-        if !ticking { s += ". Play a firmware for the Move to drive it" }
-        return s + "."
+        guard state == .connected else { return text }      // (text: rfm1cs_status_text, the web's words)
+        var parts = [text]
+        if let battery { parts.append("Battery \(battery) %.") }
+        if project >= 0 { parts.append(MoveProjectFile.displayName(project) + (playing ? ", playing." : ".")) }
+        if !ticking { parts.append("Play a firmware for the Move to drive it.") }
+        return parts.joined(separator: " ")
     }
 }
 

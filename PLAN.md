@@ -948,15 +948,15 @@ the app's sound (mono, 22,050 Hz, 4-bit ADPCM, ~13.7 KB/s) and shows "RemoteFM1"
 The owner's request (relayed by the RemoteFM1 firmware session): the website's Move support (RemoteFM1 PR 20) in the
 app. The plan: side-session notes `move-controller-ios-plan.md`.
 
-- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.2.0, MPL-2.0), shared with the website and
+- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.3.0, MPL-2.0), shared with the website and
   Android: the core (mapping, screen, sequencer) and the session (Move Remote's protocol: HELLO, pings, silence,
-  retries, LEDs, screen pacing, battery). Its fixes and features go there, not here. Switch to it before taking a
+  retries, LEDs, screen pacing, battery), the status words and the .rfmmove file. Its fixes and features go there, not here. Switch to it before taking a
   RemoteFM1 past its move-split merge (which deletes host/src/move).
 - MoveLink (RFMCore, C++) only carries bytes and time: a network thread on rfm1cs_tcp (TCP 7720: move.local, an IP,
   or address:port) runs the socket and the session's rx and tick; the engine's core thread (RFMEngine's between hook,
   once a device ms) advances the sequencer by the device clock (its notes into the firmware then), passes the
   firmware's MIDI clock in, and the FM-1's LEDs and screen (byte-swapped: the panel's is big-endian). One mutex keeps
-  the session to one thread at a time; the core thread only tries it. The status texts are the app's.
+  the session to one thread at a time; the core thread only tries it.
 - rfmm_* (RFMMove.h): the C API; MoveController (Swift): the switch, the address, the status, the settings in
   defaults, the 32 projects as files in Documents/move in the web's .rfmmove format (so files go between them).
 - UI: Settings › MIDI & audio › Ableton Move; an "Ableton Move" switch in the top-left menu once it was turned on.
