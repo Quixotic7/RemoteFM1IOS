@@ -19,7 +19,7 @@ extern "C" {
 typedef struct rfmm rfmm_t;
 
 enum { RFMM_OFF = 0, RFMM_CONNECTING = 1, RFMM_CONNECTED = 2, RFMM_RETRYING = 3, RFMM_ERROR = 4 };
-enum { RFMM_VIA_USB = 0, RFMM_VIA_WIFI = 1, RFMM_VIA_LOCAL = 2 };
+enum { RFMM_VIA_WIFI = 0, RFMM_VIA_USB = 1, RFMM_VIA_LOCAL = 2 };   // (MR_VIA_*)
 // requests (rfm_move's RFM_MOVE_ACT_* numbers)
 enum {
     RFMM_REQ_SETTINGS = 7,          // data: the settings image, to keep

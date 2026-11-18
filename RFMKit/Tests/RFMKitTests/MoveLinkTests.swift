@@ -190,6 +190,8 @@ final class MoveLinkTests: XCTestCase {
         XCTAssertTrue(until { Int(self.status().state) == Int(RFMM_CONNECTED) }, RemoteController.string(status().text))
         let s = status()
         XCTAssertEqual(RemoteController.string(s.name), "Fake Move")
+        XCTAssertEqual(Int(s.via), Int(RFMM_VIA_WIFI), "the fake says Wi-Fi (MR_VIA_WIFI 0)")
+        XCTAssertFalse(MoveController.status(of: s).overUSB)
         XCTAssertTrue(until { self.status().battery == 77 }, "STATUS's battery")
         XCTAssertTrue(until { self.fake.counts.rgb > 0 && self.fake.counts.screens > 0 }, "LEDs and the screen")
         XCTAssertEqual(fake.lastScreen.count, 1024)

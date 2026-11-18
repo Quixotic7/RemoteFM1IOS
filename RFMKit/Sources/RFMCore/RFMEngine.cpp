@@ -812,7 +812,7 @@ struct rfme final : rfm::HostParams::Panel, rfm::MoveTarget {
             for (int c = 0; c < 11; c++)
                 for (int l = 0; l < 4; l++)
                     lv[c * 4 + l] = h->led[c][l];
-            mv->coreTick(ms, *this, lv, (uint8_t)(h->led_play_green ? 1 : 0), h->master, h->lcd, h->lcd_writes);
+            mv->coreTick(ms, *this, lv, h->led_play_green, h->master, h->lcd, h->lcd_writes);
         }
         syncMap();                                       // (M8: a new map lets go of what the old one held)
         devMs.store(ms, std::memory_order_relaxed);
