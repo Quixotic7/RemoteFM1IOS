@@ -948,7 +948,7 @@ the app's sound (mono, 22,050 Hz, 4-bit ADPCM, ~13.7 KB/s) and shows "RemoteFM1"
 The owner's request (relayed by the RemoteFM1 firmware session): the website's Move support (RemoteFM1 PR 20) in the
 app. The plan: side-session notes `move-controller-ios-plan.md`.
 
-- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.3.0, MPL-2.0), shared with the website and
+- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.3.1, MPL-2.0), shared with the website and
   Android: the core (mapping, screen, sequencer) and the session (Move Remote's protocol: HELLO, pings, silence,
   retries, LEDs, screen pacing, battery), the status words and the .rfmmove file. Its fixes and features go there, not here. Switch to it before taking a
   RemoteFM1 past its move-split merge (which deletes host/src/move).
