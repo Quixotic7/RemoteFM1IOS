@@ -6,6 +6,7 @@
 
 import Foundation
 import RFMCore
+import CoreGraphics
 import XCTest
 @testable import RFMKit
 
@@ -303,5 +304,65 @@ final class MoveLinkTests: XCTestCase {
         XCTAssertEqual(MoveProjectStore.dirBits(store.all()), 1 << 7)
         store.delete(7)
         XCTAssertNil(store.read(7))
+    }
+
+    // (rfm1cs-abletonmove 0.5.10) the firmware browser, one firmware: Track 1 held + step 1 opens it, step 2 is All, a
+    // pad picks a firmware, the jog's press asks the app to play it (FW_LOAD, slot 0, the id)
+    func testTheBrowserAsksToPlayAFirmware() {
+        XCTAssertTrue(until { Int(self.status().state) == Int(RFMM_CONNECTED) })
+        let names = [("alpha", "Alpha"), ("beta", "Beta")]
+        var keep: [UnsafeMutablePointer<CChar>] = []
+        func c(_ s: String) -> UnsafePointer<CChar>? { let p = strdup(s)!; keep.append(p); return UnsafePointer(p) }
+        let list = names.map { rfmm_fw_t(id: c($0.0), name: c($0.1), version: c("1.0"), installed: c("1.0"), desc: c("A test."),
+                                         thumb: nil, cats: Int32(RFMM_CAT_SYNTH), cat: 0, virt: 0) }
+        list.withUnsafeBufferPointer { rfmm_fw_list(m, $0.baseAddress, Int32($0.count)) }
+        keep.forEach { free($0) }                                    // (copied: the array may go)
+        rfmm_fw_slot(m, "alpha")
+        fake.cc(43, 127)                                             // Track 1 held + step 1: the projects view
+        Thread.sleep(forTimeInterval: 0.03)
+        fake.input([0x09, 0x90, 16, 127]); Thread.sleep(forTimeInterval: 0.03); fake.input([0x08, 0x80, 16, 0])
+        Thread.sleep(forTimeInterval: 0.03)
+        fake.cc(43, 0)
+        Thread.sleep(forTimeInterval: 0.05)
+        fake.input([0x09, 0x90, 17, 127]); Thread.sleep(forTimeInterval: 0.03); fake.input([0x08, 0x80, 17, 0])   // All
+        Thread.sleep(forTimeInterval: 0.05)
+        fake.pad(25, 100); Thread.sleep(forTimeInterval: 0.03); fake.pad(25, 0)   // the second cell: Beta
+        Thread.sleep(forTimeInterval: 0.05)
+        fake.button(3)                                               // the jog's press
+        var r = rfmm_request_t()
+        var data = [UInt8](repeating: 0, count: 256)
+        var id = ""
+        XCTAssertTrue(until {
+            while data.withUnsafeMutableBufferPointer({ rfmm_take_request(self.m, &r, $0.baseAddress, 256) }) != 0 {
+                if Int(r.kind) == Int(RFMM_REQ_FW_LOAD) { id = String(decoding: data[0..<Int(r.len)], as: UTF8.self) }
+            }
+            return !id.isEmpty
+        }, "FW_LOAD")
+        XCTAssertEqual(id, "beta")
+        XCTAssertEqual(r.slot, 0, "one firmware: always slot 0")
+        rfmm_fw_progress(m, "beta", 100)
+        rfmm_fw_slot(m, "beta")
+    }
+
+    @MainActor func testTheFirmwareList() {
+        XCTAssertEqual(MoveController.cat("Groovebox"), 1)
+        XCTAssertEqual(MoveController.cats("Drums"), Int(RFMM_CAT_DRUMS))
+        XCTAssertEqual(MoveController.cat(""), 255)
+        XCTAssertEqual(MoveController.ascii("Café “quoted” — ok\nnext"), "Cafe \"quoted\" - ok next")
+        let img = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 8,
+                            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        img.setFillColor(gray: 1, alpha: 1)
+        img.fill(CGRect(x: 0, y: 0, width: 4, height: 8))           // the left half white
+        let t = MoveController.thumb(img.makeImage()!)!
+        XCTAssertEqual(t.count, Int(RFMM_FW_THUMB_BYTES))
+        XCTAssertEqual(t[0], 0xFF, "a white left half lit")
+        XCTAssertEqual(t[7], 0x00, "a black right half dark")
+        var a = CoreInfo(id: "fizz"); a.name = "FIZZ"; a.version = "0.12"
+        var b1 = CoreInfo(id: "rfm1:aa"); b1.coreID = "felucca"; b1.kind = "wasm"; b1.name = "Felucca"; b1.version = "1.8.1"
+        var b2 = b1; b2.id = "rfm1:bb"; b2.version = "1.8.2"
+        let l = MoveController.firmwareList(catalog: nil, cores: [b1, a, b2], current: b1)
+        XCTAssertEqual(l.map(\.id), ["felucca", "fizz"], "A-Z by name, one entry an id")
+        XCTAssertEqual(l[0].installed, "1.8.1", "the version playing")
+        XCTAssertEqual(MoveController.installedKey("felucca", cores: [b1, a, b2], current: a), "rfm1:bb", "else the newest")
     }
 }

@@ -69,7 +69,9 @@ struct RemoteFM1App: App {
             if old.contains(where: { $0.key == p.selected }) { p.select(new.key) }   // (the flash is shared by id)
         }
         _store = State(initialValue: st)
-        _midi = State(initialValue: AppMidi(player: p))
+        let m = AppMidi(player: p)
+        m.move.attach(catalog: st)                // (the Move's firmware browser lists Get firmware's)
+        _midi = State(initialValue: m)
         _battery = State(initialValue: Battery(player: p, controller: c))
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)

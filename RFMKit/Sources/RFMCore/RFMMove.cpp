@@ -99,6 +99,36 @@ int rfmm_file_unpack(const uint8_t *b, uint32_t n, rfmm_file_entry_t e[32], char
 }
 uint32_t rfmm_settings_bytes(void) { return RFM_MOVE_SETTINGS_BYTES; }
 
+static std::string str(const char *s) { return s ? s : ""; }
+
+void rfmm_fw_list(rfmm_t *m, const rfmm_fw_t *e, int n)
+{
+    std::vector<MoveLink::Firmware> list;
+    for (int i = 0; e && i < n; i++) {
+        MoveLink::Firmware f;
+        f.id = str(e[i].id);
+        if (f.id.empty() || f.id.size() >= RFM_MOVE_FW_ID_MAX)
+            continue;                           // (the core refuses longer ids)
+        f.name = str(e[i].name);
+        f.version = str(e[i].version);
+        f.installed = str(e[i].installed);
+        f.desc = str(e[i].desc);
+        if (e[i].thumb)
+            f.thumb.assign(e[i].thumb, e[i].thumb + RFM_MOVE_FW_THUMB_BYTES);
+        f.cats = (uint8_t)e[i].cats;
+        f.cat = (uint8_t)e[i].cat;
+        f.virt = e[i].virt ? 1 : 0;
+        list.push_back(std::move(f));
+    }
+    L(m)->fwList(std::move(list));
+}
+
+void rfmm_fw_installed(rfmm_t *m, const char *id, const char *version) { L(m)->fwInstalled(str(id), str(version)); }
+void rfmm_fw_progress(rfmm_t *m, const char *id, int pct) { L(m)->fwProgress(str(id), pct); }
+void rfmm_fw_slot(rfmm_t *m, const char *id) { L(m)->fwSlot(str(id)); }
+int rfmm_fw_library(rfmm_t *m, const uint8_t *b, uint32_t n) { return L(m)->fwLibrary(bytes(b, n)); }
+uint32_t rfmm_fw_library_max(void) { return RFM_MOVE_FW_LIB_BYTES; }
+
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap)
 {
     rfm_move_t *m = static_cast<rfm_move_t *>(std::calloc(1, sizeof(rfm_move_t)));

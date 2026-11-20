@@ -3,7 +3,9 @@
 // The Ableton Move as the emulated FM-1's controller (RFMMove.h, MoveLink.h): the link's switch and address, its
 // status, its settings (kept in defaults) and the sequencer's 32 projects (MoveProjectStore, one file a slot). The
 // link's core runs on the player's engine, so it works while a firmware plays here (Firmware runs on This iPhone or
-// My FM-1). The app's side of js/move-link.js: the requests answered as the web's store does.
+// My FM-1). The app's side of js/move-link.js: the requests answered as the web's store does. The Move's firmware
+// browser (rfm1cs-abletonmove 0.5.10, one firmware and no FX) lists the app's firmware (MoveFirmwareList.swift):
+// a jog press plays one here, a download goes through the app's own Get firmware (FirmwareStore).
 
 import Foundation
 import Observation
@@ -38,6 +40,7 @@ public struct MoveStatus: Equatable, Sendable {
 public final class MoveController {
     public static let enabledKey = "rfm1.move.enabled", hostKey = "rfm1.move.host"
     public static let settingsKey = "rfm1.move.settings", projectKey = "rfm1.move.project"
+    public static let libraryKey = "rfm1.move.library"
 
     public private(set) var status = MoveStatus()
     /// the link wanted (off by default)
@@ -63,10 +66,15 @@ public final class MoveController {
     @ObservationIgnored nonisolated(unsafe) let link: OpaquePointer
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored public let store: MoveProjectStore
-    @ObservationIgnored private weak var player: CorePlayer?
+    @ObservationIgnored weak var player: CorePlayer?
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var buffer: [UInt8]?                 // cut / copy in projects mode
-    @ObservationIgnored private var data = [UInt8](repeating: 0, count: Int(rfmm_project_max()))
+    @ObservationIgnored private var data = [UInt8](repeating: 0, count: Int(max(rfmm_project_max(), rfmm_fw_library_max())))
+    @ObservationIgnored weak var catalog: FirmwareStore?
+    @ObservationIgnored var firmwares: [MoveFirmware]?               // what the Move lists (nil: give it again)
+    @ObservationIgnored var thumbs: [String: [UInt8]] = [:]         // by id ([]: none)
+    @ObservationIgnored var slotID: String?                          // the firmware the Move shows playing
+    @ObservationIgnored private var polls = 0
 
     public init(player: CorePlayer, store: MoveProjectStore = MoveProjectStore(folder: MoveProjectStore.app),
                 defaults: UserDefaults = .standard, hostName: String = "RemoteFM1 iOS") {
@@ -80,6 +88,8 @@ public final class MoveController {
             hostName.withCString { rfmm_new(b.count > 0 ? b.baseAddress : nil, UInt32(b.count), $0) }
         }
         player.attachMove(link)
+        let library = [UInt8](defaults.data(forKey: Self.libraryKey) ?? Data())
+        if !library.isEmpty { _ = library.withUnsafeBufferPointer { rfmm_fw_library(link, $0.baseAddress, UInt32($0.count)) } }
         loadProjects()
         poller = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -171,6 +181,14 @@ public final class MoveController {
                     save(slot, buffer)
                     changed = true
                 }
+            case Int(RFMM_REQ_FW_LOAD):
+                play(String(decoding: bytes, as: UTF8.self))
+            case Int(RFMM_REQ_FW_UNLOAD):
+                slotID = nil                            // (the app keeps playing one: the Move shows it again)
+            case Int(RFMM_REQ_FW_DOWNLOAD):
+                download(String(decoding: bytes, as: UTF8.self))
+            case Int(RFMM_REQ_FW_LIBRARY):
+                defaults.set(Data(bytes), forKey: Self.libraryKey)
             case Int(RFMM_REQ_PROJECT_COLOR):
                 if let p = store.read(slot) {
                     save(slot, MoveProjectFile.withColor(p.bytes, Int(r.value)))
@@ -181,6 +199,9 @@ public final class MoveController {
             }
         }
         if changed { refreshProjects() }
+        polls += 1
+        if polls % 20 == 1 { syncFirmwares() }          // (the catalog and the firmware here, once a second)
+        syncSlot()
         var st = rfmm_status_t()
         rfmm_status(link, &st)
         let s = Self.status(of: st)

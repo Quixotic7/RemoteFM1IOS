@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -50,7 +51,14 @@ public:
     // a request for the app (projects, settings): kind is an RFM_MOVE_ACT_PROJECT_* or RFM_MOVE_ACT_SETTINGS
     struct Request {
         int kind = 0, slot = -1, value = 0;
-        std::vector<uint8_t> data;  // PROJECT_SAVE's blob; SETTINGS: the settings image
+        std::vector<uint8_t> data;  // PROJECT_SAVE's blob; SETTINGS: the settings image; FW_LOAD / _DOWNLOAD: the
+                                    // firmware's id; FW_LIBRARY: the library blob
+    };
+    // (0.5.10) one entry of the firmware catalog the Move's browser lists (rfm_move_fw_t, kept here)
+    struct Firmware {
+        std::string id, name, version, installed, desc;     // installed "": not here
+        std::vector<uint8_t> thumb;                         // RFM_MOVE_FW_THUMB_BYTES, or empty (initials)
+        uint8_t cats = 0, cat = 255, virt = 0;
     };
 
     MoveLink(const uint8_t *settings, uint32_t n, std::string hostName);
@@ -67,6 +75,13 @@ public:
     void projectInfo(int slot, const std::vector<uint8_t> &blob);
     void projectAnswer(int slot, const std::vector<uint8_t> &blob);    // PROJECT_LOAD's answer (empty: none there)
     void flushProject();                                               // the autosave now (the app leaves)
+    // (0.5.10) the firmware browser, one firmware and no FX (rfm_move_fw_caps 0): the catalog, a download done, a
+    // load's or download's progress (RFM_MOVE_FW_FAILED / _BUSY), the firmware playing ("" none), the library at start
+    void fwList(std::vector<Firmware> list);
+    void fwInstalled(const std::string &id, const std::string &version);
+    void fwProgress(const std::string &id, int pct);
+    void fwSlot(const std::string &id);
+    int fwLibrary(const std::vector<uint8_t> &blob);
 
     // ---- the core thread (RFMEngine)
     void coreTick(uint32_t ms, MoveTarget &t, const uint8_t levels[RFM_MOVE_NLEVELS], uint8_t playGreen,
@@ -98,6 +113,14 @@ private:
     std::deque<rfm_move_act_t> engineQ_;    // keys and pads for the engine from outside its thread
     rfm1cs_status_t st_{};
     std::thread net_;
+    // (sm_) the catalog the core points into: unchanged until the next fwList (the core keeps the pointers)
+    struct FwList {
+        std::vector<Firmware> list;
+        std::vector<rfm_move_fw_t> e;
+        std::deque<std::string> installed;  // fwInstalled's versions (a deque: what the core points to stays put)
+    };
+    std::unique_ptr<FwList> fw_;
+    std::string fwSlot_;                    // (sm_) slot 0's id
 
     // ---- the core thread's
     bool inCore_ = false;                   // (sm_ held) the session's call came from coreTick

@@ -30,7 +30,22 @@ enum {
     RFMM_REQ_PROJECT_COPY = 14,     // slot: into the buffer
     RFMM_REQ_PROJECT_PASTE = 15,    // slot (empty): the buffer stored there
     RFMM_REQ_PROJECT_COLOR = 16,    // slot, value 1..16: the stored blob's byte 18 set (rfmm_project_with_color)
+    // (rfm1cs-abletonmove 0.5.10, one firmware and no FX) the Move's firmware browser
+    RFMM_REQ_FW_LOAD = 17,          // data: the firmware's id: play it (then rfmm_fw_progress 100 and rfmm_fw_slot)
+    RFMM_REQ_FW_UNLOAD = 18,        // the slot emptied on the Move (the app keeps a firmware: rfmm_fw_slot again)
+    RFMM_REQ_FW_DOWNLOAD = 20,      // data: the id: download it, or update it (progress, then rfmm_fw_installed)
+    RFMM_REQ_FW_LIBRARY = 21,       // data: the library blob (favourites, colours, tags), to keep
+    RFMM_REQ_FW_LEVEL = 22,         // value 0..127: the firmware's level (kept in the library)
 };
+enum { RFMM_FW_FAILED = -1, RFMM_FW_BUSY = -2, RFMM_FW_THUMB_BYTES = 512 };
+// one firmware the browser lists: ASCII strings (id < 32 bytes); installed NULL / "": not here; thumb 64 x 64, 1 bit,
+// rows top first, MSB left (NULL: initials); cats RFMM_CAT_* bits; cat the main one 0..4 (255 none); virt a Fantasy CFW
+enum { RFMM_CAT_SYNTH = 1, RFMM_CAT_GROOVEBOX = 2, RFMM_CAT_CHORDS = 4, RFMM_CAT_DRUMS = 8, RFMM_CAT_OTHER = 16 };
+typedef struct {
+    const char *id, *name, *version, *installed, *desc;
+    const uint8_t *thumb;
+    int cats, cat, virt;
+} rfmm_fw_t;
 
 typedef struct {
     int state;                      // RFMM_*
@@ -74,6 +89,13 @@ uint32_t rfmm_file_max(void);
 uint32_t rfmm_file_pack(const rfmm_file_entry_t *e, int n, uint8_t *out, uint32_t cap);
 int rfmm_file_unpack(const uint8_t *b, uint32_t n, rfmm_file_entry_t e[32], char *err, uint32_t errcap);
 uint32_t rfmm_settings_bytes(void);
+// the firmware browser (copied: the caller's array may go once this returns). The list A-Z by name
+void rfmm_fw_list(rfmm_t *m, const rfmm_fw_t *e, int n);
+void rfmm_fw_installed(rfmm_t *m, const char *id, const char *version);   // a download landed (NULL: removed)
+void rfmm_fw_progress(rfmm_t *m, const char *id, int pct);                 // 0..100, RFMM_FW_FAILED, RFMM_FW_BUSY
+void rfmm_fw_slot(rfmm_t *m, const char *id);                              // the firmware playing (NULL: none)
+int rfmm_fw_library(rfmm_t *m, const uint8_t *blob, uint32_t n);           // at start; 0 ok, -1 not a library
+uint32_t rfmm_fw_library_max(void);
 // (tests) a new, empty project's blob, as the core saves it: its bytes, or -1 (cap too small)
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap);
 

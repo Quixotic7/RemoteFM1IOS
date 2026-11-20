@@ -30,6 +30,7 @@ MoveLink::MoveLink(const uint8_t *settings, uint32_t n, std::string hostName) : 
 {
     s_ = static_cast<rfm1cs_session_t *>(std::calloc(1, sizeof(rfm1cs_session_t)));   // (~180 KB: not the stack)
     rfm1cs_session_init(s_, settings, n, hostName_.c_str(), onEvent, this);
+    rfm_move_fw_caps(&s_->core, 0);             // (0.5.10) one firmware at a time, no FX: the app plays one
     st_ = *rfm1cs_session_status(s_);
     lcd_.resize(240 * 240);
     net_ = std::thread([this] { netMain(); });
@@ -148,6 +149,73 @@ void MoveLink::flushProject()
     rfm1cs_session_flush(s_);
 }
 
+// ---- (0.5.10) the firmware browser
+
+void MoveLink::fwList(std::vector<Firmware> list)
+{
+    auto f = std::make_unique<FwList>();
+    f->list = std::move(list);
+    f->e.reserve(f->list.size());
+    for (const Firmware &x : f->list) {
+        rfm_move_fw_t e{};
+        e.id = x.id.c_str();
+        e.name = x.name.c_str();
+        e.version = x.version.c_str();
+        e.installed = x.installed.empty() ? nullptr : x.installed.c_str();
+        e.desc = x.desc.empty() ? nullptr : x.desc.c_str();
+        e.thumb = x.thumb.size() == RFM_MOVE_FW_THUMB_BYTES ? x.thumb.data() : nullptr;
+        e.cats = x.cats;
+        e.cat = x.cat;
+        e.virt = x.virt;
+        f->e.push_back(e);
+    }
+    std::lock_guard<std::mutex> g(sm_);
+    rfm_move_fw_list(&s_->core, f->e.empty() ? nullptr : f->e.data(), (int)f->e.size());
+    fw_.swap(f);                                // (the old list freed once the core has the new one)
+    rfm1cs_session_redraw(s_, nowMs());
+}
+
+void MoveLink::fwInstalled(const std::string &id, const std::string &version)
+{
+    std::lock_guard<std::mutex> g(sm_);
+    if (!fw_)
+        return;
+    for (size_t i = 0; i < fw_->list.size(); i++) {
+        if (fw_->list[i].id != id)
+            continue;
+        const char *v = nullptr;
+        if (!version.empty()) {
+            fw_->installed.push_back(version);
+            v = fw_->installed.back().c_str();
+        }
+        rfm_move_fw_installed(&s_->core, (int)i, v);
+        rfm1cs_session_redraw(s_, nowMs());
+        return;
+    }
+}
+
+void MoveLink::fwProgress(const std::string &id, int pct)
+{
+    std::lock_guard<std::mutex> g(sm_);
+    rfm_move_fw_progress(&s_->core, id.c_str(), pct);
+    rfm1cs_session_redraw(s_, nowMs());
+}
+
+void MoveLink::fwSlot(const std::string &id)
+{
+    std::lock_guard<std::mutex> g(sm_);
+    fwSlot_ = id;
+    const char *ids[RFM_MOVE_FW_SLOTS] = {fwSlot_.empty() ? nullptr : fwSlot_.c_str(), nullptr, nullptr};
+    rfm_move_fw_slots(&s_->core, ids);
+    rfm1cs_session_redraw(s_, nowMs());
+}
+
+int MoveLink::fwLibrary(const std::vector<uint8_t> &blob)
+{
+    std::lock_guard<std::mutex> g(sm_);
+    return rfm_move_fw_library(&s_->core, ptr(blob), (uint32_t)blob.size());
+}
+
 void MoveLink::snap()
 {
     std::lock_guard<std::mutex> g(qmu_);
@@ -212,10 +280,15 @@ void MoveLink::act(const rfm_move_act_t &a, const uint8_t *data, uint32_t len)
     case RFM_MOVE_ACT_PROJECT_CUT:
     case RFM_MOVE_ACT_PROJECT_COPY:
     case RFM_MOVE_ACT_PROJECT_PASTE:
-    case RFM_MOVE_ACT_PROJECT_COLOR: {
+    case RFM_MOVE_ACT_PROJECT_COLOR:
+    case RFM_MOVE_ACT_FW_LOAD:                  // (0.5.10; FW_ACTIVE, FX_*, MIX and ROUTE never come: caps 0)
+    case RFM_MOVE_ACT_FW_UNLOAD:
+    case RFM_MOVE_ACT_FW_DOWNLOAD:
+    case RFM_MOVE_ACT_FW_LIBRARY:
+    case RFM_MOVE_ACT_FW_LEVEL: {
         Request r;
         r.kind = a.kind;
-        r.slot = a.kind == RFM_MOVE_ACT_SETTINGS ? -1 : a.index;
+        r.slot = a.kind == RFM_MOVE_ACT_SETTINGS ? -1 : a.kind >= RFM_MOVE_ACT_FW_LOAD ? a.slot : a.index;
         r.value = a.value;
         if (a.kind == RFM_MOVE_ACT_SETTINGS) {
             if (data && len) {
@@ -224,8 +297,12 @@ void MoveLink::act(const rfm_move_act_t &a, const uint8_t *data, uint32_t len)
                 r.data.resize(RFM_MOVE_SETTINGS_BYTES);
                 rfm_move_save(&s_->core.s, r.data.data());
             }
-        } else if (a.kind == RFM_MOVE_ACT_PROJECT_SAVE && a.data) {
-            r.data.assign(a.data, a.data + a.len);
+        } else if (a.kind == RFM_MOVE_ACT_FW_LIBRARY) {
+            if (data && len)
+                r.data.assign(data, data + len);
+        } else if ((a.kind == RFM_MOVE_ACT_PROJECT_SAVE || a.kind == RFM_MOVE_ACT_FW_LOAD ||
+                    a.kind == RFM_MOVE_ACT_FW_DOWNLOAD) && a.data) {
+            r.data.assign(a.data, a.data + a.len);  // (an id: without its NUL)
         }
         std::lock_guard<std::mutex> g(qmu_);
         requests_.push_back(std::move(r));
