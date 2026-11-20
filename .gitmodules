@@ -16,3 +16,6 @@
 [submodule "vendor/RemoteFM1"]
 	path = vendor/RemoteFM1
 	url = https://github.com/Quixotic7/RemoteFM1.git
+[submodule "vendor/rfm1cs-abletonmove"]
+	path = vendor/rfm1cs-abletonmove
+	url = https://github.com/Quixotic7/rfm1cs-abletonmove.git

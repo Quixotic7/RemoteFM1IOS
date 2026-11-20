@@ -33,6 +33,8 @@
 #include "RFMHostParams.h"
 #include "RFMInternal.h"
 #include "RFMMidiMap.h"
+#include "MoveLink.h"
+#include "RFMMove.h"
 #include "RFMRealtime.h"
 #include "RemoteLink.h"
 
@@ -167,9 +169,10 @@ void putErr(char *err, uint32_t n, const std::string &s)
 
 } // namespace
 
-struct rfme final : rfm::HostParams::Panel {
+struct rfme final : rfm::HostParams::Panel, rfm::MoveTarget {
     rfmc_t *owner = nullptr;            // the link's handle (NULL: headless)
     RemoteLink *link = nullptr;
+    std::atomic<rfm::MoveLink *> move{nullptr};  // (rfme_attach_move) the Ableton Move: its core on this core thread
 
     // the core (the control thread changes these only with the clock stopped)
     rfm::CoreFactory factory;               // makes the backend (the load's; a power cycle makes a new one with it)
@@ -634,6 +637,10 @@ struct rfme final : rfm::HostParams::Panel {
         hpPublish();
     }
 
+    // ---- the Ableton Move's actions (MoveLink::coreTick, this thread)
+    void moveEvent(const rfm_event_t &e) override { apply(e); }
+    void moveMidi(const uint8_t *d, uint32_t n) override { toFirmware(d, n); }
+
     // ---- the between hook (the clock thread)
     void apply(const rfm_event_t &e)
     {
@@ -796,6 +803,17 @@ struct rfme final : rfm::HostParams::Panel {
         }
         while (in.pop(ev))
             apply(ev);
+        // the Ableton Move (MoveLink.h): its input, its sequencer by this clock (notes into the firmware now), the
+        // FM-1's LEDs and screen back to it
+        rfm::MoveLink *mv = move.load(std::memory_order_acquire);
+        if (mv) {
+            const fm1panel_t *h = dev->panel();
+            uint8_t lv[RFM_MOVE_NLEVELS];
+            for (int c = 0; c < 11; c++)
+                for (int l = 0; l < 4; l++)
+                    lv[c * 4 + l] = h->led[c][l];
+            mv->coreTick(ms, *this, lv, h->led_play_green, h->master, h->lcd, h->lcd_writes);
+        }
         syncMap();                                       // (M8: a new map lets go of what the old one held)
         devMs.store(ms, std::memory_order_relaxed);
         // (kept while the audio ring is made, for the AU; 2: on every clock, for the app's web managers)
@@ -803,6 +821,13 @@ struct rfme final : rfm::HostParams::Panel {
         const bool keep = outOn == 2 || (producing && outOn == 1);
         for (uint32_t pkt; dev->midi_out_take(&pkt);) {    // (M4: for the AU's MIDI output; else counted, dropped)
             midiOut.fetch_add(1, std::memory_order_relaxed);
+            if (mv) {                                    // (the Move's sequencer follows the firmware's MIDI clock)
+                const uint8_t st = (uint8_t)(pkt >> 8), m[3] = {st, (uint8_t)(pkt >> 16), (uint8_t)(pkt >> 24)};
+                if (st >= 0xF8 && st <= 0xFC)
+                    mv->coreMidiOut(m, 1);
+                else if (st == 0xF2)
+                    mv->coreMidiOut(m, 3);
+            }
             if (keep)
                 (void)midiOutQ.push(OutPacket{outAt + dev->render_frame(), pkt});   // (its frame in the ring)
         }
@@ -1430,6 +1455,8 @@ int rfme_power_cycle(rfme_t *e, char *err, uint32_t n)
     e->resume(prev, true);
     return 1;
 }
+
+void rfme_attach_move(rfme_t *e, rfmm_t *m) { e->move.store(reinterpret_cast<rfm::MoveLink *>(m), std::memory_order_release); }
 
 void rfme_attach(rfme_t *e, int on)
 {

@@ -69,7 +69,9 @@ struct RemoteFM1App: App {
             if old.contains(where: { $0.key == p.selected }) { p.select(new.key) }   // (the flash is shared by id)
         }
         _store = State(initialValue: st)
-        _midi = State(initialValue: AppMidi(player: p))
+        let m = AppMidi(player: p)
+        m.move.attach(catalog: st)                // (the Move's firmware browser lists Get firmware's)
+        _midi = State(initialValue: m)
         _battery = State(initialValue: Battery(player: p, controller: c))
         if !coreTest {                          // (the last choices; the core test sets its own)
             p.setAudio(d.object(forKey: "rfm1.audio") as? Bool ?? true)
@@ -104,6 +106,8 @@ struct RemoteFM1App: App {
         }
         .onChange(of: phase) { _, p in
             if p == .background, let player { Self.saveInBackground(player) }
+            if p == .background { midi?.move.flush() }                 // (the Move's open project saved)
+            if p == .active { midi?.move.refreshProjects() }           // (project files added in Files meanwhile)
             if p == .background, !coreTest { battery?.enteredBackground() }     // (the battery: stop when the setting says)
             if p == .active { battery?.becameActive() }
             if p == .active, let library, let player {          // (files added in the Files app meanwhile)
