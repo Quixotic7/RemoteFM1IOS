@@ -82,6 +82,9 @@ public:
     void fwProgress(const std::string &id, int pct);
     void fwSlot(const std::string &id);
     int fwLibrary(const std::vector<uint8_t> &blob);
+    // (0.5.6..0.5.7) another firmware plays: its button names (FM1P_B_* order, 14, "" none; empty: none at all), its
+    // live labels and readouts cleared (the engine gives neither yet)
+    void firmwareChanged(const std::vector<std::string> &buttonNames);
 
     // ---- the core thread (RFMEngine)
     void coreTick(uint32_t ms, MoveTarget &t, const uint8_t levels[RFM_MOVE_NLEVELS], uint8_t playGreen,

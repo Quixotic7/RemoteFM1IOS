@@ -67,6 +67,28 @@ extension MoveController {
         id.withCString { rfmm_fw_slot(link, id.isEmpty ? nil : $0) }
     }
 
+    /// (0.5.6) the firmware's own button names on the Move when another firmware plays (rfme_button_names' number
+    /// moves), its live labels and readouts started again: the engine gives neither yet, so the Move shows the names
+    func syncNames() {
+        guard let player else { return }
+        var b = rfme_button_names_t()
+        let gen = rfme_button_names(player.e, &b)
+        guard gen != namesGen else { return }
+        namesGen = gen
+        let names: [String] = withUnsafeBytes(of: &b.names) { p in
+            (0..<14).map { i in Self.ascii(String(decoding: p[(i * 48)..<(i * 48 + 48)].prefix { $0 != 0 }, as: UTF8.self)) }
+        }
+        guard b.loaded != 0, names.contains(where: { !$0.isEmpty }) else {
+            rfmm_firmware_changed(link, nil)
+            return
+        }
+        var keep: [UnsafeMutablePointer<CChar>?] = names.map { strdup($0) }
+        defer { keep.forEach { free($0) } }
+        keep.withUnsafeMutableBufferPointer { p in
+            p.baseAddress!.withMemoryRebound(to: UnsafePointer<CChar>?.self, capacity: 14) { rfmm_firmware_changed(link, $0) }
+        }
+    }
+
     /// FW_LOAD: that firmware played here (as choosing it in the app)
     func play(_ id: String) {
         guard let player, let key = Self.installedKey(id, cores: player.cores, current: player.current) else {

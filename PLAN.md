@@ -948,7 +948,7 @@ the app's sound (mono, 22,050 Hz, 4-bit ADPCM, ~13.7 KB/s) and shows "RemoteFM1"
 The owner's request (relayed by the RemoteFM1 firmware session): the website's Move support (RemoteFM1 PR 20) in the
 app. The plan: side-session notes `move-controller-ios-plan.md`.
 
-- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.5.10, MPL-2.0), shared with the website and
+- The Move code is rfm1cs-abletonmove (vendor/rfm1cs-abletonmove, v0.5.11, MPL-2.0), shared with the website and
   Android: the core (mapping, screen, sequencer) and the session (Move Remote's protocol: HELLO, pings, silence,
   retries, LEDs, screen pacing, battery), the status words and the .rfmmove file. Its fixes and features go there, not here. Switch to it before taking a
   RemoteFM1 past its move-split merge (which deletes host/src/move).
@@ -964,8 +964,10 @@ app. The plan: side-session notes `move-controller-ios-plan.md`.
   firmware here, A-Z, one entry an id, the catalog's picture as a 64 x 64 dithered thumbnail (MoveFirmwareList.swift).
   A jog press plays one here (the version playing, else the newest); a download is Get firmware's install, its progress
   on the Move. The library (favourites, colours, tags) in defaults (`rfm1.move.library`). Unload keeps the firmware
-  playing (the app always plays one). Not yet: the firmware's states from the Move, labels and readouts, FW_LEVEL
-  (kept in the library, not applied). Nothing is built in for the Move: firmware stays in the catalog.
+  playing (the app always plays one). The firmware's own button names go to the Move on each firmware change
+  (rfmm_firmware_changed; its live labels and readouts cleared). Not yet: the firmware's states from the Move, live
+  labels and readouts (the engine reads neither fm1core_label nor readouts yet), FW_LEVEL (kept in the library, not
+  applied: the app has no volume of its own besides MASTER). Nothing is built in for the Move: firmware stays in the catalog.
 - UI: Settings › MIDI & audio › Ableton Move; an "Ableton Move" switch in the top-left menu once it was turned on.
   NSLocalNetworkUsageDescription (iOS asks on the first connect).
 - Not yet: Sample (the audio loop), the metronome click, the Move's speaker playing the app, the AU, encoder labels.

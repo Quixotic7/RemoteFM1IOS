@@ -216,6 +216,18 @@ int MoveLink::fwLibrary(const std::vector<uint8_t> &blob)
     return rfm_move_fw_library(&s_->core, ptr(blob), (uint32_t)blob.size());
 }
 
+void MoveLink::firmwareChanged(const std::vector<std::string> &names)
+{
+    const char *nm[RFM_MOVE_NBTN] = {};
+    for (int b = 0; b < RFM_MOVE_NBTN && b < (int)names.size(); b++)
+        nm[b] = names[(size_t)b].empty() ? nullptr : names[(size_t)b].c_str();
+    std::lock_guard<std::mutex> g(sm_);
+    rfm_move_set_labels(&s_->core, nullptr);
+    rfm_move_set_button_names(&s_->core, names.empty() ? nullptr : nm);   // (the core copies them)
+    rfm_move_readouts_clear(&s_->core);
+    rfm1cs_session_redraw(s_, nowMs());
+}
+
 void MoveLink::snap()
 {
     std::lock_guard<std::mutex> g(qmu_);

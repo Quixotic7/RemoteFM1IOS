@@ -129,6 +129,14 @@ void rfmm_fw_slot(rfmm_t *m, const char *id) { L(m)->fwSlot(str(id)); }
 int rfmm_fw_library(rfmm_t *m, const uint8_t *b, uint32_t n) { return L(m)->fwLibrary(bytes(b, n)); }
 uint32_t rfmm_fw_library_max(void) { return RFM_MOVE_FW_LIB_BYTES; }
 
+void rfmm_firmware_changed(rfmm_t *m, const char *const *names)
+{
+    std::vector<std::string> n;
+    for (int b = 0; names && b < RFM_MOVE_NBTN; b++)
+        n.push_back(str(names[b]));
+    L(m)->firmwareChanged(n);
+}
+
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap)
 {
     rfm_move_t *m = static_cast<rfm_move_t *>(std::calloc(1, sizeof(rfm_move_t)));

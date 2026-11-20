@@ -7,7 +7,7 @@
 import PackageDescription
 
 let rfm = "RemoteFM1"                   // inside vendor: RemoteFM1 main 18c6a82 (0.3.6), its own submodule
-let abletonMove = "rfm1cs-abletonmove"  // inside vendor: the Ableton Move code shared with the web and Android, v0.5.10
+let abletonMove = "rfm1cs-abletonmove"  // inside vendor: the Ableton Move code shared with the web and Android, v0.5.11
 let vendorRFM = "../../vendor/RemoteFM1"                 // the same, from Sources/RFMCore
 let vendorMove = "../../vendor/rfm1cs-abletonmove"       // the same, from Sources/RFMCore
 let vendorFM1 = "../../vendor/FM1VST"                    // FM1VST, from Sources/RFMCore

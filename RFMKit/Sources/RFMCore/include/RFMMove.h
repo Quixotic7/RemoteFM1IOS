@@ -96,6 +96,9 @@ void rfmm_fw_progress(rfmm_t *m, const char *id, int pct);                 // 0.
 void rfmm_fw_slot(rfmm_t *m, const char *id);                              // the firmware playing (NULL: none)
 int rfmm_fw_library(rfmm_t *m, const uint8_t *blob, uint32_t n);           // at start; 0 ok, -1 not a library
 uint32_t rfmm_fw_library_max(void);
+// another firmware plays (or its names changed): its own button names, 14 in FM1P_B_* order ("" or NULL: none;
+// names NULL: none at all); the Move's live labels and readouts start again
+void rfmm_firmware_changed(rfmm_t *m, const char *const *names);
 // (tests) a new, empty project's blob, as the core saves it: its bytes, or -1 (cap too small)
 int rfmm_test_empty_project(uint8_t *out, uint32_t cap);
 

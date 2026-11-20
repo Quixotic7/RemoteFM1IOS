@@ -74,6 +74,7 @@ public final class MoveController {
     @ObservationIgnored var firmwares: [MoveFirmware]?               // what the Move lists (nil: give it again)
     @ObservationIgnored var thumbs: [String: [UInt8]] = [:]         // by id ([]: none)
     @ObservationIgnored var slotID: String?                          // the firmware the Move shows playing
+    @ObservationIgnored var namesGen: UInt32?                        // rfme_button_names' number the Move has
     @ObservationIgnored private var polls = 0
 
     public init(player: CorePlayer, store: MoveProjectStore = MoveProjectStore(folder: MoveProjectStore.app),
@@ -202,6 +203,7 @@ public final class MoveController {
         polls += 1
         if polls % 20 == 1 { syncFirmwares() }          // (the catalog and the firmware here, once a second)
         syncSlot()
+        syncNames()
         var st = rfmm_status_t()
         rfmm_status(link, &st)
         let s = Self.status(of: st)
