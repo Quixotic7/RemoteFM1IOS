@@ -968,6 +968,9 @@ app. The plan: side-session notes `move-controller-ios-plan.md`.
   (rfmm_firmware_changed; its live labels and readouts cleared). Not yet: the firmware's states from the Move, live
   labels and readouts (the engine reads neither fm1core_label nor readouts yet), FW_LEVEL (kept in the library, not
   applied: the app has no volume of its own besides MASTER). Nothing is built in for the Move: firmware stays in the catalog.
+- With an FM-1 (the owner, 2026-11-19): the FM-1 on the app over USB or Bluetooth and the Move on the app at once.
+  The firmware runs in the app's engine either way; My FM-1 attaches it to the FM-1's link, and the Move's core runs
+  on the same engine, so both play it (MoveWithFM1Tests). Nothing connects the FM-1 to the Move.
 - UI: Settings › MIDI & audio › Ableton Move; an "Ableton Move" switch in the top-left menu once it was turned on.
   NSLocalNetworkUsageDescription (iOS asks on the first connect).
 - Not yet: Sample (the audio loop), the metronome click, the Move's speaker playing the app, the AU, encoder labels.
